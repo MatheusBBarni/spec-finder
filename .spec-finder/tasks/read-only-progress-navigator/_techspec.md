@@ -1,52 +1,58 @@
-# Read-Only Progress Navigator Technical Specification
+# Read-Only Progress Navigator with Integrated Task Timer — Technical Specification
 
 ## Executive Summary
 
-Implement the selected current-seam projection design from [ADR-003](adrs/adr-003-current-seam-transcript-projection.md).
+Implement the approved timer update at the existing cockpit projection seam.
 
-The existing execution engine, ACP transport, task packet format, configuration schema, and `--no-ui` event contract remain unchanged. The cockpit store becomes a task-aware view model, a new `src/ui/transcript.ts` module normalizes ACP updates, and `App.tsx` renders explicit task selection, active-task following, transcript scrolling, responsive hierarchy, and contextual help.
+The design adds:
 
-The primary trade-off is a richer UI-specific store retaining complete run-scoped transcript history in memory. This avoids a broader runtime protocol refactor and requires no migration or new dependency.
+- a pure `src/ui/timer.ts` module for timer transitions and formatting;
+- ephemeral per-task timer state in `CockpitStore`;
+- an explicit `store.tick()` path driven by the App's existing OpenTUI live lifecycle;
+- `performance.now()` as the production monotonic source, injectable for tests;
+- task-row rendering for `—`, live/final `MM:SS`, and `unavailable`.
 
-The approved PRD predates stable requirement IDs. This TechSpec assigns local IDs such as `PRD-G-01` and maps them to the exact approved goals, stories, features, constraints, and metrics below.
+The engine, ACP transport, raw `RunEvent` union, task packet schema, configuration, reports, persistence, and `--no-ui` behavior remain unchanged.
+
+The primary trade-off is additional UI-store state and one timer tick path. This preserves deterministic transitions and avoids widening the runtime event contract.
+
+The existing `_tasks.md` describes the earlier navigator scope and must be regenerated after this TechSpec is approved.
 
 ## Technical Evidence
 
 | Kind | Finding/constraint | Source | Version/date | Design consequence |
 |---|---|---|---|---|
-| Repository | The engine is sequential and emits task status, activity, session updates, and run completion events. | `src/engine.ts`, `src/events.ts` | 2026-08-04 | Preserve execution semantics; improve only the viewing projection. |
-| Repository | Events already include task IDs for task status, activity, and ACP updates. | `src/events.ts` | 2026-08-04 | Per-task transcript history can be built without changing the event protocol. |
-| Repository | The store owns an external immutable snapshot but currently stores one global activity list capped at 250 entries. | `src/ui/store.ts` | 2026-08-04 | Add per-task normalized history and remove the presentation cap. |
-| Repository | The UI already has a header, two main columns, and an OpenTUI `ScrollBox`, but no selected task or pane focus. | `src/ui/App.tsx` | 2026-08-04 | Evolve the current layout instead of introducing a new UI framework. |
-| Repository | TUI mode currently enables an interactive permission promise. | `src/commands.ts`, `src/acp-client.ts` | 2026-08-04 | Cancel prompt requests in TUI mode and emit a read-only reason. |
-| Repository | Current tests cover only basic frame rendering, status projection, and permission selection. | `tests/cockpit.test.tsx`, `tests/store.test.ts` | 2026-08-04 | Add pure projection, selection, scrolling, responsive, and read-only regression tests. |
-| Dependency | Installed versions are `@opentui/core` 0.4.5, `@opentui/react` 0.4.5, and ACP SDK 1.2.1. | `package.json`, installed modules | 2026-08-04 | Use currently installed APIs; do not add dependencies. |
-| Official docs | OpenTUI supports `useKeyboard`, focus routing, resize handling, focused `ScrollBox`, sticky scrolling, viewport culling, and renderer test utilities. | [keyboard](https://opentui.com/docs/core-concepts/keyboard/), [ScrollBox](https://opentui.com/docs/components/scrollbox/), [testing](https://opentui.com/docs/core-concepts/testing/) | 0.4.5 / 2026-08-04 | Use native focus and scrolling primitives, with frame-level tests. |
-| Official docs | ACP streams agent message chunks and tool-call updates; permission requests require a response. | [ACP lifecycle](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/docs/protocol/v1/overview.mdx), [ACP updates](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/docs/protocol/v2/schema.mdx) | SDK 1.2.1 / 2026-08-04 | Coalesce by ACP identity and fail closed when the read-only cockpit cannot answer a permission request. |
-| Inference | Kitten’s reducer/projection separation is a useful pattern, but this repository already has a suitable external-store seam. | Kitten `sessionReducer.ts`, `transcriptProjection.ts` | 2026-08-04 | Adopt pure projection helpers without introducing a second domain package. |
+| Repository | `CockpitStore` is the current immutable task/transcript presentation boundary. | [`src/ui/store.ts`](/Users/matheusbbarni/projects/spec-finder/src/ui/store.ts) | 2026-08-04 | Keep timer state in the store projection. |
+| Repository | `App.tsx` already requests live rendering and advances a spinner while tasks run. | [`src/ui/App.tsx`](/Users/matheusbbarni/projects/spec-finder/src/ui/App.tsx) | 2026-08-04 | Reuse the existing live lifecycle for timer ticks. |
+| Repository | `task_status` carries task ID and status but no timestamp. | [`src/events.ts`](/Users/matheusbbarni/projects/spec-finder/src/events.ts) | 2026-08-04 | Do not add timestamps to raw events; establish local baselines. |
+| Repository | The engine emits `in_progress` before ACP work and terminal status after completion/failure. | [`src/engine.ts`](/Users/matheusbbarni/projects/spec-finder/src/engine.ts) | 2026-08-04 | Use first observed `in_progress` and terminal status as timer boundaries. |
+| Repository | Existing renderer evidence covers 80×24, 120×40, 200×60, reduced-color, 70×20 fallback, and 300-entry transcripts. | Packet memory and [`tests/cockpit.test.tsx`](/Users/matheusbbarni/projects/spec-finder/tests/cockpit.test.tsx) | 2026-08-04 | Extend the same deterministic frame boundary for timer layout. |
+| Repository | Installed versions are `@opentui/core`/`@opentui/react` 0.4.5 and ACP SDK 1.2.1. | [`package.json`](/Users/matheusbbarni/projects/spec-finder/package.json) | 2026-08-04 | Use installed APIs and add no dependency. |
+| Repository | Existing verification is Bun-based and succeeds through `bun run verify`. | [`package.json`](/Users/matheusbbarni/projects/spec-finder/package.json), packet reports | 2026-08-04 | Add focused timer tests and preserve repository gates. |
+| Official docs | OpenTUI supports `requestLive()`/`dropLive()` and renderer clock configuration. | [OpenTUI renderer](https://opentui.com/docs/core-concepts/renderer/) | 0.4.5 / 2026-08-04 | Keep continuous rendering scoped to active animation. |
+| Official docs | OpenTUI provides focused keyboard routing and canonical key names. | [OpenTUI keyboard](https://opentui.com/docs/core-concepts/keyboard/) | 0.4.5 / 2026-08-04 | Preserve existing task/transcript focus behavior. |
+| Official docs | OpenTUI `ScrollBox` supports line/page/Home/End navigation, sticky scrolling, and viewport culling. | [OpenTUI ScrollBox](https://opentui.com/docs/components/scrollbox/) | 0.4.5 / 2026-08-04 | Timer rendering must not disrupt transcript navigation or culling. |
+| Official docs | OpenTUI testing supports fixed renderers, frame capture, keyboard drivers, terminal capability fixtures, and `ManualClock`. | [OpenTUI testing](https://opentui.com/docs/core-concepts/testing/) | 0.4.5 / 2026-08-04 | Use deterministic timer and frame evidence without wall-clock sleeps. |
+| Official docs | ACP uses `session/update` notifications for progress and keeps permission requests as client responses. | [ACP overview](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/docs/protocol/v1/overview.mdx), [ACP schema](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/docs/protocol/v2/schema.mdx) | Current as of 2026-08-04 | Keep timing outside ACP protocol and preserve the existing fail-closed permission behavior. |
+| Inference | A store-local timer with a pure helper module is the smallest design satisfying the approved PRD and ADR-004. | ADR-004, ADR-006 | 2026-08-04 | Avoid App-only timing and runtime event changes. |
 
 ## Requirement Traceability
 
-The PRD predates stable IDs. The IDs below are local aliases to its exact approved rows.
+The PRD's unlabeled constraint bullets are assigned technical aliases `C-01` through `C-09` below.
 
-| PRD IDs | Technical obligation | Component/interface | Verification | Status/gap |
+| PRD ID | Technical obligation | Component/interface | Verification | Status/gap |
 |---|---|---|---|---|
-| `PRD-G-01`, `PRD-US-01`, `PRD-F-01`, `PRD-M-01` | Header shows slug, effective runtime identity, active task, phase/outcome, and counts. | `CockpitState`, header selectors, `App.tsx` | 80×24 frame and orientation evaluation | Satisfied |
-| `PRD-G-02`, `PRD-US-02`, `PRD-F-02` | Every task remains visible or reachable with status symbols, labels, and active marker. | Task navigator `ScrollBox`, task selectors | Multi-task frame and selection tests | Satisfied |
-| `PRD-G-03`, `PRD-US-03`, `PRD-US-05`, `PRD-F-03`, `PRD-F-07`, `PRD-M-02`, `PRD-M-03`, `PRD-M-04` | Selecting a task shows only its complete chronological history; start, tail, and navigation are reachable. | Per-task transcript map, transcript `ScrollBox` | Two-task selection, long-history, Home/End/page tests | Satisfied |
-| `PRD-G-04`, `PRD-US-06`, `PRD-F-05`, `PRD-F-06` | Messages, thoughts, plans, tools, updates, errors, and outcomes have readable labels; streamed chunks coalesce. | `src/ui/transcript.ts` | Pure normalization fixtures | Satisfied |
-| `PRD-G-05`, `PRD-US-08`, `PRD-F-09`, `PRD-C-01`, `PRD-M-06` | No permission controls or workflow mutation controls appear. | `acp-client.ts`, `App.tsx`, store actions | Permission-request regression and frame assertions | Satisfied |
-| `PRD-US-04`, `PRD-F-04` | Selected task follows the active task until manual inspection begins. | `activeTaskId`, `selectedTaskId`, `followingActiveTask` | Status-transition and manual-selection tests | Satisfied |
-| `PRD-US-07`, `PRD-F-08`, `PRD-C-05`, `PRD-M-05` | Failed/blocked tasks show a concise reason immediately, while retaining detail in the transcript. | Task summary reason selectors and transcript entries | Failure, blocked dependency, and permission-cancel fixtures | Satisfied |
-| `PRD-F-10` | Footer exposes essential bindings and `?` opens complete help. | Keymap constants and help view | Help/frame test; keymap table test | Satisfied |
-| `PRD-F-11`, `PRD-C-09`, `PRD-M-07` | Responsive layout remains understandable at 80×24 and degrades below the minimum. | Dimension selectors and responsive layout branches | 80×24, 120×40, 200×60, reduced-color frames | Satisfied |
-| `PRD-C-02`, `PRD-C-03` | Full run-scoped history is retained in memory with event categories and chronology intact. | Normalized per-task transcript state | Synthetic history above 250 entries; ordering fixtures | Satisfied; replaces current cap |
-| `PRD-C-04` | Header distinguishes requested, applied, default, and unsupported runtime options. | Runtime-option projection | Applied/default/unsupported fixtures | Satisfied |
-| `PRD-C-06` | Execution order, provider behavior, report requirements, and approve-all/deny policy remain unchanged; TUI `prompt` requests are explicitly cancelled per approved clarification. | Engine unchanged; TUI permission branch isolated in ACP client | Engine and `--no-ui` regression suite | Approved exception recorded |
-| `PRD-C-07` | No cross-run transcript persistence or telemetry is added. | In-memory store lifecycle | Fresh-store and filesystem-diff checks | Satisfied |
-| `PRD-C-08` | Status meaning never depends on color alone. | Symbols, labels, semantic colors | Reduced-color frame assertions | Satisfied |
-
-The PRD’s non-goals remain excluded: search, filtering, event tabs, copying/export, cross-run history, configurable themes/keymaps, analytics, retries, edits, reordering, and status mutation.
+| `G-01`, `US-01`, `F-01`, `M-01` | Render truthful run identity, phase/outcome, active task, and counts. | `CockpitState`, header selectors, `App.tsx` | Orientation frames at 80×24, 120×40, 200×60 | Existing navigator satisfied; preserve |
+| `G-02`, `US-02`, `F-02`, `F-04`, `M-02` | Keep every task reachable with status, identity, and active marker. | `CockpitTask`, task `ScrollBox`, task selectors | Multi-task frame and keyboard selection tests | Existing navigator satisfied; preserve |
+| `G-03`, `US-03`, `US-04`, `US-05`, `F-03`, `F-04`, `F-07`, `M-03`, `M-04` | Keep task histories isolated, selectable, followable, and scrollable from start to tail. | `transcripts`, `selectedTaskId`, `followingActiveTask`, transcript `ScrollBox` | Selection, follow, long-history, Home/End/page tests | Existing navigator satisfied; preserve |
+| `G-04`, `US-06`, `US-07`, `F-05`, `F-06`, `F-08`, `M-05` | Present ACP categories, streaming content, errors, and blocked reasons clearly. | `src/ui/transcript.ts`, task reasons, `TranscriptEntry` | Projection fixtures and failure/category frame tests | Existing navigator satisfied; preserve |
+| `G-05`, `US-08`, `F-09`, `C-01`, `C-02`, `M-06` | Keep the cockpit observational and fail closed for TUI permission prompts. | `App.tsx`, `CockpitStore`, `src/acp-client.ts` | Negative control assertions and ACP permission tests | Existing navigator satisfied; preserve |
+| `G-06`, `US-09`, `US-10`, `F-11`, `C-03`, `C-04`, `C-05`, `M-07`, `M-08` | Add ephemeral per-task timer with placeholders, live/final `MM:SS`, and unavailable state. | `src/ui/timer.ts`, `CockpitStore.taskTimers`, `store.tick()` | Pure transition, store, and frame tests | New timer delta |
+| `G-07`, `US-11`, `US-12`, `F-10`, `F-11`, `C-08`, `C-09`, `M-09`, `M-10` | Preserve task identity/status/timer/transcript context in compact layouts and explain neutral timing. | Responsive branches, footer/help, task-row formatter | 80×24/120×40/200×60/reduced-color frames and help comprehension fixture | New timer layout/copy delta |
+| `C-06` | Preserve task execution order, provider behavior, permission policy, reports, and `--no-ui`. | `src/engine.ts`, `src/events.ts`, `src/commands.ts` | Protected-boundary diff and engine/no-UI regression | No code change intended |
+| `C-07` | Keep ACP history task-scoped and chronological during the run. | Transcript projection and store | Existing projection/history tests | Existing behavior preserved |
+| `C-08` | Keep runtime identity truthful to effective configuration. | Runtime option selectors/header | Applied/default/unsupported fixtures | Existing behavior preserved |
+| `C-09` | Preserve supported terminal behavior and reduced-color meaning. | `App.tsx`, OpenTUI renderer tests | Fixed-size and capability frames | Extend with timer assertions |
 
 ## System Architecture
 
@@ -54,310 +60,346 @@ The PRD’s non-goals remain excluded: search, filtering, event tabs, copying/ex
 
 | Component | Existing/new | Responsibility | Inputs/outputs | Dependencies |
 |---|---|---|---|---|
-| Task engine | Existing, unchanged | Executes tasks sequentially, writes reports, emits runtime events. | `RunOptions` → `RunEvent` | ACP client, task packet |
-| ACP client | Existing, narrowly changed | Runs ACP turns, emits raw updates, cancels TUI permission prompts. | ACP stream → `RunEvent` | ACP SDK 1.2.1 |
+| Task engine | Existing, unchanged | Executes tasks and emits status/events. | `RunOptions` → `RunEvent` | ACP client, task packet |
+| ACP client | Existing, unchanged for timer | Runs ACP turns and handles TUI permission cancellation. | ACP stream → `RunEvent` | ACP SDK 1.2.1 |
 | Runtime event protocol | Existing, unchanged | Stable execution-to-observer contract. | `RunEvent` | Task and ACP types |
-| `CockpitStore` | Existing, changed | Owns run snapshot, task status, normalized histories, selection, focus, follow mode, and help state. | `RunEvent` → immutable snapshot | Transcript helpers |
-| Transcript projection | New `src/ui/transcript.ts` | Purely normalizes and merges ACP/task events into readable entries. | Event/update + prior entries → next entries | ACP types only |
-| TUI `App` | Existing, changed | Renders header, task navigator, selected transcript, footer, help, and responsive layout. | Store snapshot + view actions → OpenTUI tree | OpenTUI React 0.4.5 |
-| Cockpit lifecycle | Existing, unchanged | Creates and destroys the renderer. | Store/cancel callback | OpenTUI renderer |
-| Tests | Existing, expanded | Verify projection, store actions, frames, input, ACP behavior, and gates. | Fixtures → evidence | Bun test, OpenTUI test renderer |
+| `CockpitStore` | Existing, changed | Owns task state, transcripts, selection, reasons, and timer projection. | `RunEvent` + `tick()` → immutable snapshot | Timer helpers, transcript helpers |
+| Timer projection | New `src/ui/timer.ts` | Pure timer transitions, validation, and formatting. | Prior timer + status/time → next timer | No OpenTUI or ACP dependency |
+| Transcript projection | Existing `src/ui/transcript.ts` | Normalizes ACP updates into readable entries. | ACP update → entries | ACP SDK types only |
+| TUI `App` | Existing, changed | Renders task timer, header, task list, transcript, help, and responsive modes. | Store snapshot + keyboard/tick actions → OpenTUI tree | OpenTUI React 0.4.5 |
+| Cockpit lifecycle | Existing, unchanged | Creates/destroys renderer and App root. | Store/cancel callback → renderer | OpenTUI |
+| Tests | Existing, expanded | Verify timer, store, frames, focus, ACP, and gates. | Fixtures → evidence | Bun test, OpenTUI test renderer |
 
 ### Data and Control Flow
 
 Normal run:
 
-1. `runCommand` loads config and creates the store.
-2. `runTaskPacket` emits `run_started`; the store initializes tasks, run metadata, empty per-task histories, and default view state.
-3. `task_status: in_progress` updates `activeTaskId`. While follow mode is enabled, it also updates `selectedTaskId`.
-4. Task-scoped activity and ACP updates enter `src/ui/transcript.ts`.
-5. The projection appends new entries or merges message/tool updates by stable ACP identity.
-6. `App.tsx` renders the selected task’s entries. The selected transcript remains at the live tail until the user scrolls away.
-7. Task selection changes only view state and never calls the engine or ACP client.
+1. `runCommand` creates `CockpitStore` and starts the existing cockpit.
+2. `run_started` resets the store and creates one empty timer projection per task by omission; no timer value is rendered for pending tasks.
+3. The first `task_status: in_progress` calls the timer start transition with the store clock.
+4. The App's existing live effect calls `store.tick()` while any task is running.
+5. `tick()` advances only running timer entries. A snapshot is published only when the displayed elapsed second changes.
+6. Task rows select timer state and task status to render `—`, `MM:SS`, or `unavailable`.
+7. The first terminal task status freezes the timer. Duplicate or stale terminal events do not overwrite it.
+8. Task selection and transcript scrolling remain view-only and do not affect timer state.
 
-Failure and blocked paths:
+Terminal paths:
 
-- A failed task receives an immediate generic reason such as `Task failed; see latest activity`, then replaces it with the first-line task error activity.
-- A blocked task receives `Blocked because dependency <id> failed` based on the task graph already present in `run_started`.
-- `run_finished` updates the header outcome and freezes the final summary while leaving all history visible.
-
-Permission path:
-
-- When TUI mode receives `permissions: "prompt"`, `resolvePermission` does not emit an interactive permission event.
-- It emits task-scoped activity explaining that the request was cancelled because the cockpit is read-only.
-- It returns ACP’s cancelled response.
-- The existing engine stop/error handling marks the task and run according to current behavior.
+- `completed` and `failed` freeze observed elapsed duration.
+- `blocked` renders `—`, regardless of any stale timer entry.
+- A terminal status without an observed start baseline renders `unavailable`.
+- A task that starts with an invalid clock value receives `unavailable` rather than an invented duration.
+- `run_finished` updates run outcome but does not create a task duration; normal engine paths emit task terminal status first.
 
 Cancellation and recovery:
 
-- `q`/`Ctrl+C` invokes the existing abort controller and destroys the renderer.
-- ACP child termination remains unchanged.
-- Resize events recompute layout only; transcript and task state are preserved.
-- Unknown ACP update types become visible generic transcript entries instead of being silently dropped.
+- The existing abort controller and renderer cleanup remain unchanged.
+- App timer/spinner intervals are cleared when the renderer unmounts or no task remains running.
+- A late-attached cockpit cannot reconstruct a baseline and shows `unavailable`.
+- Resizing and transcript scrolling preserve timer state.
+- A new `run_started` resets all timer state.
 
 ## Implementation Design
 
 ### Core Interfaces
 
 ```ts
-export type TranscriptKind =
-  | "message" | "thought" | "plan" | "tool"
-  | "tool_update" | "activity" | "error" | "outcome" | "unknown"
+export type MonotonicNow = () => number
 
-export interface TranscriptEntry {
-  id: string
-  sequence: number
-  kind: TranscriptKind
-  label: string
-  text: string
-  sourceId?: string
-  status?: string
-  streaming?: boolean
-}
+export type TaskTimer =
+  | { kind: "running"; startedAtMs: number; elapsedSeconds: number }
+  | { kind: "finished"; elapsedSeconds: number }
+  | { kind: "unavailable" }
+
+export const systemNow: MonotonicNow = () => performance.now()
 ```
 
 ```ts
-export interface CockpitViewState {
-  selectedTaskId: string | null
-  focusedPane: "tasks" | "transcript"
-  followingActiveTask: boolean
-  helpOpen: boolean
-}
+export function beginTaskTimer(
+  previous: TaskTimer | undefined,
+  nowMs: number,
+): TaskTimer
 
-export interface CockpitState extends CockpitViewState {
-  transcripts: Readonly<Record<string, readonly TranscriptEntry[]>>
-  taskReasons: Readonly<Record<string, string>>
-}
+export function advanceTaskTimer(
+  previous: TaskTimer,
+  nowMs: number,
+): TaskTimer
+
+export function finishTaskTimer(
+  previous: TaskTimer | undefined,
+  nowMs: number,
+): TaskTimer
 ```
 
 ```ts
-export function applySessionUpdate(
-  entries: readonly TranscriptEntry[],
-  update: SessionUpdate,
-  sequence: number,
-): readonly TranscriptEntry[]
-
-export function formatTaskReason(
+export function formatTaskTimer(
   status: TaskStatus,
-  activity: string | undefined,
-  failedDependencyIds: readonly string[],
-): string | undefined
+  timer: TaskTimer | undefined,
+): string
 ```
 
 Rules:
 
-- `agent_message_chunk` merges by `messageId` when present.
-- Thought chunks merge by message identity when available; otherwise they append.
-- `tool_call` creates a tool entry keyed by `toolCallId`.
-- `tool_call_update` merges into the existing tool entry; an update without a prior call creates a readable fallback entry.
-- `plan` appends a chronological plan update rather than silently replacing prior plan history.
-- Unknown update variants retain their `sessionUpdate` discriminator in a generic label.
-- Task activity is split into meaningful lines and retained in order.
-- Run-level activity and runtime-option outcomes are retained separately from task transcripts and rendered in the header/status summary.
+- `beginTaskTimer` preserves an existing running, finished, or unavailable entry.
+- Non-finite or negative baselines produce `unavailable`.
+- `advanceTaskTimer` clamps elapsed seconds at zero and returns the same entry when the displayed second has not changed.
+- `finishTaskTimer` preserves an existing finished entry, freezes a running entry, and returns `unavailable` without a baseline.
+- `formatTaskTimer` returns `—` for pending/blocked, `unavailable` for missing active/terminal baselines, and total-minute `MM:SS` for observed values.
+
+### Store Interface
+
+```ts
+export interface CockpitState {
+  readonly tasks: readonly CockpitTask[]
+  readonly taskTimers: Readonly<Record<string, TaskTimer>>
+  readonly activeTaskId: string | null
+  readonly selectedTaskId: string | null
+  // Existing transcript and view fields remain unchanged.
+}
+
+export class CockpitStore {
+  constructor(now?: MonotonicNow)
+  tick(nowMs?: number): void
+}
+```
+
+`CockpitStore` responsibilities:
+
+- Own the timer map and include it in immutable snapshots.
+- Call timer transitions from `consumeTaskStatus`.
+- Use the injected clock when `consumeTaskStatus` starts or finishes a timer.
+- Ignore invalid tick values without publishing a corrupt state.
+- Notify subscribers only when a timer display or another state field changes.
+- Keep timer state separate from transcript entries, run activity, runtime options, and task reasons.
+
+### App Integration
+
+The existing running-task effect remains the lifecycle owner:
+
+- Request OpenTUI live rendering while a task is running.
+- Advance the existing spinner interval.
+- Call `store.tick()` on a one-second cadence, or call it from the existing interval while the timer helper suppresses unchanged displayed seconds.
+- Clear every interval and call `renderer.dropLive()` during cleanup.
+- Render `formatTaskTimer(task.status, state.taskTimers[task.id])` in `TaskRow`.
+- Keep the timer before title truncation so compact layouts preserve it.
+- Add the neutral timer explanation to the existing help overlay.
+- Do not add keyboard actions or execution callbacks for timer values.
 
 ### Data Models and Lifecycle
 
-- History is owned by one `CockpitStore` instance and discarded when the cockpit closes.
-- There is no disk persistence, packet mutation, cross-run cache, or telemetry.
-- Per-task arrays are immutable from the consumer’s perspective; each event produces a new snapshot.
-- Stable entry IDs must not depend only on array indexes.
-- No retention cap is applied to task histories. OpenTUI’s `viewportCulling` limits rendered work, not retained history.
-- The task list itself is scrollable so every task remains reachable when it exceeds viewport height.
-- Manual selection sets `followingActiveTask` to `false`; selecting the current active task re-enables following.
-- The transcript starts at the live tail for a newly selected task. Manual scrolling disables sticky follow until the user returns to `End`.
-
-### Header and Responsive Layout
-
-Header priority:
-
-1. Task slug.
-2. Plain-language phase/outcome.
-3. Active task.
-4. Task counts.
-5. Provider/model.
-6. Reasoning.
-7. Speed.
-
-For runtime options:
-
-- `applied`: show the requested value as effective.
-- `default`: show `auto` or `provider default`.
-- `unsupported`: show the requested value with an `unsupported` label; never claim it was applied.
-
-Layout behavior:
-
-- At 120 columns and above, use the full two-column layout with expanded metadata.
-- From 80–119 columns, retain two columns, wrap the header to two rows, and shorten task titles before hiding identity fields.
-- Below 80 columns or 24 rows, use a compact stacked fallback that preserves slug, phase/outcome, active task, task status, and selected transcript context. This is below the supported KPI boundary and must show a compact-size notice if content cannot fit.
-- Status uses symbols and text in addition to semantic colors.
-- Light, dark, and reduced-color terminals must retain meaning.
-
-### Keyboard and Focus
-
-- `Tab` / `Shift+Tab`: switch between task and transcript panes.
-- Task pane: arrows and `j`/`k` move selection; selected row is scrolled into view.
-- Transcript pane: focused `ScrollBox` handles arrows, `PageUp`, `PageDown`, `Home`, and `End`.
-- `?`: toggle help.
-- `q` / `Ctrl+C`: preserve the terminal escape hatch.
-- No key performs permission approval, retry, editing, reordering, or status mutation.
+- Timer state is keyed by stable task ID.
+- Timer state exists only inside one `CockpitStore`.
+- `run_started` resets the complete timer map.
+- Pending and blocked tasks need no timer entry because status controls the `—` placeholder.
+- Running tasks have a start baseline and display seconds.
+- Finished tasks have frozen display seconds only.
+- Active or terminal tasks without a trustworthy baseline have `unavailable`.
+- Timer history is not written to task files, reports, transcript entries, logs, telemetry, clipboard, exports, or configuration.
+- JavaScript event handlers and timer ticks are synchronous store transitions; no worker, lock, or cross-thread coordination is required.
+- Timer formatting must support durations beyond 59 minutes without hour rollover.
+- The store must not derive duration from transcript activity, ACP chunks, or wall-clock timestamps.
 
 ## External Interfaces
 
 No new public CLI, network, storage, authentication, or configuration interface is introduced.
 
-The existing ACP interface remains responsible for initialization and session creation, prompt and cancellation, file access, provider configuration options, and task execution.
+Unchanged external contracts:
 
-The only ACP behavior change is the approved TUI-specific handling of `permissions: "prompt"`: return cancellation rather than exposing a permission UI. `approve-all`, `deny`, and `--no-ui` behavior remain unchanged.
+- `RunEvent` and `RunEventListener`.
+- ACP initialization, session, prompt, update, cancellation, and permission response behavior.
+- `--no-ui` console event projection.
+- Task packet and report schemas.
+- Existing provider launch configuration.
+
+New internal interface:
+
+- `CockpitStore.tick(nowMs?)`.
+- `CockpitState.taskTimers`.
+- Pure timer helpers in `src/ui/timer.ts`.
+
+The timer is not rendered or emitted in `--no-ui` mode.
 
 ## Integration Points
 
 | Boundary | Current contract | Change | Failure behavior | Compatibility/migration |
 |---|---|---|---|---|
 | Engine → event listener | Raw `RunEvent` stream | No change | Existing engine outcomes remain authoritative | Fully compatible |
-| ACP client → event listener | Raw `SessionUpdate` events | TUI prompt requests become cancellation + activity notice | Existing stop/error path handles failure | Internal behavior explicitly approved |
-| Store → App | `useSyncExternalStore` snapshot | Snapshot gains view/transcript fields | Invalid task selection falls back to active/first task | No external migration |
-| App → renderer | OpenTUI React tree | Adds focused task/transcript controls and responsive branches | Compact fallback on small terminal | Same OpenTUI versions |
-| CLI → `--no-ui` listener | Activity/status/run-finished console output | No change | Existing console behavior | Fully compatible |
+| `task_status` → store | Task ID and status | Store starts/finishes local timer projection | Duplicate/stale transitions are idempotent | No event migration |
+| Store → App | Immutable `useSyncExternalStore` snapshot | Add `taskTimers` and `tick()` | Invalid clock values become unavailable/no-op | Internal only |
+| App → renderer | OpenTUI React tree and live lifecycle | Render timer and tick during live effect | Cleanup stops interval and live request | Same OpenTUI version |
+| Timer module → store | No current boundary | New pure helper calls | Invalid input returns unavailable or unchanged state | No external migration |
+| ACP client → listener | ACP updates and permission behavior | No timer change | Existing ACP failure handling | Fully compatible |
+| CLI → `--no-ui` listener | Raw activity/status/run-finished console output | No change | Existing console behavior | Fully compatible |
 | Packet/config files | Existing schemas | No change | Existing validation errors | No migration |
+| Tests → renderer/store | Existing fixtures and test renderer | Add timer fixtures and controlled clock | Failed assertions block verification | No production dependency |
 
 ## Failure and Recovery Behavior
 
 | Failure mode | Detection | User/system behavior | Recovery/rollback | Evidence |
 |---|---|---|---|---|
-| ACP permission request in TUI | `resolvePermission` sees `permissions: "prompt"` and TUI mode | Cancel request; display read-only reason; engine marks outcome | Configure permissions before rerun | Approved user decision; ACP permission contract |
-| Provider spawn/connect/init failure | ACP client exception | Task failure reason appears in transcript and header | Existing engine failure path | `acp-client.ts` tests |
-| Unsupported model/reasoning/speed | Existing `runtime_option` outcome | Header shows default/unsupported truthfully; task continues unless existing required-option error occurs | Existing configuration behavior | Runtime-option events |
-| Unknown ACP update | Projection default branch | Generic labeled entry remains visible | No protocol change | Transcript unit test |
-| Tool update before tool call | Missing `toolCallId` entry | Create fallback tool entry and merge later updates | No data loss | Transcript unit test |
-| Task failure | Failed status + task activity | Status symbol, plain-language reason, full detail | Existing run stop behavior | Engine/store integration test |
-| Blocked dependency | Blocked status + failed dependency set | Dependency-specific blocked reason | Existing dependency handling | Store test |
-| User abort | Abort signal / child termination | Renderer closes; no cockpit action is sent | Existing cancellation behavior | ACP/engine regression |
-| Resize or narrow terminal | OpenTUI resize event | Reflow or compact fallback; state remains intact | Resize back restores full layout | Renderer resize tests |
-| Very long history | Synthetic high-volume stream | All entries retained; viewport culling limits render work | Future spill-to-disk remains out of scope | Memory spike evidence |
+| Duplicate `in_progress` | Existing timer entry is running/finished/unavailable | Preserve first baseline; do not reset | Continue normal tick path | Timer unit test |
+| Terminal without baseline | No timer entry at terminal status | Render `unavailable` | No reconstruction attempt | Timer/store test |
+| Duplicate terminal status | Existing entry is finished | Preserve first frozen value | No-op | Timer unit test |
+| Out-of-order terminal after later start | Existing finished entry | Preserve first terminal value | No-op | Timer transition test |
+| Non-finite/negative clock | Clock validation | Mark new baseline unavailable or ignore invalid tick | Next valid observed start can establish baseline if not terminal | Timer unit test |
+| Clock moves backward | Computed delta below zero | Clamp displayed duration to zero | Later values advance normally | Controlled-clock test |
+| No transcript activity during run | Task remains `in_progress` | Timer continues; no stall label or alert | Operator interprets neutral cue | Frame/help test |
+| `run_finished` without task terminal | Run-level completion lacks task ID | Do not invent task final duration; renderer closes normally | Reopen shows no prior timer baseline | Store lifecycle test |
+| Renderer unmount | React effect cleanup | Stop timer interval and drop live request | No background tick remains | Renderer cleanup/PTY test |
+| Narrow terminal | Dimension branch | Preserve task identity/status/timer/transcript context; collapse secondary metadata | Resize restores expanded layout | Fixed-size frame tests |
+| Long task history | High entry count | Timer remains O(task count); transcript culling remains unchanged | Persistence/spill remains out of scope | 300-entry renderer test |
+| TUI permission request | Existing ACP permission branch | Cancel with stable read-only notice; timer remains observational | Configure permissions and rerun | Existing ACP integration test |
 
 ## Security and Privacy
 
-- The cockpit is display-only except for navigation, scrolling, help, and terminal cancellation.
-- Permission options are never rendered or selected.
-- No new command execution, file mutation, retry, task edit, reorder, or status mutation path is introduced.
-- ACP output may contain source code, paths, prompts, or provider-sensitive text; it remains in process memory and terminal output only.
-- No transcript files, analytics, telemetry, or cross-run cache are added.
-- Existing workspace-constrained ACP file operations remain unchanged.
-- Provider errors are shown in the transcript but are not duplicated into new persistent logs.
-- The permission path fails closed by cancelling rather than implicitly approving.
+- Timer state is presentation-only and remains in process memory.
+- No timer value is added to raw events, transcripts, reports, logs, telemetry, clipboard, export, or persistence.
+- Timer values cannot trigger commands, permissions, retries, cancellation, or status changes.
+- The timer module has no filesystem, network, ACP, or credential access.
+- The existing TUI permission boundary remains fail closed.
+- No new sensitive data is introduced beyond transient elapsed runtime in the UI process.
+- No audit or telemetry event is emitted for timer ticks.
+- Provider output continues to follow the existing in-session handling and workspace constraints.
 
 ## Compatibility, Migration, and Rollback
 
-- No configuration, packet, task-frontmatter, or event-schema migration is needed.
-- Existing `--no-ui` execution remains supported.
-- Existing providers remain selected through the current provider-launch mechanism.
-- The feature requires the already-installed OpenTUI 0.4.5 and ACP SDK 1.2.1 ranges.
-- Rollback consists of reverting the UI/store/projection changes and the TUI permission branch.
-- No cleanup of persisted data is required because no new persistent data exists.
+- No package, lockfile, packet, configuration, task-frontmatter, event-schema, or report migration is required.
+- Existing OpenTUI 0.4.5 and Bun `>=1.3.0` remain sufficient.
+- Existing `--no-ui` execution remains unchanged.
+- Existing store fixtures must initialize `taskTimers` as an empty map.
+- Rollback removes `src/ui/timer.ts`, timer state/selectors, App tick/render wiring, and timer tests.
+- No cleanup of persisted data is required because no timer data is persisted.
+- The existing navigator task graph must be regenerated after this TechSpec is approved; implementation tasks must not rely on the stale four-task graph.
 
 ## Impact Analysis
 
 | Component/file | Impact | Risk | Required action |
 |---|---|---|---|
-| `src/ui/transcript.ts` | New pure normalized transcript model and helpers | ACP variant coverage | Add exhaustive fixtures and generic fallback |
-| `src/ui/store.ts` | Add per-task history, view state, selectors, actions, reasons | State complexity and follow confusion | Refactor with immutable snapshots and focused unit tests |
-| `src/ui/App.tsx` | Replace global activity view with task/transcript panels, header, help, responsive modes | Layout regressions at small sizes | Add frame and keyboard tests |
-| `src/acp-client.ts` | Cancel TUI prompt permissions and emit notice | Provider-specific cancellation differences | Add mocked ACP permission tests |
-| `src/commands.ts` | Preserve existing mode wiring; remove assumptions about permission modal if needed | TUI/no-UI behavior drift | Add command integration regression |
-| `src/events.ts` | No intended change | Accidental protocol expansion | Keep raw event union stable |
-| `src/engine.ts` | No intended change | Hidden execution coupling | Run existing engine tests |
-| `tests/store.test.ts` | Expand state/action coverage | Incomplete view-state assertions | Add selection, follow, reason, history tests |
-| `tests/cockpit.test.tsx` | Expand renderer coverage | OpenTUI frame/focus flakiness | Add deterministic test-renderer fixtures |
-| `tests/acp-client.test.ts` | Add permission cancellation and unknown-update cases | Mock mismatch with ACP SDK | Preserve existing mock agent style |
-| `tests/transcript.test.ts` | New pure projection suite | Missing event variants | Cover all supported and fallback types |
-| `README.md` | Update cockpit behavior and remove permission-modal claim | User documentation drift | Update after implementation |
+| `src/ui/timer.ts` | New pure timer state, transitions, formatting, and clock helpers | Boundary/format errors | Add focused deterministic tests |
+| `src/ui/store.ts` | Add `taskTimers`, clock injection, status transitions, `tick()`, and selectors | Snapshot and idempotence regressions | Preserve immutable updates and existing view behavior |
+| `src/ui/App.tsx` | Render timer, call `tick()`, add help copy, preserve compact width | Layout and lifecycle regressions | Add timer frames and cleanup evidence |
+| `src/ui/cockpit.tsx` | No intended production change | Renderer lifecycle drift | Confirm protected diff remains clean |
+| `src/events.ts` | No intended change | Accidental protocol expansion | Protected-boundary diff check |
+| `src/engine.ts` | No intended change | Timer coupling to execution | Engine regression gate |
+| `src/commands.ts` | No intended change | `--no-ui` timer leakage | Console/no-UI regression |
+| `tests/timer.test.ts` | New pure helper suite | Incomplete boundary coverage | Add all M-07 cases |
+| `tests/store.test.ts` | Add timer state, clock, status, tick, and lifecycle assertions | Interaction with existing state | Preserve all current tests |
+| `tests/cockpit.test.tsx` | Add timer row/frame/help and cleanup assertions | OpenTUI timing flakiness | Use controlled store ticks and frame fixtures |
+| `tests/acp-client.test.ts` | No timer-specific production change | Regression from broader gate | Keep existing permission coverage |
+| `README.md` | Optional concise cockpit timer/help wording | Documentation drift | Update only if implementation changes user-facing CLI guidance |
+| `_tasks.md` | Regenerated after approval | Stale task graph | Run `sf-create-tasks` before implementation |
 
 ## Testing and Evidence
 
 ### Unit Tests
 
-- `applySessionUpdate` merges message chunks by `messageId`.
-- Tool-call updates merge by `toolCallId` and preserve initial order.
-- Thoughts, plans, activity, errors, outcomes, and unknown updates remain labeled.
-- Different task IDs never share transcript entries.
-- Histories longer than 250 entries remain complete.
-- Task selection clamps at both ends and maps to the correct transcript.
-- Active-task following stops after manual selection and resumes when selecting the active task.
-- Blocked reasons identify failed dependencies.
-- Failed status receives a fallback reason before detailed failure activity arrives.
-- Runtime option outcomes display applied/default/unsupported truthfully.
-- Permission events never create a selectable permission state in the cockpit.
+Create `tests/timer.test.ts` covering:
+
+- pending and blocked formatting as `—`;
+- active/terminal missing baseline as `unavailable`;
+- first `in_progress` starts at zero;
+- duplicate `in_progress` preserves the first baseline;
+- `advanceTaskTimer` changes only when the displayed second changes;
+- total-minute formatting at `00:00`, `00:01`, `01:00`, `59:59`, `60:00`, and multi-hour values;
+- first terminal freezes the observed value;
+- duplicate/stale terminal events preserve the frozen value;
+- invalid and regressing clock values never produce negative elapsed time;
+- pure helpers do not mutate prior entries.
+
+Extend `tests/store.test.ts` to cover:
+
+- timer map reset on `run_started`;
+- status transitions establish and freeze task timers;
+- `tick()` updates only running tasks;
+- no snapshot notification when formatted seconds are unchanged;
+- terminal without baseline becomes unavailable;
+- timer state remains separate from transcript and run activity;
+- `run_finished` does not invent a task terminal duration.
 
 ### Integration Tests
 
-- A mocked multi-task run produces independent histories and correct active/selected divergence.
-- A mocked ACP permission request in TUI mode returns cancellation and emits the read-only activity notice.
-- `--no-ui` retains its existing console event output and permission behavior.
-- Engine failure and blocked dependency outcomes still produce the existing final result.
-- A tool update received before its initial tool call remains visible and later merges correctly.
+Extend `tests/cockpit.test.tsx` to cover:
+
+- running row displays `MM:SS`;
+- completed/failed rows retain final value;
+- pending/blocked rows display `—`;
+- unavailable rows display the documented fallback;
+- timer values remain visible at 80×24, 120×40, 200×60, reduced-color, and compact fallback sizes;
+- help contains the neutral-timer explanation;
+- timer updates do not change selected task, focus, transcript scroll, or follow state;
+- renderer cleanup stops timer updates and drops live mode.
+
+Preserve existing integration tests for task selection/following, transcript scrolling, failure/blocked reasons, permission cancellation, `--no-ui`, and runtime-option truthfulness.
 
 ### End-to-End or Platform Evidence
 
-- Renderer frames at 80×24, 120×40, and 200×60.
-- Task navigation with arrows and `j`/`k`.
-- Pane switching with `Tab` and `Shift+Tab`.
-- Transcript line, page, start, and end scrolling.
-- Live tail behavior before and after manual scroll.
-- `?` help rendering and escape behavior.
-- Light, dark, and reduced-color terminal output.
-- Synthetic long-running transcript memory/render test.
-- Manual TTY check with a provider that emits message, thought, plan, tool, tool-update, error, and completion events.
+- Real OpenTUI PTY smoke test with a running fixture verifies the timer appears and advances.
+- Real PTY `q` and Ctrl+C checks verify interval cleanup and terminal restoration.
+- Manual checks at 80×24, 120×40, and 200×60 verify timer/title truncation.
+- Reduced-color frame capture verifies status and timer meaning without color dependence.
+- Controlled long-duration fixture verifies formatting beyond 59 minutes without waiting in real time.
+- No live third-party provider is required for timer correctness; existing deterministic ACP fixtures remain the provider-variance boundary.
 
 ### Verification Gates
 
 Focused:
 
 ```bash
-bun test tests/transcript.test.ts tests/store.test.ts tests/cockpit.test.tsx tests/acp-client.test.ts
+bun test ./tests/timer.test.ts ./tests/store.test.ts ./tests/cockpit.test.tsx
 ```
 
-Repository gates:
+Repository:
 
 ```bash
 bun run check
 bun test
 bun run build
 bun run verify
+git diff --check
 ```
 
-No test result is considered evidence until the command exits successfully.
+Protected-boundary check:
+
+```bash
+git diff -- src/events.ts src/engine.ts src/commands.ts package.json bun.lock
+```
+
+No test result is evidence until the command exits successfully.
 
 ## Observability
 
-- No external metrics, telemetry, or transcript persistence is added.
-- The header exposes run phase/outcome, active task, counts, and effective runtime-option outcomes.
-- The selected transcript exposes detailed event chronology and failure context.
-- Read-only permission cancellation uses a stable, user-facing activity string suitable for tests and support diagnosis.
-- No new logs should include credentials, environment secrets, or duplicated raw ACP payloads.
+- No external metrics, telemetry, or timer logs are added.
+- Existing header state, task status, transcript chronology, runtime-option outcomes, and failure reasons remain the diagnostic surfaces.
+- Timer ticks must not emit `RunEvent`, ACP messages, console output, or persistent logs.
+- Tests should expose timer state through snapshots and rendered frames only.
+- No alert or operational threshold is introduced.
 
 ## Development Sequencing
 
-1. Add transcript types, normalization rules, fallback labels, and pure unit tests. No dependencies.
-2. Extend `CockpitStore` with per-task histories, selection/follow/focus/help state, reason derivation, and actions. Depends on step 1.
-3. Implement task and transcript selectors, stable entry keys, and task-list/transcript `ScrollBox` behavior. Depends on step 2.
-4. Implement the responsive header, two-column layout, semantic status presentation, footer, and help view. Depends on steps 2 and 3.
-5. Change TUI permission handling to fail closed and add ACP integration coverage. Depends on step 2; can run in parallel with step 3.
-6. Add renderer interaction tests, responsive frames, reduced-color checks, and long-history evidence. Depends on steps 4 and 5.
-7. Run focused tests and the complete verification gate, then update README behavior documentation. Depends on step 6.
+1. Add `src/ui/timer.ts` with pure transitions, formatting, clock validation, and focused tests. No dependencies.
+2. Extend `CockpitStore` with timer state, injected clock, status transitions, `tick()`, and selectors. Depends on step 1.
+3. Render timer values in `TaskRow`, add App tick wiring and neutral help copy, and preserve existing live-render cleanup. Depends on step 2.
+4. Add timer-aware renderer frames, compact-layout assertions, reduced-color checks, and cleanup/PTY evidence. Depends on step 3.
+5. Run focused tests, protected-boundary checks, TypeScript, full Bun verification, and build; update user-facing documentation if required. Depends on step 4.
+6. Regenerate the implementation task graph from the approved PRD and TechSpec. Depends on TechSpec approval and completion of the design review; it is a Spec Finder handoff rather than a code prerequisite.
 
 ## Known Risks and Open Technical Questions
 
 | Item | Evidence | Consequence | Resolution criterion/owner |
 |---|---|---|---|
-| PRD stable-ID gap | Approved PRD predates the current template’s stable-ID convention. | Future task generation must use the aliases consistently. | This matrix is the canonical alias map; packet owner verifies before `sf-create-tasks`. |
-| Provider-specific ACP updates | ACP allows evolving/provider-specific update variants. | Some entries may use generic labels. | Every unrecognized update remains visible with its discriminator and test fixture. |
-| In-memory history growth | Complete history is required and persistence is prohibited. | Long runs increase memory use. | Synthetic high-volume test records memory/render behavior; spill-to-disk requires a later PRD. |
-| OpenTUI renderer behavior | Frame and focus behavior is version-sensitive. | Interaction tests may expose implementation-specific differences. | Validate against installed 0.4.5 test renderer before implementation sign-off. |
-| Below-minimum terminal size | PRD guarantees 80×24, not smaller terminals. | Compact mode may omit secondary metadata. | Preserve slug, active task, phase/outcome, task status, and transcript context; show a size notice when necessary. |
-| Permission prompt cancellation | Explicitly approved behavior differs from the current modal. | Prompt-configured runs may fail when an ACP tool requests permission. | Notice must be visible before the existing failure outcome; approve-all/deny remain unchanged. |
+| Timer tick cadence | Product format is `MM:SS`; OpenTUI live rendering is already active for the spinner. | Excessive store snapshots could affect renderer churn. | Tick at one-second display precision or suppress unchanged displayed seconds; verify frame behavior in timer/store tests. |
+| `performance.now()` process lifetime | The timer is intentionally local and non-persistent. | Late attachment/restart cannot reconstruct prior duration. | Render `unavailable`; verify lifecycle reset tests. |
+| Run completion without task terminal | Raw `run_finished` is run-level and carries no task ID. | No trustworthy task final duration exists in that synthetic sequence. | Do not invent a duration; renderer closes after run completion. |
+| Timer row width | Existing task rows already truncate titles at compact widths. | Timer could clip or obscure task identity. | Reserve timer/status width before title truncation; verify M-09. |
+| Existing task graph is stale | `_tasks.md` still describes the earlier navigator-only implementation. | Implementation could omit timer work or duplicate completed tasks. | Regenerate with `sf-create-tasks` after TechSpec approval. |
+| OpenTUI clock coupling | OpenTUI exposes `ManualClock`, but the selected timer module remains OpenTUI-independent. | Renderer tests and store tests use different time seams. | Store tests inject a simple monotonic function; renderer tests drive store ticks explicitly. |
+| Provider variance | Timer boundaries depend on Spec Finder task status, not ACP update categories. | Timer correctness does not require a live third-party provider. | Retain deterministic provider fixtures and existing live-provider gap. |
 
 ## Architecture Decision Records
 
-- [ADR-001: Read-Only Progress Cockpit](adrs/adr-001-read-only-progress-cockpit.md) — establishes the observation-only master-detail boundary.
-- [ADR-002: Guided Live Transcript Product Shape](adrs/adr-002-guided-live-transcript.md) — establishes the header, two-column layout, task following, and readable transcript.
-- [ADR-003: Current-Seam Transcript Projection](adrs/adr-003-current-seam-transcript-projection.md) — records the selected implementation architecture.
+- [ADR-001: Read-Only Progress Cockpit](adrs/adr-001-read-only-progress-cockpit.md) — observation-only master-detail boundary.
+- [ADR-002: Guided Live Transcript Product Shape](adrs/adr-002-guided-live-transcript.md) — header, two-column layout, task following, and readable transcript.
+- [ADR-003: Current-Seam Transcript Projection](adrs/adr-003-current-seam-transcript-projection.md) — existing store/App projection architecture.
+- [ADR-004: Ephemeral Task Duration Signal](adrs/adr-004-ephemeral-task-duration.md) — timer semantics, placeholders, final retention, and non-persistence.
+- [ADR-005: Integrated Neutral Task Timer Product Scope](adrs/adr-005-integrated-neutral-task-timer.md) — timer included in the navigator MVP.
+- [ADR-006: Store-Local Task Timer Projection](adrs/adr-006-store-local-task-timer-projection.md) — pure timer module, store ownership, explicit ticks, and monotonic clock injection.

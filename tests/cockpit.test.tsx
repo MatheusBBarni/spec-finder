@@ -38,19 +38,64 @@ describe("read-only progress cockpit", () => {
         expect(frame).toContain("Phase: running")
         expect(frame).toContain("Active: task_02")
         expect(frame).toContain("Tasks: 1/3 completed · 1 running")
-        expect(frame).toContain("Provider codex")
-        expect(frame).toContain("model gpt-5 (applied)")
-        expect(frame).toContain("reasoning provider default")
-        expect(frame).toContain("speed fast (unsupported)")
-        expect(frame).not.toContain("speed fast (applied)")
+        expect(frame).not.toContain("Provider codex")
+        expect(frame).not.toContain("model gpt-5")
+        expect(frame).not.toContain("reasoning provider default")
+        expect(frame).not.toContain("speed fast")
+        if (width >= 120) {
+          expect(frame).toContain("codex - gpt-5 (applied) - provider default - fast (unsupported)")
+        } else {
+          expect(frame).toContain("codex -")
+        }
+        const countsHeader = frame.split("\n").find((line) => line.includes("Tasks:"))
+        expect(countsHeader).toBeDefined()
+        expect(countsHeader).not.toContain("…")
         expect(frame).toContain("[COMPLETED]")
-        expect(frame).toMatch(/\[[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\]/)
+        expect(frame).toMatch(/>[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s+task_02/)
+        expect(frame).not.toMatch(/task_02\s+\[[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\]/)
         expect(frame).not.toContain("[RUNNING]")
         expect(frame).toContain("TRANSCRIPT · task_02 · FOLLOWING ACTIVE")
         expect(frame).toContain("Selected task transcript")
       } finally {
         await destroy(screen)
       }
+    }
+  })
+
+  test("keeps transcript entries compact without blank rows between messages", async () => {
+    const store = startedStore([task(1, "Compact transcript")])
+    store.consume({ type: "activity", taskId: "task_01", message: "FIRST-MESSAGE" })
+    store.consume({ type: "activity", taskId: "task_01", message: "SECOND-MESSAGE" })
+    const screen = await render(store, 120, 40)
+
+    try {
+      const lines = screen.captureCharFrame().split("\n")
+      const firstIndex = lines.findIndex((line) => line.includes("FIRST-MESSAGE"))
+      const secondIndex = lines.findIndex((line) => line.includes("SECOND-MESSAGE"))
+      expect(firstIndex).toBeGreaterThanOrEqual(0)
+      expect(secondIndex).toBe(firstIndex + 2)
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+  test("collapses repeated blank lines from streamed ACP text", async () => {
+    const store = startedStore([task(1, "Whitespace fixture")])
+    store.consume({ type: "session_update", taskId: "task_01", update: {
+      sessionUpdate: "agent_message_chunk",
+      messageId: "whitespace",
+      content: { type: "text", text: `before${"\n".repeat(8)}after` },
+    } })
+    const screen = await render(store, 120, 40)
+
+    try {
+      const lines = screen.captureCharFrame().split("\n")
+      const beforeIndex = lines.findIndex((line) => line.includes("before"))
+      const afterIndex = lines.findIndex((line) => line.includes("after"))
+      expect(beforeIndex).toBeGreaterThanOrEqual(0)
+      expect(afterIndex).toBe(beforeIndex + 2)
+    } finally {
+      await destroy(screen)
     }
   })
 

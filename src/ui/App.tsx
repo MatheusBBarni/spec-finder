@@ -111,9 +111,9 @@ export function App({ store, onCancel }: AppProps) {
         borderStyle="single"
         borderColor={state.finished?.ok === false ? colors.danger : colors.border}
       >
-        <text fg={colors.accent} wrapMode="none" truncate><strong>{headerLines[0]}</strong></text>
+        <text fg={colors.accent} wrapMode="none"><strong>{headerLines[0]}</strong></text>
         {headerLines.slice(1).map((line, index) => (
-          <text key={`header-${index}`} fg={index === 0 ? colors.text : colors.muted} wrapMode="none" truncate>{line}</text>
+          <text key={`header-${index}`} fg={index === 0 ? colors.text : colors.muted} wrapMode="none">{line}</text>
         ))}
       </box>
 
@@ -138,7 +138,6 @@ export function App({ store, onCancel }: AppProps) {
                 key={task.id}
                 task={task}
                 selected={task.id === state.selectedTaskId}
-                active={task.id === state.activeTaskId}
                 reason={selectTaskReason(state, task.id)}
                 spinner={spinner}
                 titleLimit={compact ? Math.max(12, width - 29) : expanded ? 36 : Math.max(10, Number(taskPanelWidth) - 23)}
@@ -190,23 +189,22 @@ export function App({ store, onCancel }: AppProps) {
 function TaskRow({
   task,
   selected,
-  active,
   reason,
   spinner,
   titleLimit,
 }: {
   task: CockpitTask
   selected: boolean
-  active: boolean
   reason: string | undefined
   spinner: string
   titleLimit: number
 }) {
-  const label = statusLabel(task.status, spinner)
-  const marker = active ? "▶" : statusIcon(task.status)
+  const running = task.status === "in_progress"
+  const label = running ? "" : statusLabel(task.status)
+  const marker = running ? spinner : statusIcon(task.status)
   return (
     <text id={taskRowId(task.id)} fg={selected ? colors.accent : statusColor(task.status)} wrapMode="word" flexShrink={0}>
-      {selected ? ">" : " "}{marker} {task.id} [{label}] {fit(task.title, titleLimit)}
+      {selected ? ">" : " "}{marker} {task.id}{label ? ` [${label}]` : ""} {fit(task.title, titleLimit)}
       {reason ? <><br /><span fg={colors.danger}>  ! {reason}</span></> : null}
     </text>
   )
@@ -214,11 +212,12 @@ function TaskRow({
 
 function TranscriptRow({ entry }: { entry: TranscriptEntry }) {
   const status = entry.status ? ` · ${humanize(entry.status)}` : entry.streaming ? " · streaming" : ""
+  const text = compactTranscriptText(entry.text)
   return (
-    <text id={`transcript-entry-${entry.id}`} fg={transcriptColor(entry.kind)} wrapMode="word" marginBottom={1} flexShrink={0}>
+    <text id={`transcript-entry-${entry.id}`} fg={transcriptColor(entry.kind)} wrapMode="word" flexShrink={0}>
       <strong>{transcriptIcon(entry.kind)} {entry.label}{status}</strong>
       <br />
-      <span fg={entry.kind === "error" ? colors.danger : colors.text}>{entry.text || "(no text)"}</span>
+      <span fg={entry.kind === "error" ? colors.danger : colors.text}>{text}</span>
     </text>
   )
 }
@@ -260,7 +259,7 @@ function buildHeaderLines(
   compact: boolean,
   expanded: boolean,
 ): string[] {
-  const max = Math.max(12, width - 4)
+  const max = Math.max(12, width - 6)
   const phase = runPhase(state)
   const active = activeTaskSummary(state)
   const counts = taskCounts(state)
@@ -269,25 +268,22 @@ function buildHeaderLines(
 
   if (expanded) {
     return [
-      fit(`${title}  |  ${phase}`, max),
-      fit(`${active}  |  ${counts}`, max),
-      fit(identity.join(" · "), max),
+      clip(`${title}  |  ${phase}`, max),
+      clip(`${active}  |  ${counts}`, max),
+      clip(identity.join(" - "), max),
     ]
   }
   if (compact) {
     return [
-      fit(`${title} · COMPACT ${width}x${height}`, max),
-      fit(`${phase} · ${active}`, max),
-      fit(counts, max),
-      fit(identity[0] ?? "Runtime: initializing", max),
+      clip(`${title} · COMPACT ${width}x${height}`, max),
+      clip(`${phase} · ${active}`, max),
+      clip(`${counts} · ${identity.join(" - ")}`, max),
     ]
   }
   return [
-    fit(title, max),
-    fit(`${phase} · ${active}`, max),
-    fit(counts, max),
-    fit(identity.slice(0, 2).join(" · "), max),
-    fit(identity.slice(2).join(" · "), max),
+    clip(title, max),
+    clip(`${phase} · ${active}`, max),
+    clip(`${counts} · ${identity.join(" - ")}`, max),
   ]
 }
 
@@ -312,22 +308,22 @@ function taskCounts(state: CockpitState): string {
 }
 
 function runtimeIdentityParts(state: CockpitState): string[] {
-  if (!state.config) return ["Runtime: initializing"]
+  if (!state.config) return ["initializing"]
   return [
-    `Provider ${state.config.provider}`,
-    runtimeOption("model", state),
-    runtimeOption("reasoning", state),
-    runtimeOption("speed", state),
+    state.config.provider,
+    runtimeOptionValue("model", state),
+    runtimeOptionValue("reasoning", state),
+    runtimeOptionValue("speed", state),
   ]
 }
 
-function runtimeOption(name: RuntimeOptionName, state: CockpitState): string {
+function runtimeOptionValue(name: RuntimeOptionName, state: CockpitState): string {
   const outcome = state.runtimeOptions[name]
   const requested = outcome?.requested ?? state.config?.[name] ?? "auto"
-  if (!outcome) return `${name} ${requested} (requested)`
-  if (outcome.outcome === "applied") return `${name} ${requested} (applied)`
-  if (outcome.outcome === "default") return `${name} provider default`
-  return `${name} ${requested} (unsupported)`
+  if (!outcome) return `${requested} (requested)`
+  if (outcome.outcome === "applied") return `${requested} (applied)`
+  if (outcome.outcome === "default") return "provider default"
+  return `${requested} (unsupported)`
 }
 
 function transcriptTitle(selectedTaskId: string | undefined, state: CockpitState): string {
@@ -354,9 +350,8 @@ function statusIcon(status: TaskStatus): string {
   return "·"
 }
 
-function statusLabel(status: TaskStatus, spinner: string): string {
+function statusLabel(status: TaskStatus): string {
   if (isCompleted(status)) return "COMPLETED"
-  if (status === "in_progress") return spinner
   return status.toUpperCase()
 }
 
@@ -398,6 +393,20 @@ function humanize(value: string): string {
 function fit(value: string, limit: number): string {
   if (limit <= 1) return value.slice(0, Math.max(0, limit))
   return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`
+}
+
+function clip(value: string, limit: number): string {
+  return value.slice(0, Math.max(0, limit))
+}
+
+function compactTranscriptText(value: string): string {
+  const compact = value
+    .replace(/\r\n?/gu, "\n")
+    .replace(/[ \t]+\n/gu, "\n")
+    .replace(/\n[ \t]+/gu, "\n")
+    .replace(/\n{3,}/gu, "\n\n")
+    .trim()
+  return compact || "(no text)"
 }
 
 function isCompleted(status: TaskStatus): boolean {
