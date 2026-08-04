@@ -2,8 +2,11 @@ import { access, mkdir, readFile } from "node:fs/promises"
 import { join, relative } from "node:path"
 import type { SpecFinderConfig } from "./config.ts"
 import type { RunEventListener } from "./events.ts"
+import type { ProviderLaunch } from "./providers.ts"
 import { runAcpTurn } from "./acp-client.ts"
 import { executionOrder, loadTaskPacket, updateTaskStatus, validateTasks, type TaskFile } from "./tasks.ts"
+
+const REPORT_DIRECTORY = "reports"
 
 export interface RunOptions {
   root: string
@@ -12,6 +15,7 @@ export interface RunOptions {
   signal: AbortSignal
   emit: RunEventListener
   interactivePermissions: boolean
+  providerLaunch?: ProviderLaunch
 }
 
 export interface RunResult {
@@ -27,7 +31,7 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
   if (issues.length > 0) {
     throw new Error(`task packet is invalid:\n${issues.map((issue) => `- ${relative(options.root, issue.path)}: ${issue.message}`).join("\n")}`)
   }
-  const ordered = executionOrder(packet.tasks, options.config.execution.includeCompleted)
+  const ordered = executionOrder(packet.tasks)
   options.emit({ type: "run_started", slug: options.slug, config: options.config, tasks: packet.tasks })
 
   const failedIds = new Set<string>()
@@ -59,26 +63,26 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
         signal: options.signal,
         emit: options.emit,
         interactivePermissions: options.interactivePermissions,
+        ...(options.providerLaunch ? { providerLaunch: options.providerLaunch } : {}),
       })
       if (!successfulStop(implementation.stopReason)) throw new Error(`implementation stopped: ${implementation.stopReason}`)
 
-      if (options.config.report.enabled) {
-        const reportDirectory = join(packet.directory, options.config.report.directory)
-        const reportPath = join(reportDirectory, `${current.id}.md`)
-        await mkdir(reportDirectory, { recursive: true })
-        options.emit({ type: "activity", taskId: current.id, message: "final report session starting" })
-        const report = await runAcpTurn({
-          root: options.root,
-          config: options.config,
-          prompt: reportPrompt(options.root, packet.directory, current, reportPath),
-          taskId: current.id,
-          signal: options.signal,
-          emit: options.emit,
-          interactivePermissions: options.interactivePermissions,
-        })
-        if (!successfulStop(report.stopReason)) throw new Error(`report stopped: ${report.stopReason}`)
-        await assertReport(reportPath)
-      }
+      const reportDirectory = join(packet.directory, REPORT_DIRECTORY)
+      const reportPath = join(reportDirectory, `${current.id}.md`)
+      await mkdir(reportDirectory, { recursive: true })
+      options.emit({ type: "activity", taskId: current.id, message: "final report session starting" })
+      const report = await runAcpTurn({
+        root: options.root,
+        config: options.config,
+        prompt: reportPrompt(options.root, packet.directory, current, reportPath),
+        taskId: current.id,
+        signal: options.signal,
+        emit: options.emit,
+        interactivePermissions: options.interactivePermissions,
+        ...(options.providerLaunch ? { providerLaunch: options.providerLaunch } : {}),
+      })
+      if (!successfulStop(report.stopReason)) throw new Error(`report stopped: ${report.stopReason}`)
+      await assertReport(reportPath)
 
       current = await updateTaskStatus(current, "completed")
       completed += 1
@@ -89,7 +93,7 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
       failed += 1
       options.emit({ type: "task_status", taskId: current.id, status: "failed" })
       options.emit({ type: "activity", taskId: current.id, message: error instanceof Error ? error.message : String(error) })
-      if (!options.config.execution.continueOnError) break
+      break
     }
   }
 
@@ -134,4 +138,3 @@ async function assertReport(path: string): Promise<void> {
   const report = await readFile(path, "utf8")
   if (report.trim().length < 120) throw new Error(`final report is missing or incomplete: ${path}`)
 }
-

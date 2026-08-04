@@ -5,7 +5,7 @@ import { configCommand, runCommand, setupCommand, upgradeCommand, versionCommand
 const HELP = `spec-finder — skill-driven specifications with an ACP cockpit
 
 Usage:
-  spec-finder setup [--agent claude|codex|cursor]
+  spec-finder setup [--agent claude|codex|cursor]... [--local|--global] [--copy|--symlink]
   spec-finder upgrade
   spec-finder run <task_slug> [--no-ui] [--provider NAME] [--model ID]
   spec-finder config
@@ -44,4 +44,3 @@ try {
   }
   process.exitCode = 1
 }
-

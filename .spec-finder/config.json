@@ -1,37 +1,8 @@
 {
-  "version": 1,
+  "version": 2,
   "provider": "codex",
-  "model": "auto",
+  "model": "gpt-5.6-sol",
   "reasoning": "high",
   "speed": "normal",
-  "mode": "agent",
-  "permissions": "prompt",
-  "report": {
-    "enabled": true,
-    "directory": "reports"
-  },
-  "execution": {
-    "continueOnError": false,
-    "includeCompleted": false
-  },
-  "providers": {
-    "claude": {
-      "command": "npx",
-      "args": ["--yes", "@agentclientprotocol/claude-agent-acp"],
-      "env": {},
-      "authMethod": null
-    },
-    "codex": {
-      "command": "npx",
-      "args": ["--yes", "@agentclientprotocol/codex-acp"],
-      "env": {},
-      "authMethod": null
-    },
-    "cursor": {
-      "command": "cursor-agent",
-      "args": ["acp"],
-      "env": {},
-      "authMethod": null
-    }
-  }
+  "permissions": "prompt"
 }

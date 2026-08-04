@@ -30,11 +30,23 @@ spec-finder setup
 └── tasks/
 ```
 
-It also installs all bundled skills for Claude, Codex, and Cursor. Limit setup to one or more targets when needed:
+In an interactive terminal, `setup` opens keyboard pickers for providers, installation scope, and copy or symlink mode. Use `↑`/`↓` to move, `Space` to toggle providers, `Enter` to confirm, and `Esc` to cancel. All providers start selected; local scope and copied skills are the defaults. Supply any choice as a flag to skip only its corresponding picker. Non-interactive setup defaults to all providers, local scope, and copied skills.
+
+Limit setup to one or more targets when needed; repeat `--agent` to select more than one:
 
 ```bash
-spec-finder setup --agent codex --agent cursor
+spec-finder setup --agent codex --agent cursor --global --symlink
 ```
+
+The `.spec-finder/config.json` and `.spec-finder/tasks/` scaffolding always remain in the current project. Skill destinations depend on scope:
+
+| Provider | Local | Global |
+|---|---|---|
+| Claude | `.claude/skills` | `~/.claude/skills` |
+| Codex | `.agents/skills` | `~/.agents/skills` |
+| Cursor | `.cursor/skills` | `~/.cursor/skills` |
+
+`--copy` copies the six bundled `sf-*` skills into every selected provider. `--symlink` copies them once to a canonical provider—Codex when selected, otherwise the first selected provider—and creates a per-skill symlink for every other selected provider. Rerunning setup replaces only those six `sf-*` entries; unrelated skills in the target directories are preserved.
 
 ## Specification pipeline
 
@@ -79,41 +91,12 @@ spec-finder run my-feature \
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "provider": "codex",
   "model": "auto",
   "reasoning": "high",
   "speed": "normal",
-  "mode": "agent",
-  "permissions": "prompt",
-  "report": {
-    "enabled": true,
-    "directory": "reports"
-  },
-  "execution": {
-    "continueOnError": false,
-    "includeCompleted": false
-  },
-  "providers": {
-    "claude": {
-      "command": "npx",
-      "args": ["--yes", "@agentclientprotocol/claude-agent-acp"],
-      "env": {},
-      "authMethod": null
-    },
-    "codex": {
-      "command": "npx",
-      "args": ["--yes", "@agentclientprotocol/codex-acp"],
-      "env": {},
-      "authMethod": null
-    },
-    "cursor": {
-      "command": "cursor-agent",
-      "args": ["acp"],
-      "env": {},
-      "authMethod": null
-    }
-  }
+  "permissions": "prompt"
 }
 ```
 
@@ -122,11 +105,11 @@ Key behavior:
 - `model`: `auto` or a provider model ID. Claude uses `ANTHROPIC_MODEL`; Cursor receives `--model`; Codex uses advertised ACP session options.
 - `reasoning`: `auto`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`. It is applied only when advertised.
 - `speed`: `auto`, `normal`, or `fast`. Unsupported providers continue with a truthful `unsupported` cockpit outcome.
-- `mode`: `default`, `read-only`, `agent`, or `agent-full-access`. It is applied only when the agent advertises the exact mode.
-- `permissions`: `prompt` is the safe default. `approve-all` and `deny` select matching ACP permission options without interaction.
-- `report.enabled`: must remain `true`; evidence reports are a completion invariant, not an optional feature.
-- `report.directory`: must be a relative, traversal-free directory inside the task packet.
-- `authMethod`: optional ACP authentication method ID. Spec Finder refuses it when the adapter did not advertise that ID.
+- `permissions`: `prompt` asks through the cockpit whenever the provider requests access; `approve-all` automatically chooses an allow option; `deny` automatically chooses a reject option.
+
+Provider process commands are built into Spec Finder for Claude, Codex, and Cursor. They are implementation details rather than user configuration. Spec Finder also follows each provider's default ACP mode: mode IDs are advertised by the agent and are not portable across providers. Final reports are always required in `reports/`, completed tasks are skipped, and the run stops after a task failure.
+
+Version 1 configuration files are accepted for migration. Rerun `spec-finder setup` to rewrite an existing verbose file to the compact version 2 format.
 
 Validate and inspect the effective file:
 
@@ -137,7 +120,7 @@ spec-finder config
 ## CLI
 
 ```text
-spec-finder setup [--agent claude|codex|cursor]
+spec-finder setup [--agent claude|codex|cursor]... [--local|--global] [--copy|--symlink]
 spec-finder upgrade
 spec-finder run <task_slug> [--no-ui]
 spec-finder config
@@ -161,7 +144,7 @@ dependencies:
 ---
 ```
 
-The first H1 must match `title`. Dependencies use task IDs and must be acyclic. A failed task blocks its dependents. Unrelated branches can continue only when `execution.continueOnError` is enabled.
+The first H1 must match `title`. Dependencies use task IDs and must be acyclic. A failed task stops the run; dependent tasks remain incomplete for a later run.
 
 ACP filesystem requests are constrained to the workspace root. Spec Finder sends cancellation through ACP and terminates the provider process when the operator quits.
 

@@ -12,7 +12,7 @@ import type {
 import type { SpecFinderConfig } from "./config.ts"
 import type { RunEventListener } from "./events.ts"
 import { assertInsideWorkspace } from "./paths.ts"
-import { resolveProviderLaunch } from "./providers.ts"
+import { resolveProviderLaunch, type ProviderLaunch } from "./providers.ts"
 import { VERSION } from "./version.ts"
 
 export interface AcpTurnOptions {
@@ -23,6 +23,7 @@ export interface AcpTurnOptions {
   signal: AbortSignal
   emit: RunEventListener
   interactivePermissions: boolean
+  providerLaunch?: ProviderLaunch
 }
 
 export interface AcpTurnResult {
@@ -30,7 +31,7 @@ export interface AcpTurnResult {
 }
 
 export async function runAcpTurn(options: AcpTurnOptions): Promise<AcpTurnResult> {
-  const launch = resolveProviderLaunch(options.config)
+  const launch = options.providerLaunch ?? resolveProviderLaunch(options.config)
   const child = spawn(launch.command, launch.args, {
     cwd: options.root,
     env: { ...process.env, ...launch.env },
@@ -132,7 +133,6 @@ async function configureSession(
   }, options.emit)
 
   await applySpeed(context, session.sessionId, configOptions, options.config.speed, options.emit)
-  await applyMode(context, session.sessionId, session.modes, options.config.mode, options.emit)
 }
 
 interface SelectRequest {
@@ -213,28 +213,6 @@ async function applySpeed(
     })
   }
   emit({ type: "runtime_option", name: "speed", requested, outcome: "applied" })
-}
-
-async function applyMode(
-  context: acp.ClientContext,
-  sessionId: string,
-  modes: acp.SessionModeState | null | undefined,
-  requested: SpecFinderConfig["mode"],
-  emit: RunEventListener,
-): Promise<void> {
-  if (requested === "default") {
-    emit({ type: "runtime_option", name: "mode", requested, outcome: "default" })
-    return
-  }
-  const mode = modes?.availableModes.find((candidate) => candidate.id === requested)
-  if (!mode) {
-    emit({ type: "runtime_option", name: "mode", requested, outcome: "unsupported" })
-    return
-  }
-  if (modes?.currentModeId !== mode.id) {
-    await context.request(acp.methods.agent.session.setMode, { sessionId, modeId: mode.id })
-  }
-  emit({ type: "runtime_option", name: "mode", requested, outcome: "applied" })
 }
 
 function flattenSelectOptions(options: acp.SessionConfigSelectOptions): acp.SessionConfigSelectOption[] {

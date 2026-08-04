@@ -82,7 +82,7 @@ export function App({ store, onCancel }: AppProps) {
 
       <box height={1} paddingLeft={1} paddingRight={1} flexDirection="row" justifyContent="space-between">
         <text fg={state.finished?.ok === false ? colors.danger : colors.muted}>{state.finished?.message ?? "q cancel"}</text>
-        <text fg={colors.muted}>reports: {config?.report.enabled ? "on" : "off"}</text>
+        <text fg={colors.muted}>reports: required</text>
       </box>
     </box>
   )
@@ -101,4 +101,3 @@ function statusColor(status: string): string {
   if (status === "in_progress") return colors.active
   return colors.text
 }
-

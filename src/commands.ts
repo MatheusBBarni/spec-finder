@@ -1,24 +1,178 @@
 import { spawn } from "node:child_process"
+import type { Writable } from "node:stream"
 import { loadConfig, parseConfig, type SpecFinderConfig } from "./config.ts"
 import { runTaskPacket } from "./engine.ts"
 import { type RunEventListener } from "./events.ts"
 import { findWorkspaceRoot } from "./paths.ts"
-import { setupWorkspace, type SkillTarget } from "./setup.ts"
+import {
+  isSkillTarget,
+  setupWorkspace,
+  type SkillInstallMode,
+  type SkillTarget,
+  type SetupScope,
+} from "./setup.ts"
 import { CockpitStore } from "./ui/store.ts"
 import { startCockpit } from "./ui/cockpit.tsx"
+import {
+  setupMultiSelect,
+  setupSelect,
+  type SetupPickerInput,
+} from "./ui/setup-picker.ts"
 import { PACKAGE_NAME, VERSION } from "./version.ts"
+
+const ALL_SKILL_TARGETS = ["claude", "codex", "cursor"] as const
+
+export interface SetupOptions {
+  targets: SkillTarget[]
+  scope: SetupScope
+  mode: SkillInstallMode
+}
+
+export interface SetupResolutionOptions {
+  interactive?: boolean
+  input?: SetupPickerInput
+  output?: Writable
+}
 
 export async function setupCommand(args: string[]): Promise<number> {
   const root = process.cwd()
-  const requested = valuesFor(args, "--agent")
-  const targets = (requested.length > 0 ? requested : ["claude", "codex", "cursor"]) as SkillTarget[]
-  for (const target of targets) {
-    if (!(["claude", "codex", "cursor"] as string[]).includes(target)) throw new Error(`unsupported setup agent: ${target}`)
-  }
-  const result = await setupWorkspace(root, targets)
+  const options = await resolveSetupOptions(args)
+  const result = await setupWorkspace(root, options.targets, { scope: options.scope, mode: options.mode })
   process.stdout.write(`${result.configCreated ? "created" : "validated"} ${result.configPath}\n`)
-  process.stdout.write(`installed ${result.installed.length} skill copies\n`)
+  process.stdout.write(`setup scope: ${result.scope}\n`)
+  process.stdout.write(`canonical provider: ${result.canonical ?? "none (copy mode)"}\n`)
+  process.stdout.write(`copied skill entries: ${result.copied.length}\n`)
+  process.stdout.write(`linked skill entries: ${result.linked.length}\n`)
   return 0
+}
+
+export async function resolveSetupOptions(
+  args: readonly string[],
+  resolutionOptions: SetupResolutionOptions = {},
+): Promise<SetupOptions> {
+  const provided = parseSetupArguments(args)
+  const interactive = resolutionOptions.interactive ?? isInteractiveTerminal()
+  const input = resolutionOptions.input ?? process.stdin
+  const output = resolutionOptions.output ?? process.stdout
+  const targets = provided.targets ?? (interactive ? await promptForTargets(input, output) : [...ALL_SKILL_TARGETS])
+  const scope = provided.scope ?? (interactive ? await promptForScope(input, output) : "local")
+  const mode = provided.mode ?? (interactive ? await promptForMode(input, output) : "copy")
+  if (targets.length === 0) throw new Error("select at least one setup provider")
+  return { targets, scope, mode }
+}
+
+interface ParsedSetupArguments {
+  targets?: SkillTarget[]
+  scope?: SetupScope
+  mode?: SkillInstallMode
+}
+
+function parseSetupArguments(args: readonly string[]): ParsedSetupArguments {
+  const targets: SkillTarget[] = []
+  let requestedTargets = false
+  let scope: SetupScope | undefined
+  let mode: SkillInstallMode | undefined
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]!
+    if (argument === "--agent") {
+      requestedTargets = true
+      const target = args[index + 1]
+      if (!target || target.startsWith("--")) throw new Error("setup requires a provider after --agent")
+      addSkillTarget(targets, target)
+      index += 1
+      continue
+    }
+    if (argument.startsWith("--agent=")) {
+      requestedTargets = true
+      const target = argument.slice("--agent=".length)
+      if (!target) throw new Error("setup requires a provider after --agent")
+      addSkillTarget(targets, target)
+      continue
+    }
+    if (argument === "--global") {
+      scope = setSetupScope(scope, "global")
+      continue
+    }
+    if (argument === "--local") {
+      scope = setSetupScope(scope, "local")
+      continue
+    }
+    if (argument === "--symlink") {
+      mode = setInstallMode(mode, "symlink")
+      continue
+    }
+    if (argument === "--copy") {
+      mode = setInstallMode(mode, "copy")
+      continue
+    }
+    throw new Error(`unsupported setup option: ${argument}`)
+  }
+
+  if (requestedTargets && targets.length === 0) throw new Error("select at least one setup provider")
+  return {
+    ...(requestedTargets ? { targets } : {}),
+    ...(scope ? { scope } : {}),
+    ...(mode ? { mode } : {}),
+  }
+}
+
+function addSkillTarget(targets: SkillTarget[], value: string): void {
+  if (!isSkillTarget(value)) throw new Error(`unsupported setup agent: ${value}`)
+  targets.push(value)
+}
+
+function setSetupScope(current: SetupScope | undefined, next: SetupScope): SetupScope {
+  if (current && current !== next) throw new Error("setup accepts either --global or --local, not both")
+  return next
+}
+
+function setInstallMode(current: SkillInstallMode | undefined, next: SkillInstallMode): SkillInstallMode {
+  if (current && current !== next) throw new Error("setup accepts either --symlink or --copy, not both")
+  return next
+}
+
+function isInteractiveTerminal(): boolean {
+  return process.stdin.isTTY === true && process.stdout.isTTY === true
+}
+
+async function promptForTargets(input: SetupPickerInput, output: Writable): Promise<SkillTarget[]> {
+  return setupMultiSelect({
+    message: "Select providers",
+    items: [
+      { label: "Claude", value: "claude" },
+      { label: "Codex", value: "codex" },
+      { label: "Cursor", value: "cursor" },
+    ],
+    initialSelected: [...ALL_SKILL_TARGETS],
+    required: true,
+    input,
+    output,
+  })
+}
+
+async function promptForScope(input: SetupPickerInput, output: Writable): Promise<SetupScope> {
+  return setupSelect({
+    message: "Choose installation scope",
+    items: [
+      { label: "Local", value: "local", hint: "current project" },
+      { label: "Global", value: "global", hint: "home directory" },
+    ],
+    input,
+    output,
+  })
+}
+
+async function promptForMode(input: SetupPickerInput, output: Writable): Promise<SkillInstallMode> {
+  return setupSelect({
+    message: "Choose skill installation mode",
+    items: [
+      { label: "Copy", value: "copy", hint: "independent provider copies" },
+      { label: "Symlink", value: "symlink", hint: "one canonical copy" },
+    ],
+    input,
+    output,
+  })
 }
 
 export async function configCommand(): Promise<number> {

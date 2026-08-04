@@ -16,12 +16,7 @@ describe("ACP client", () => {
       model: "auto",
       reasoning: "auto",
       speed: "auto",
-      mode: "default",
       permissions: "approve-all",
-      providers: {
-        ...DEFAULT_CONFIG.providers,
-        cursor: { command: process.execPath, args: [fixture], env: {}, authMethod: null },
-      },
     })
     const events: RunEvent[] = []
 
@@ -33,6 +28,7 @@ describe("ACP client", () => {
       signal: new AbortController().signal,
       emit: (event) => events.push(event),
       interactivePermissions: false,
+      providerLaunch: { command: process.execPath, args: [fixture], env: {}, authMethod: null },
     })
 
     expect(result.stopReason).toBe("end_turn")

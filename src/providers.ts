@@ -7,9 +7,30 @@ export interface ProviderLaunch {
   authMethod: string | null
 }
 
+const PROVIDER_LAUNCHES: Record<ProviderName, ProviderLaunch> = {
+  claude: {
+    command: "npx",
+    args: ["--yes", "@agentclientprotocol/claude-agent-acp"],
+    env: {},
+    authMethod: null,
+  },
+  codex: {
+    command: "npx",
+    args: ["--yes", "@agentclientprotocol/codex-acp"],
+    env: {},
+    authMethod: null,
+  },
+  cursor: {
+    command: "cursor-agent",
+    args: ["acp"],
+    env: {},
+    authMethod: null,
+  },
+}
+
 export function resolveProviderLaunch(config: SpecFinderConfig): ProviderLaunch {
   const provider = config.provider
-  const entry = config.providers[provider]
+  const entry = PROVIDER_LAUNCHES[provider]
   const args = [...entry.args]
   const env = { ...entry.env }
   if (provider === "claude" && config.model !== "auto") env.ANTHROPIC_MODEL = config.model
@@ -26,4 +47,3 @@ export function resolveProviderLaunch(config: SpecFinderConfig): ProviderLaunch 
 export function providerLabel(provider: ProviderName): string {
   return provider === "claude" ? "Claude" : provider === "codex" ? "Codex" : "Cursor"
 }
-

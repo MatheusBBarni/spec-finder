@@ -32,12 +32,7 @@ dependencies: []
       model: "auto",
       reasoning: "auto",
       speed: "auto",
-      mode: "default",
       permissions: "approve-all",
-      providers: {
-        ...DEFAULT_CONFIG.providers,
-        cursor: { command: process.execPath, args: [fixture], env: {}, authMethod: null },
-      },
     })
 
     const result = await runTaskPacket({
@@ -47,6 +42,7 @@ dependencies: []
       signal: new AbortController().signal,
       emit: () => {},
       interactivePermissions: false,
+      providerLaunch: { command: process.execPath, args: [fixture], env: {}, authMethod: null },
     })
 
     expect(result).toEqual({ ok: true, completed: 1, failed: 0, blocked: 0 })
