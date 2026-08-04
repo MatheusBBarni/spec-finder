@@ -1,0 +1,49 @@
+{
+  "name": "spec-finder",
+  "version": "0.1.0",
+  "description": "A skill-driven specification framework and ACP cockpit",
+  "type": "module",
+  "bin": {
+    "spec-finder": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "bun build src/cli.tsx --target=bun --packages=external --outfile=dist/cli.js",
+    "check": "tsc --noEmit",
+    "test": "bun test",
+    "verify": "bun run check && bun test && bun run build",
+    "prepack": "bun run verify"
+  },
+  "engines": {
+    "bun": ">=1.3.0"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^1.2.1",
+    "@opentui/core": "^0.4.5",
+    "@opentui/react": "^0.4.5",
+    "react": "^19.2.7",
+    "yaml": "^2.8.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^19.2.7",
+    "typescript": "^5.9.3"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MatheusBBarni/spec-finder.git"
+  },
+  "keywords": [
+    "agent-skills",
+    "spec-driven-development",
+    "acp",
+    "terminal-ui"
+  ]
+}
