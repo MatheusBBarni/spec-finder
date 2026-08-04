@@ -70,7 +70,7 @@ Every stage keeps the approval gates from the original Compozy skills. Research 
 spec-finder run my-feature
 ```
 
-The cockpit shows the effective provider configuration, task graph, ACP activity, tool calls, and permission requests. It executes dependency-safe tasks sequentially. Each implementation task is followed by a fresh report session. Spec Finder marks a task `completed` only after the required report exists and contains substantive evidence.
+The read-only cockpit shows the effective provider configuration, task graph, ACP activity, and tool calls. It executes dependency-safe tasks sequentially. Each implementation task is followed by a fresh report session. Spec Finder marks a task `completed` only after the required report exists and contains substantive evidence.
 
 For logs without the cockpit:
 
@@ -108,7 +108,7 @@ Key behavior:
 - `model`: `auto` or a provider model ID. Claude uses `ANTHROPIC_MODEL`; Cursor receives `--model`; Codex uses advertised ACP session options.
 - `reasoning`: `auto`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`. It is applied only when advertised.
 - `speed`: `auto`, `normal`, or `fast`. Unsupported providers continue with a truthful `unsupported` cockpit outcome.
-- `permissions`: `prompt` asks through the cockpit whenever the provider requests access; `approve-all` automatically chooses an allow option; `deny` automatically chooses a reject option.
+- `permissions`: `prompt` cancels permission requests in the read-only cockpit with a visible notice; with `--no-ui`, it prompts in an interactive terminal and cancels when input is unavailable. `approve-all` automatically chooses an allow option; `deny` automatically chooses a reject option.
 
 Provider process commands are built into Spec Finder for Claude, Codex, and Cursor. They are implementation details rather than user configuration. Spec Finder also follows each provider's default ACP mode: mode IDs are advertised by the agent and are not portable across providers. Final reports are always required in `reports/`, completed tasks are skipped, and the run stops after a task failure.
 

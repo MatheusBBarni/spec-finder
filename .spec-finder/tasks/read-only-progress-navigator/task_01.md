@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Define and test task-scoped ACP transcript normalization
 type: refactor
 complexity: medium

@@ -2,9 +2,12 @@
 
 ## Current State
 
-- The approved task DAG has four pending tasks for the Read-Only Progress Navigator.
+- The approved task DAG has four tasks for the Read-Only Progress Navigator.
 - `task_01` and `task_03` are independent roots; `task_04` is the integration leaf.
-- No implementation task has started and no reports exist yet.
+- `task_01` is completed and its final report exists.
+- `task_02` implementation and final-report verification are complete; its lifecycle status remains owned by the Spec Finder runtime.
+- `task_03` implementation and repository verification are complete; its final report and lifecycle status remain owned by the Spec Finder runtime.
+- `task_04` implementation, focused tests, responsive/reduced-color frames, real-PTY escape checks, repository verification, and final report are complete; its lifecycle status remains owned by the Spec Finder runtime.
 
 ## Shared Decisions
 
@@ -16,19 +19,18 @@
 ## Shared Learnings
 
 - `src/events.ts` already associates task status, activity, and ACP session updates with task IDs.
-- The current store has a single global activity list capped at 250 entries and a permission modal state; these are the main UI-state seams to replace.
+- `CockpitStore` retains uncapped per-task transcripts plus separate active/selected, focus, follow, help, run-activity, runtime-option, and task-reason state; task 04 removed the legacy permission and flat-activity view surfaces.
 - OpenTUI 0.4.5 provides the focused `ScrollBox`, keyboard routing, resize handling, viewport culling, and test renderer needed by the approved design.
+- OpenTUI 0.4.5 frame/input evidence passes at 80×24, 120×40, 200×60, reduced color, and a 70×20 stacked fallback; the renderer also navigates a 300-entry synthetic transcript.
 - The repository has no Spec Finder-local `AGENTS.md` or `CLAUDE.md`; existing dirty files are user-owned and must be preserved.
 
 ## Open Risks
 
 - Provider-specific ACP updates may require generic transcript labels.
-- Complete in-memory history needs synthetic high-volume validation.
-- OpenTUI frame/focus behavior must be verified against the installed 0.4.5 version.
-- The existing README and several unrelated source/test files are already dirty; edits must remain narrow.
+- Complete in-memory transcript history still grows linearly for the life of a run; current store and renderer evidence covers 300 entries without introducing persistence.
+- Existing Task 01 and runtime-owned packet changes are dirty and must remain untouched during later tasks.
 
 ## Handoffs
 
-- Start with `task_01` or `task_03`.
-- `task_02` depends on the transcript helper contract from `task_01`.
-- `task_04` must remove the legacy permission UI/state only after the store and ACP behavior are ready.
+- `reports/task_04.md` records a completed verdict with deterministic category/frame evidence, refreshed real-PTY help/`q`/`Ctrl+C` evidence, and the unperformed live third-party provider smoke as a residual validation gap.
+- Spec Finder still owns the `task_04.md` lifecycle transition; the report phase did not change task frontmatter.

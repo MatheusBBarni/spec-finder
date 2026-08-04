@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Add task-scoped cockpit state and view navigation
 type: frontend
 complexity: medium

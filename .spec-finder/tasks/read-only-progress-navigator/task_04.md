@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Render and verify the read-only progress cockpit
 type: frontend
 complexity: high

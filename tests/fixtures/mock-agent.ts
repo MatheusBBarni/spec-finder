@@ -30,21 +30,32 @@ acp
         content: { type: "text", text: "mock turn started" },
       },
     })
-    const permission = await context.client.request(acp.methods.client.session.requestPermission, {
-      sessionId: context.params.sessionId,
-      toolCall: {
-        toolCallId: "mock-edit",
-        title: "Mock edit",
-        kind: "edit",
-        status: "pending",
-      },
-      options: [
-        { optionId: "allow", name: "Allow", kind: "allow_once" },
-        { optionId: "reject", name: "Reject", kind: "reject_once" },
-      ],
-    })
-    if (permission.outcome.outcome !== "selected" || permission.outcome.optionId !== "allow") {
-      return { stopReason: "refusal" }
+    if (process.env.SPEC_FINDER_TEST_REQUEST_PERMISSION === "1") {
+      const permission = await context.client.request(acp.methods.client.session.requestPermission, {
+        sessionId: context.params.sessionId,
+        toolCall: {
+          toolCallId: "mock-edit",
+          title: "Mock edit",
+          kind: "edit",
+          status: "pending",
+        },
+        options: [
+          { optionId: "allow", name: "Allow", kind: "allow_once" },
+          { optionId: "reject", name: "Reject", kind: "reject_once" },
+        ],
+      })
+      const permissionOutcome = permission.outcome.outcome === "selected"
+        ? permission.outcome.optionId
+        : "cancelled"
+      await context.client.notify(acp.methods.client.session.update, {
+        sessionId: context.params.sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: `permission response: ${permissionOutcome}` },
+        },
+      })
+      const expectedOutcome = process.env.SPEC_FINDER_TEST_EXPECT_PERMISSION ?? "allow"
+      if (permissionOutcome !== expectedOutcome) return { stopReason: "refusal" }
     }
     const reportPath = prompt.match(/Write the final report to (.+)\. The report MUST/)?.[1]
     if (reportPath) {
