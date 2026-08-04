@@ -17,14 +17,16 @@ At least one of `.spec-finder/tasks/<slug>/_prd.md` or `_techspec.md`; both are 
 3. Produce a dependency DAG of independently implementable tasks. Each task has title, type, complexity, dependencies, bounded scope, and embedded tests. No cycles or undeclared prerequisites.
 4. Present the entire task graph with descriptions, complexity, and dependencies. Wait for explicit approval before writing files.
 5. Write `_tasks.md` plus sequential `task_01.md` files using `references/task-template.md`.
-6. Every task MUST require a final report at `reports/task_NN.md`. The report is written by the `sf-task-report` post-run phase and is required before Spec Finder marks the task complete.
-7. Re-read every generated file and validate:
+6. Initialize packet memory using the `sf-memory` templates: `memory/MEMORY.md` plus one `memory/task_NN.md` file for every task. Never overwrite existing memory when regenerating tasks.
+7. Every task MUST require a final report at `reports/task_NN.md`. The report is written by the `sf-task-report` post-run phase and is required before Spec Finder marks the task complete.
+8. Re-read every generated file and validate:
    - filename matches `task_\d+.md`;
    - required frontmatter exists and H1 title matches;
    - dependencies exist and are acyclic;
    - every section in the template exists;
    - test cases name specific inputs or behaviors;
    - tasks touch at most seven files and contain at most seven subtasks.
+   - shared and per-task memory files exist under `memory/`.
 
 ## Complexity
 
@@ -39,4 +41,3 @@ At least one of `.spec-finder/tasks/<slug>/_prd.md` or `_techspec.md`; both are 
 - Reference TechSpec sections rather than copying designs.
 - If the TechSpec is absent, label implementation gaps instead of inventing them.
 - Preserve approved task numbering and use dependencies as task IDs such as `task_01`.
-

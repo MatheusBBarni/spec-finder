@@ -47,6 +47,8 @@ dependencies: []
 
     expect(result).toEqual({ ok: true, completed: 1, failed: 0, blocked: 0 })
     expect(await readFile(taskPath, "utf8")).toContain("status: completed")
+    expect(await readFile(join(packet, "memory", "MEMORY.md"), "utf8")).toContain("## Shared Decisions")
+    expect(await readFile(join(packet, "memory", "task_01.md"), "utf8")).toContain("- Build the mock")
     expect(await readFile(join(packet, "reports", "task_01.md"), "utf8")).toContain("Final verdict: completed")
   })
 })

@@ -4,6 +4,7 @@ import type { SpecFinderConfig } from "./config.ts"
 import type { RunEventListener } from "./events.ts"
 import type { ProviderLaunch } from "./providers.ts"
 import { runAcpTurn } from "./acp-client.ts"
+import { ensurePacketMemory, taskMemoryPaths } from "./memory.ts"
 import { executionOrder, loadTaskPacket, updateTaskStatus, validateTasks, type TaskFile } from "./tasks.ts"
 
 const REPORT_DIRECTORY = "reports"
@@ -31,6 +32,7 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
   if (issues.length > 0) {
     throw new Error(`task packet is invalid:\n${issues.map((issue) => `- ${relative(options.root, issue.path)}: ${issue.message}`).join("\n")}`)
   }
+  await ensurePacketMemory(packet.directory, packet.tasks)
   const ordered = executionOrder(packet.tasks)
   options.emit({ type: "run_started", slug: options.slug, config: options.config, tasks: packet.tasks })
 
@@ -109,9 +111,12 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
 function implementationPrompt(root: string, packetDirectory: string, task: TaskFile): string {
   const prd = join(packetDirectory, "_prd.md")
   const techspec = join(packetDirectory, "_techspec.md")
+  const memory = taskMemoryPaths(packetDirectory, task.id)
   return `You are executing a Spec Finder implementation task in ${root}.
 
 Read the complete task at ${task.path}. Read ${prd} and ${techspec} when they exist, plus every ADR referenced by the task. Treat the task requirements and repository instructions as authoritative.
+
+Use the sf-memory skill before editing. Read shared memory at ${memory.shared} and current task memory at ${memory.task}. Keep task memory current during execution and update it before finishing. Promote only durable cross-task context to shared memory.
 
 Implement only this task. Preserve unrelated work. Run the task's required focused tests and the repository's relevant verification gate. Do not mark task frontmatter complete and do not write the final report; Spec Finder owns both lifecycle phases.
 
@@ -120,9 +125,10 @@ ${task.source}`
 }
 
 function reportPrompt(root: string, packetDirectory: string, task: TaskFile, reportPath: string): string {
+  const memory = taskMemoryPaths(packetDirectory, task.id)
   return `You are the final-report phase for ${task.id} in ${root}.
 
-Read ${task.path}, ${join(packetDirectory, "_prd.md")}, ${join(packetDirectory, "_techspec.md")}, relevant ADRs, the current git diff, and all verification evidence produced for this task. Re-run focused verification if the evidence is incomplete or stale.
+Read ${task.path}, ${join(packetDirectory, "_prd.md")}, ${join(packetDirectory, "_techspec.md")}, relevant ADRs, shared memory at ${memory.shared}, current task memory at ${memory.task}, the current git diff, and all verification evidence produced for this task. Re-run focused verification if the evidence is incomplete or stale. Use sf-memory to make any final factual memory update before writing the report.
 
 Write the final report to ${reportPath}. The report MUST include: task and outcome; files changed; requirements satisfied; tests and exact results; unresolved risks or follow-ups; and a final verdict of completed, failed, or blocked. Be factual and never claim a test passed without terminal evidence. Do not change the task frontmatter status; Spec Finder owns it.
 

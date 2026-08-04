@@ -12,6 +12,7 @@ dependencies: []
 
 <critical>
 - Read the PRD, TechSpec, relevant ADRs, and repository instructions before editing.
+- Use `sf-memory`; read `memory/MEMORY.md` and `memory/task_NN.md` before editing, then update memory before finishing.
 - Implement only this task and preserve unrelated work.
 - Run focused tests plus the required repository gate.
 - A factual final report at `reports/task_NN.md` is mandatory.
@@ -38,6 +39,7 @@ dependencies: []
 - [Concrete output]
 - Required automated tests
 - `reports/task_NN.md` final evidence report
+- Updated `memory/MEMORY.md` and `memory/task_NN.md` when new durable or task-local context exists
 
 ## Tests
 
@@ -54,4 +56,3 @@ dependencies: []
 - All required tests pass.
 - Repository verification gate passes.
 - Final report records exact evidence and unresolved risks.
-

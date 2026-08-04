@@ -1,6 +1,6 @@
 # Spec Finder
 
-Spec Finder is a skill-driven specification framework with a local ACP cockpit. It restores the compact workflow that made pre-0.3 Compozy useful—idea → PRD → TechSpec → executable tasks—without adding a daemon or a second source of truth.
+Spec Finder is a skill-driven specification framework with a local ACP cockpit, heavily inspired by Compozy. It brings back the compact workflow that made pre-0.3 Compozy useful—idea → PRD → TechSpec → executable tasks—without adding a daemon or a second source of truth.
 
 Specifications stay in the repository. Skills are portable Agent Skills. Claude, Codex, and Cursor run through their own ACP harnesses while Spec Finder owns task ordering, lifecycle state, permissions, and evidence reports.
 
@@ -46,7 +46,7 @@ The `.spec-finder/config.json` and `.spec-finder/tasks/` scaffolding always rema
 | Codex | `.agents/skills` | `~/.agents/skills` |
 | Cursor | `.cursor/skills` | `~/.cursor/skills` |
 
-`--copy` copies the six bundled `sf-*` skills into every selected provider. `--symlink` copies them once to a canonical provider—Codex when selected, otherwise the first selected provider—and creates a per-skill symlink for every other selected provider. Rerunning setup replaces only those six `sf-*` entries; unrelated skills in the target directories are preserved.
+`--copy` copies the seven bundled `sf-*` skills into every selected provider. `--symlink` copies them once to a canonical provider—Codex when selected, otherwise the first selected provider—and creates a per-skill symlink for every other selected provider. Rerunning setup replaces only those seven `sf-*` entries; unrelated skills in the target directories are preserved.
 
 ## Specification pipeline
 
@@ -56,6 +56,7 @@ The `.spec-finder/config.json` and `.spec-finder/tasks/` scaffolding always rema
 | `sf-create-prd` | `.spec-finder/tasks/<slug>/_prd.md` |
 | `sf-create-techspec` | `.spec-finder/tasks/<slug>/_techspec.md` |
 | `sf-create-tasks` | `_tasks.md` and `task_NN.md` |
+| `sf-memory` | `memory/MEMORY.md` and `memory/task_NN.md` |
 | `sf-execute-task` | bounded implementation and verification |
 | `sf-task-report` | `reports/task_NN.md` |
 
@@ -145,6 +146,16 @@ dependencies:
 ```
 
 The first H1 must match `title`. Dependencies use task IDs and must be acyclic. A failed task stops the run; dependent tasks remain incomplete for a later run.
+
+Each packet has workflow-scoped memory:
+
+```text
+.spec-finder/tasks/<slug>/memory/
+├── MEMORY.md
+└── task_NN.md
+```
+
+`MEMORY.md` contains durable context shared across the packet. Each `task_NN.md` contains only operational context for that task. Spec Finder initializes missing memory files before execution and never overwrites existing memory during initialization.
 
 ACP filesystem requests are constrained to the workspace root. Spec Finder sends cancellation through ACP and terminates the provider process when the operator quits.
 

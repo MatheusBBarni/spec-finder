@@ -23,6 +23,7 @@ export const SPEC_FINDER_SKILLS = [
   "sf-create-prd",
   "sf-create-techspec",
   "sf-create-tasks",
+  "sf-memory",
   "sf-execute-task",
   "sf-task-report",
 ] as const
