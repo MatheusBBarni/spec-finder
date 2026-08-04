@@ -1,13 +1,12 @@
 ---
 name: sf-task-report
 description: Writes the mandatory evidence-backed final report for a Spec Finder implementation task. Use after implementation and verification, before task completion.
-argument-hint: "[path to task_NN.md] [report path]"
 ---
 
 # Write a Spec Finder Task Report
 
 <HARD-GATE>
-Never report a passing test, completed requirement, or clean outcome without current evidence. Do not change task frontmatter status; the Spec Finder runtime owns it.
+Never report a passing test, completed requirement, or clean outcome without current evidence. Do not change task frontmatter status; the invoking runtime or manual execution orchestrator owns it.
 </HARD-GATE>
 
 1. Read the task, PRD, TechSpec, ADRs, `memory/MEMORY.md`, current `memory/task_NN.md`, current diff, and verification output.

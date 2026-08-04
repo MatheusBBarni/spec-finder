@@ -1,31 +1,130 @@
 ---
 name: sf-create-techspec
-description: Translates an approved PRD into an approved, codebase-informed technical specification in .spec-finder/tasks. Use for architecture and implementation design, not product discovery or task execution.
-argument-hint: "[feature slug]"
+description: Translates an approved PRD into an approved, codebase-informed Technical Specification through architecture research, technical clarification, explicit approach selection, ADR capture, requirement traceability, and whole-draft approval. Use for implementation design, not product discovery, task generation, or coding.
 ---
 
 # Create a Spec Finder TechSpec
 
 <HARD-GATE>
-Do not save `_techspec.md` until codebase exploration, technical clarification, approach selection, ADR creation, whole-draft review, and explicit user approval are complete. Ask one question per turn.
+- NEVER write or replace `_techspec.md` before source requirements, codebase exploration, relevant official documentation, technical clarification, explicit approach selection, ADR capture, complete draft review, and explicit user approval are complete.
+- NEVER propose architecture from memory when the repository or current documentation can verify it.
+- NEVER silently choose a material boundary, dependency, persistence, security, migration, or failure-policy decision.
+- NEVER skip design review because the change appears small.
+- NEVER require section-by-section approval; present one complete draft after the technical direction is selected.
 </HARD-GATE>
+
+## Interaction contract
+
+- Ask exactly one technical question per turn and wait for the answer.
+- Use the runtime's blocking question mechanism when available. Otherwise make the question the complete response and stop.
+- Prefer 2-3 concrete options plus `Other`, with the evidence-backed recommendation first.
+- Ask about HOW, WHERE, and WHICH only when the answer is not already dictated by approved requirements, repository conventions, or current official documentation.
+- Do not auto-resolve decisions that change public contracts, data ownership, security posture, migrations, dependencies, or required evidence.
+
+## Required inputs
+
+- A packet slug with an approved `_prd.md`.
+- Optional `_idea.md` and existing `_techspec.md` for context/update mode.
+
+If `_prd.md` is absent, stop and recommend `sf-create-prd`. Proceed from a bounded user description only after the user explicitly accepts the traceability gap; record that gap in the Executive Summary and Open Questions.
+
+## Mandatory phase checklist
+
+1. Load PRD, idea, ADRs, existing design, memory, and repository rules.
+2. Explore architecture, implementation seams, dependencies, tests, and build gates.
+3. Verify evolving libraries, SDKs, protocols, or platform constraints in official sources.
+4. Present technical evidence, conflicts, and unknowns.
+5. Ask 3-6 technical clarification questions.
+6. Present 2-3 technical approaches and obtain explicit selection.
+7. Record the primary design and other consequential choices in ADRs.
+8. Draft a traceable TechSpec, obtain explicit approval, save, and validate.
 
 ## Workflow
 
-1. Read `.spec-finder/tasks/<slug>/_prd.md`, `_idea.md` when present, existing `_techspec.md`, and all ADRs. If the PRD is absent, request a bounded product description.
-2. Explore the codebase for architecture, dependencies, conventions, tests, build gates, and integration boundaries. Present the findings before design questions.
-3. Ask 3-6 technical questions, one at a time, covering component boundaries, persistence/data, interfaces, integration, failure behavior, testing, security, and performance as relevant.
-4. Present 2-3 technical approaches with trade-offs. Wait for selection.
-5. Create at least one accepted ADR for the primary design. Create more only for consequential decisions.
-6. Draft the full TechSpec using `references/techspec-template.md`. Map every PRD goal and story to a component and testable contract.
-7. Present the complete draft for one review loop. Iterate until explicitly approved.
-8. Save `.spec-finder/tasks/<slug>/_techspec.md`. The next stage is `sf-create-tasks`.
+### 1. Load authoritative context
 
-## Rules
+- Read `_prd.md`, `_idea.md` when present, existing `_techspec.md`, `_tasks.md`, all ADRs, packet memory, repository instructions, and `.spec-finder/config.json` when relevant.
+- Extract every goal, story, capability, constraint, metric, risk, and open question into a requirements ledger with stable IDs.
+- In update mode, identify the requested delta and the downstream artifacts it may invalidate.
 
-- Technical focus: HOW, WHERE, WHICH.
-- Prefer existing modules and the smallest design that satisfies the PRD.
-- Core interface examples use the repository's language and stay under 20 lines each.
-- Every build-order step after the first names its dependencies.
-- English, active voice, explicit failure and security behavior.
+### 2. Research the implementation context
 
+**Repository exploration — always required**
+
+- Inspect architecture, module boundaries, domain models, existing interfaces, persistence, concurrency, configuration, error conventions, security boundaries, observability, tests, fixtures, and verification commands.
+- Trace relevant callers and consumers, not only the apparent target file.
+- Cite concrete paths and distinguish current behavior from proposed behavior.
+
+**External technical research — conditionally required**
+
+- When the design depends on an evolving library, SDK, protocol, CLI, cloud service, security standard, or platform capability, consult current primary documentation before recommending an approach.
+- Capture exact version or date, supported API/constraint, source URL, and design consequence.
+- Do not introduce a dependency based only on popularity or memory.
+
+Run independent exploration tracks concurrently when real delegation is available. Otherwise explore sequentially and do not claim independent confirmation.
+
+### 3. Present technical evidence
+
+Before questions, present:
+
+- **Existing architecture:** components, boundaries, and paths.
+- **Reusable patterns:** conventions the design should preserve.
+- **External constraints:** verified current documentation.
+- **Conflicts:** repository patterns or requirements that disagree.
+- **Unknowns:** decisions or spikes needed before implementation.
+
+If a conflict could change product behavior, stop and return it to the PRD owner/user rather than resolving it as a technical preference.
+
+### 4. Clarify material decisions
+
+- Ask 3-6 one-at-a-time questions covering only relevant dimensions: component ownership, state/data lifecycle, public interfaces, integration, compatibility/migration, failure/recovery, security/privacy, performance, observability, and test/platform evidence.
+- Skip dimensions already fixed by evidence; do not manufacture questions to reach a quota.
+- When uncertainty can be resolved with a bounded spike, offer the spike and its decision criterion instead of asking for a guess.
+
+### 5. Present technical approaches
+
+- Offer 2-3 viable designs. For each include component changes, data flow, affected contracts, migration path, failure behavior, security implications, testing burden, operational cost, reversibility, and rejected complexity.
+- Recommend the smallest design that satisfies every approved requirement and repository constraint.
+- State the primary trade-off explicitly and identify any prerequisite or evidence gap.
+- Wait for explicit user selection before creating an accepted ADR or drafting.
+
+### 6. Record ADRs
+
+- Read `references/adr-template.md` and allocate sequential zero-padded ADRs without replacing existing files.
+- Create at least one ADR for the selected primary technical approach.
+- Create additional ADRs only for consequential independent decisions such as persistence, protocol, compatibility, security boundary, or migration strategy.
+- Record evidence, rejected alternatives, consequences, risks, rollback/reversal considerations, and implementation notes.
+
+### 7. Draft the TechSpec
+
+- Read `references/techspec-template.md` and fill every applicable section.
+- Map every PRD goal, story, feature, constraint, and metric to components, interfaces, and verification in a traceability matrix. No requirement may disappear silently.
+- Use repository language for interface examples and keep each example under 20 lines.
+- Prefer existing modules and dependencies. Justify every new package, directory, abstraction, or service.
+- Specify success and failure behavior, security/privacy, migration/compatibility, observability, rollback, and platform-specific evidence.
+- Provide dependency-ordered build sequencing; every step after the first names prerequisites.
+- End with links to every relevant ADR.
+
+### 8. Review, save, and validate
+
+- Present one complete draft and ask for `Approve`, `Adjust`, `Rewrite`, or `Discard`.
+- Apply feedback and present the complete current draft again.
+- Write `.spec-finder/tasks/<slug>/_techspec.md` only after explicit approval.
+- Re-read the saved file and validate requirement traceability, evidence citations, interfaces, failure behavior, security, tests, sequencing, risks, and ADR links.
+- Point to `sf-create-tasks` as the next step.
+
+## Anti-patterns
+
+- Greenfield architecture that ignores existing seams.
+- Technology selection without a requirements or repository rationale.
+- “Handle errors” without named failure modes and recovery behavior.
+- Tests that do not map to contracts and requirements.
+- Copying PRD prose instead of translating it into technical obligations.
+- Hiding unresolved decisions as implementation details.
+
+## Failure rules
+
+- If codebase evidence conflicts, present both patterns and their actual usage before recommending one.
+- If official documentation is unavailable for a critical external dependency, stop or obtain explicit approval for a documented research-limited design.
+- If an approved product requirement is technically infeasible, do not weaken it silently; return the conflict for decision.
+- Preserve unrelated approved sections in update mode and identify downstream task files that require regeneration.

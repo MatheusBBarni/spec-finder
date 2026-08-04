@@ -114,6 +114,8 @@ function implementationPrompt(root: string, packetDirectory: string, task: TaskF
   const memory = taskMemoryPaths(packetDirectory, task.id)
   return `You are executing a Spec Finder implementation task in ${root}.
 
+Use the sf-execute-task skill to execute ${task.path}. Follow the skill's hard gates and lifecycle contract. If the skill is unavailable, stop and report that blocker instead of silently substituting a generic workflow.
+
 Read the complete task at ${task.path}. Read ${prd} and ${techspec} when they exist, plus every ADR referenced by the task. Treat the task requirements and repository instructions as authoritative.
 
 Use the sf-memory skill before editing. Read shared memory at ${memory.shared} and current task memory at ${memory.task}. Keep task memory current during execution and update it before finishing. Promote only durable cross-task context to shared memory.

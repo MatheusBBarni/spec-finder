@@ -59,6 +59,8 @@ The `.spec-finder/config.json` and `.spec-finder/tasks/` scaffolding always rema
 | `sf-memory` | `memory/MEMORY.md` and `memory/task_NN.md` |
 | `sf-execute-task` | bounded implementation and verification |
 | `sf-task-report` | `reports/task_NN.md` |
+| `sf-batch-tasks` | dependency-safe manual range execution |
+| `sf-archive-tasks` | completed-packet archival and reports |
 
 Every stage keeps the approval gates from the original Compozy skills. Research and interactive decisions happen before artifacts are saved. Tasks form an acyclic dependency graph and carry their own tests.
 

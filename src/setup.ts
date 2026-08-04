@@ -26,6 +26,8 @@ export const SPEC_FINDER_SKILLS = [
   "sf-memory",
   "sf-execute-task",
   "sf-task-report",
+  "sf-batch-tasks",
+  "sf-archive-tasks",
 ] as const
 
 export interface SetupWorkspaceOptions {

@@ -11,6 +11,7 @@ describe("task engine", () => {
     const packet = join(root, ".spec-finder", "tasks", "demo")
     await mkdir(packet, { recursive: true })
     const taskPath = join(packet, "task_01.md")
+    const promptLog = join(root, "prompts.log")
     await writeFile(taskPath, `---
 status: pending
 title: Build the mock
@@ -42,7 +43,12 @@ dependencies: []
       signal: new AbortController().signal,
       emit: () => {},
       interactivePermissions: false,
-      providerLaunch: { command: process.execPath, args: [fixture], env: {}, authMethod: null },
+      providerLaunch: {
+        command: process.execPath,
+        args: [fixture],
+        env: { SPEC_FINDER_TEST_PROMPT_LOG: promptLog },
+        authMethod: null,
+      },
     })
 
     expect(result).toEqual({ ok: true, completed: 1, failed: 0, blocked: 0 })
@@ -50,5 +56,6 @@ dependencies: []
     expect(await readFile(join(packet, "memory", "MEMORY.md"), "utf8")).toContain("## Shared Decisions")
     expect(await readFile(join(packet, "memory", "task_01.md"), "utf8")).toContain("- Build the mock")
     expect(await readFile(join(packet, "reports", "task_01.md"), "utf8")).toContain("Final verdict: completed")
+    expect(await readFile(promptLog, "utf8")).toContain(`Use the sf-execute-task skill to execute ${taskPath}.`)
   })
 })

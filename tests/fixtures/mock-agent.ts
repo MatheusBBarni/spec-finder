@@ -1,4 +1,5 @@
 import { Readable, Writable } from "node:stream"
+import { appendFile } from "node:fs/promises"
 import * as acp from "@agentclientprotocol/sdk"
 
 const stream = acp.ndJsonStream(
@@ -19,6 +20,9 @@ acp
       .filter((block): block is Extract<typeof block, { type: "text" }> => block.type === "text")
       .map((block) => block.text)
       .join("\n")
+    if (process.env.SPEC_FINDER_TEST_PROMPT_LOG) {
+      await appendFile(process.env.SPEC_FINDER_TEST_PROMPT_LOG, `${prompt}\n--- TURN ---\n`)
+    }
     await context.client.notify(acp.methods.client.session.update, {
       sessionId: context.params.sessionId,
       update: {
