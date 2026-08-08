@@ -65,6 +65,14 @@ export function applySessionUpdate(
                 .join("\n"),
         },
       ]
+    case "available_commands_update":
+    case "current_mode_update":
+    case "config_option_update":
+      // These updates describe ACP capabilities and session setup rather than
+      // task progress. The cockpit already reports ACP initialization as a
+      // compact activity, so rendering their full payload only buries useful
+      // startup feedback beneath protocol metadata.
+      return entries
     default:
       return appendUnknownUpdate(entries, update, sequence)
   }
@@ -183,19 +191,90 @@ function formatToolDetails(
   update: Extract<SessionUpdate, { sessionUpdate: "tool_call" | "tool_call_update" }>,
 ): string {
   const details: string[] = []
+  const isExecute = update.kind === "execute"
 
-  if (update.kind) details.push(`Kind: ${humanize(update.kind)}`)
-  if (update.content) details.push(...update.content.map(formatToolContent))
+  if (update.kind && !isExecute) details.push(`Kind: ${humanize(update.kind)}`)
+  if (update.content) {
+    details.push(...update.content
+      .map((content) => formatToolContent(content, { hideTerminal: isExecute }))
+      .filter((content): content is string => content.length > 0))
+  }
   if (update.locations) {
     details.push(`Locations: ${update.locations.map((location) => `${location.path}${location.line == null ? "" : `:${location.line}`}`).join(", ")}`)
   }
-  if (update.rawInput !== undefined) details.push(`Input: ${stableStringify(update.rawInput)}`)
-  if (update.rawOutput !== undefined) details.push(`Output: ${stableStringify(update.rawOutput)}`)
+  if (update.rawInput !== undefined) details.push(formatToolInput(update.rawInput, isExecute))
+  if (update.rawOutput !== undefined) details.push(formatToolOutput(update.rawOutput, isExecute))
 
-  return details.join("\n")
+  return details.filter((detail) => detail.length > 0).join("\n")
 }
 
-function formatToolContent(content: ToolCallContent): string {
+function formatToolInput(input: unknown, isExecute: boolean): string {
+  const value = decodeStructuredValue(input)
+  if (isExecute && isRecord(value)) {
+    const cwd = value.cwd
+    return typeof cwd === "string" ? `Working directory: ${cwd}` : ""
+  }
+
+  return `Input:\n${formatStructuredValue(value)}`
+}
+
+function formatToolOutput(output: unknown, isExecute: boolean): string {
+  const value = decodeStructuredValue(output)
+  if (isRecord(value)) {
+    const formattedOutput = typeof value.formatted_output === "string"
+      ? value.formatted_output
+      : typeof value.formattedOutput === "string"
+        ? value.formattedOutput
+        : undefined
+
+    if (formattedOutput !== undefined) {
+      const metadata = Object.fromEntries(
+        Object.entries(value).filter(([key]) => key !== "formatted_output" && key !== "formattedOutput"),
+      )
+      const details = formatToolMetadata(metadata)
+      const body = formatTerminalOutput(formattedOutput)
+      const content = [details, body].filter((part) => part.length > 0).join("\n\n")
+      return isExecute ? content : `Output:\n${content}`
+    }
+  }
+
+  const content = formatStructuredValue(value)
+  return isExecute ? content : `Output:\n${content}`
+}
+
+function formatToolMetadata(metadata: Record<string, unknown>): string {
+  return Object.entries(metadata)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${humanize(key)}: ${formatStructuredValue(value)}`)
+    .join("\n")
+}
+
+function formatTerminalOutput(output: string): string {
+  return formatStructuredValue(decodeStructuredValue(output))
+}
+
+function formatStructuredValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : stableStringify(value)
+}
+
+function decodeStructuredValue(value: unknown): unknown {
+  if (typeof value !== "string") return value
+
+  const trimmed = value.trim()
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return value
+
+  try {
+    return JSON.parse(trimmed) as unknown
+  } catch {
+    return value
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+}
+
+function formatToolContent(content: ToolCallContent, options: { hideTerminal: boolean }): string {
   switch (content.type) {
     case "content":
       return formatContentBlock(content.content)
@@ -204,7 +283,7 @@ function formatToolContent(content: ToolCallContent): string {
       return `Diff: ${content.path}${before}\nAfter:\n${content.newText}`
     }
     case "terminal":
-      return `Terminal: ${content.terminalId}`
+      return options.hideTerminal ? "" : `Terminal: ${content.terminalId}`
   }
 }
 

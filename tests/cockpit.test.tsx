@@ -345,6 +345,39 @@ describe("read-only progress cockpit", () => {
     }
   })
 
+  test("renders executed command results without escaped ACP payload fields", async () => {
+    const store = startedStore([task(1, "Terminal output")])
+    store.consume({ type: "session_update", taskId: "task_01", sessionId: "test-session", update: {
+      sessionUpdate: "tool_call",
+      toolCallId: "exec-1",
+      title: "rtk cat package.json",
+      kind: "execute",
+      status: "completed",
+      content: [{ type: "terminal", terminalId: "exec-1" }],
+      rawInput: {
+        command: "rtk cat package.json",
+        cwd: "/workspace/spec-finder",
+      },
+      rawOutput: {
+        exit_code: 0,
+        formatted_output: '{\n  "name": "spec-finder"\n}',
+      },
+    } })
+    const screen = await render(store, 160, 40)
+
+    try {
+      const frame = screen.captureCharFrame()
+      expect(frame).toContain("◆ Tool · rtk cat package.json · completed")
+      expect(frame).toContain("Working directory: /workspace/spec-finder")
+      expect(frame).toContain("Exit code: 0")
+      expect(frame).toContain('"name": "spec-finder"')
+      expect(frame).not.toContain("formatted_output")
+      expect(frame).not.toContain("\\n")
+    } finally {
+      await destroy(screen)
+    }
+  })
+
   test("renders compact fallback and reduced-color semantics without permission or workflow controls", async () => {
     const store = startedStore([task(1, "Read-only task")])
     store.consume({ type: "task_status", taskId: "task_01", status: "failed" })

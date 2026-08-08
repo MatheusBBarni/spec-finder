@@ -19,6 +19,10 @@
 - `runCommand` currently extracts the first non-flag token and invokes one packet; batch parsing must replace that behavior only on the batch branch.
 - `run_started` resets the store and task IDs/transcripts are bare, so nested packet lifecycle events cannot be forwarded directly.
 - Existing OpenTUI tests use fixed frames, keyboard actions, compact sizes, and reduced-color assertions.
+- `src/batch.ts` now owns the shared `PacketOutcome`, `PacketSummary`, `BatchResult`, `BatchRunOptions`, and `PacketRunner` contracts plus the `parseMultipleArgs` boundary; downstream coordination should extend these contracts rather than redefine them.
+- Batch parsing delegates slug syntax to the exported `isValidTaskSlug` helper in `src/tasks.ts`, which remains the single slug grammar used by packet loading.
+- `runBatch`/`preflightBatch` now load and validate the complete slug sequence before invoking any runner; the coordinator retains read-only execution-order snapshots, runs serially with the supplied signal/config, and returns `not_started` summaries after the first stop.
+- Coordinator cancellation classification covers shared aborts, cancellation-shaped runner errors/results, and ACP stop activity while ordinary runner failures remain `failed`; empty execution orders map to successful `already_complete` summaries.
 
 ## Open Risks
 
@@ -30,3 +34,5 @@
 
 - Execute tasks in numeric order. `task_04` and `task_05` are parallelizable after `task_03`, but both must complete before `task_06`.
 - Every task requires a focused test run, repository gate, memory update, and later `reports/task_NN.md` evidence.
+- `task_02` can consume the parsed `mode: "batch"` slugs and ordered runtime passthrough tokens without changing the existing single-run engine/result contract.
+- `task_03` can consume `runBatch` summaries and the forwarded packet event listener; command integration may supply `root`, interactive permission mode, and an optional provider-launch seam through the additive batch options.

@@ -5,6 +5,7 @@ import { z } from "zod"
 import { specPath, TASKS_DIR } from "./paths.ts"
 
 const TASK_PATTERN = /^task_(\d+)\.md$/
+const TASK_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const statusSchema = z.enum(["pending", "in_progress", "completed", "done", "finished", "failed", "blocked"])
 export type TaskStatus = z.infer<typeof statusSchema>
 
@@ -32,6 +33,10 @@ export interface TaskIssue {
   message: string
 }
 
+export function isValidTaskSlug(slug: string): boolean {
+  return TASK_SLUG_PATTERN.test(slug)
+}
+
 function splitFrontmatter(source: string): { raw: string; body: string } {
   const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/)
   if (!match?.[1]) throw new Error("missing YAML frontmatter")
@@ -52,7 +57,7 @@ export function parseTask(path: string, source: string): TaskFile {
 }
 
 export async function loadTaskPacket(root: string, slug: string): Promise<{ directory: string; tasks: TaskFile[] }> {
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) throw new Error(`invalid task slug: ${slug}`)
+  if (!isValidTaskSlug(slug)) throw new Error(`invalid task slug: ${slug}`)
   const directory = specPath(root, TASKS_DIR, slug)
   const files = (await readdir(directory)).filter((name) => TASK_PATTERN.test(name)).sort()
   if (files.length === 0) throw new Error(`no task_XX.md files found in ${directory}`)
@@ -126,4 +131,3 @@ export async function updateTaskStatus(task: TaskFile, status: TaskStatus): Prom
   await writeFile(task.path, source)
   return { ...task, source, frontmatter: next }
 }
-
