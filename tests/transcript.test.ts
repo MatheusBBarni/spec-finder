@@ -41,6 +41,35 @@ describe("task transcript normalization", () => {
     ])
   })
 
+  test("scopes reused message and tool IDs to their ACP turn", () => {
+    let entries: readonly TranscriptEntry[] = []
+    entries = applySessionUpdate(entries, message("reused", "Implementation"), 1, "implementation")
+    entries = applySessionUpdate(entries, message("reused", " report"), 2, "report")
+    entries = applySessionUpdate(entries, {
+      sessionUpdate: "tool_call",
+      toolCallId: "reused-tool",
+      title: "Implementation tool",
+      status: "completed",
+    }, 3, "implementation")
+    entries = applySessionUpdate(entries, {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "reused-tool",
+      status: "completed",
+      rawOutput: { turn: "report" },
+    }, 4, "report")
+
+    expect(entries.map((entry) => entry.id)).toEqual([
+      "agent:implementation:reused",
+      "agent:report:reused",
+      "tool:implementation:reused-tool",
+      "tool:report:reused-tool",
+    ])
+    expect(entries[0]?.text).toBe("Implementation")
+    expect(entries[1]?.text).toBe(" report")
+    expect(entries[2]?.label).toBe("Tool · Implementation tool")
+    expect(entries[3]?.text).toContain('"turn": "report"')
+  })
+
   test("merges a tool update received before its initial call without losing details", () => {
     const earlyUpdate = {
       sessionUpdate: "tool_call_update",

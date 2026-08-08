@@ -62,8 +62,8 @@ describe("cockpit store", () => {
   test("keeps task activity and streamed session updates isolated", () => {
     const store = startedStore([task(1, "First"), task(2, "Second")])
     store.consume({ type: "activity", taskId: "task_01", message: "Inspecting task one" })
-    store.consume({ type: "session_update", taskId: "task_02", update: message("message-2", "Task two") })
-    store.consume({ type: "session_update", taskId: "task_02", update: message("message-2", " output") })
+    store.consume({ type: "session_update", taskId: "task_02", sessionId: "test-session", update: message("message-2", "Task two") })
+    store.consume({ type: "session_update", taskId: "task_02", sessionId: "test-session", update: message("message-2", " output") })
     store.consume({ type: "activity", taskId: "task_02", message: "Finished task two fixture" })
 
     expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).toEqual([

@@ -38,17 +38,18 @@ export function applySessionUpdate(
   entries: readonly TranscriptEntry[],
   update: SessionUpdate,
   sequence: number,
+  sessionId?: string,
 ): readonly TranscriptEntry[] {
   switch (update.sessionUpdate) {
     case "user_message_chunk":
-      return mergeContentChunk(entries, update, sequence, "message", "User", "user")
+      return mergeContentChunk(entries, update, sequence, "message", "User", "user", sessionId)
     case "agent_message_chunk":
-      return mergeContentChunk(entries, update, sequence, "message", "Agent", "agent")
+      return mergeContentChunk(entries, update, sequence, "message", "Agent", "agent", sessionId)
     case "agent_thought_chunk":
-      return mergeContentChunk(entries, update, sequence, "thought", "Thought", "thought")
+      return mergeContentChunk(entries, update, sequence, "thought", "Thought", "thought", sessionId)
     case "tool_call":
     case "tool_call_update":
-      return mergeToolUpdate(entries, update, sequence)
+      return mergeToolUpdate(entries, update, sequence, sessionId)
     case "plan":
       return [
         ...entries,
@@ -101,9 +102,12 @@ function mergeContentChunk(
   kind: "message" | "thought",
   label: string,
   identityPrefix: "user" | "agent" | "thought",
+  sessionId?: string,
 ): readonly TranscriptEntry[] {
   const sourceId = update.messageId || undefined
-  const id = sourceId ? `${identityPrefix}:${sourceId}` : `${identityPrefix}:${sequence}`
+  const id = sourceId
+    ? scopedTranscriptId(identityPrefix, sourceId, sessionId)
+    : scopedTranscriptId(identityPrefix, String(sequence), sessionId)
   const text = formatContentBlock(update.content)
   const existingIndex = sourceId ? entries.findIndex((entry) => entry.id === id) : -1
 
@@ -136,8 +140,9 @@ function mergeToolUpdate(
   entries: readonly TranscriptEntry[],
   update: Extract<SessionUpdate, { sessionUpdate: "tool_call" | "tool_call_update" }>,
   sequence: number,
+  sessionId?: string,
 ): readonly TranscriptEntry[] {
-  const id = `tool:${update.toolCallId}`
+  const id = scopedTranscriptId("tool", update.toolCallId, sessionId)
   const existingIndex = entries.findIndex((entry) => entry.id === id)
   const existing = existingIndex >= 0 ? entries[existingIndex] : undefined
   const title = update.title?.trim()
@@ -160,6 +165,10 @@ function mergeToolUpdate(
 
   if (existingIndex < 0) return [...entries, next]
   return replaceAt(entries, existingIndex, next)
+}
+
+function scopedTranscriptId(prefix: string, sourceId: string, sessionId?: string): string {
+  return sessionId ? `${prefix}:${sessionId}:${sourceId}` : `${prefix}:${sourceId}`
 }
 
 function resolveToolStatus(

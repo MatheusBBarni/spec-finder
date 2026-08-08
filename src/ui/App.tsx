@@ -38,7 +38,7 @@ const colors = {
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const
 const SPINNER_INTERVAL_MS = 120
 
-interface TaskTiming {
+export interface TaskTiming {
   startedAt: number
   elapsedMs?: number
 }
@@ -576,9 +576,10 @@ function progressBar(state: CockpitState, width: number): string {
   return "█".repeat(filled) + "░".repeat(width - filled)
 }
 
-function taskElapsedText(task: CockpitTask, timings: Map<string, TaskTiming>, now: number): string {
+export function taskElapsedText(task: CockpitTask, timings: Map<string, TaskTiming>, now: number): string {
+  if (task.status === "pending" || task.status === "blocked") return "—"
   const timing = timings.get(task.id)
-  if (!timing) return "00:00"
+  if (!timing) return "unavailable"
   const elapsed = timing.elapsedMs ?? Math.max(0, now - timing.startedAt)
   return formatElapsed(elapsed)
 }

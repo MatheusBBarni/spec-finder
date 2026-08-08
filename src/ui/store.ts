@@ -104,7 +104,7 @@ export class CockpitStore {
         else this.consumeRunActivity(event.message)
         break
       case "session_update":
-        this.consumeSessionUpdate(event.taskId, event.update)
+        this.consumeSessionUpdate(event.taskId, event.sessionId, event.update)
         break
       case "runtime_option": {
         const detail = event.detail === undefined ? {} : { detail: event.detail }
@@ -228,10 +228,10 @@ export class CockpitStore {
     })
   }
 
-  private consumeSessionUpdate(taskId: string, update: Extract<RunEvent, { type: "session_update" }>["update"]): void {
+  private consumeSessionUpdate(taskId: string, sessionId: string, update: Extract<RunEvent, { type: "session_update" }>["update"]): void {
     const current = this.state.transcripts[taskId]
     if (!current) return
-    const next = applySessionUpdate(current, update, this.nextSequence())
+    const next = applySessionUpdate(current, update, this.nextSequence(), sessionId)
     this.set({
       ...this.state,
       transcripts: { ...this.state.transcripts, [taskId]: next },

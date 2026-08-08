@@ -6,12 +6,33 @@ import { testRender } from "@opentui/react/test-utils"
 import { act } from "react"
 import { DEFAULT_CONFIG, type SpecFinderConfig } from "../src/config.ts"
 import type { TaskFile, TaskStatus } from "../src/tasks.ts"
-import { App } from "../src/ui/App.tsx"
+import { App, taskElapsedText, type TaskTiming } from "../src/ui/App.tsx"
 import { CockpitStore } from "../src/ui/store.ts"
 
 type TestScreen = Awaited<ReturnType<typeof testRender>>
 
 describe("read-only progress cockpit", () => {
+  test("renders honest timer placeholders and observed durations", () => {
+    const store = startedStore([
+      task(1, "Pending"),
+      task(2, "Blocked", [], "blocked"),
+      task(3, "Running", [], "in_progress"),
+      task(4, "Completed", [], "completed"),
+      task(5, "Observed complete", [], "completed"),
+    ])
+    const tasks = store.getSnapshot().tasks
+    const timings = new Map<string, TaskTiming>([
+      ["task_03", { startedAt: 1_000 }],
+      ["task_05", { startedAt: 1_000, elapsedMs: 2_500 }],
+    ])
+
+    expect(taskElapsedText(tasks[0]!, timings, 5_000)).toBe("—")
+    expect(taskElapsedText(tasks[1]!, timings, 5_000)).toBe("—")
+    expect(taskElapsedText(tasks[2]!, timings, 3_500)).toBe("00:02")
+    expect(taskElapsedText(tasks[3]!, timings, 5_000)).toBe("unavailable")
+    expect(taskElapsedText(tasks[4]!, timings, 5_000)).toBe("00:02")
+  })
+
   test("renders orientation, truthful option outcomes, task semantics, and selected history at required sizes", async () => {
     const store = startedStore([
       task(1, "Inspect packet", [], "completed"),
@@ -75,7 +96,7 @@ describe("read-only progress cockpit", () => {
 
   test("collapses repeated blank lines from streamed ACP text", async () => {
     const store = startedStore([task(1, "Whitespace fixture")])
-    store.consume({ type: "session_update", taskId: "task_01", update: {
+    store.consume({ type: "session_update", taskId: "task_01", sessionId: "test-session", update: {
       sessionUpdate: "agent_message_chunk",
       messageId: "whitespace",
       content: { type: "text", text: `before${"\n".repeat(8)}after` },
@@ -306,7 +327,7 @@ describe("read-only progress cockpit", () => {
         detail: "Waiting for capacity",
       } as unknown as SessionUpdate,
     ]
-    updates.forEach((update) => store.consume({ type: "session_update", taskId: "task_01", update }))
+    updates.forEach((update) => store.consume({ type: "session_update", taskId: "task_01", sessionId: "test-session", update }))
     store.consume({ type: "activity", taskId: "task_01", message: "Runtime activity" })
     const screen = await render(store, 120, 60)
 

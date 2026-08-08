@@ -96,7 +96,7 @@ export async function runAcpTurn(options: AcpTurnOptions): Promise<AcpTurnResult
         for (;;) {
           const message = await Promise.race([session.nextUpdate(), failure])
           if (message.kind === "stop") return { stopReason: message.stopReason }
-          options.emit({ type: "session_update", taskId: options.taskId, update: message.update })
+          options.emit({ type: "session_update", taskId: options.taskId, sessionId: session.sessionId, update: message.update })
         }
       })
     })
