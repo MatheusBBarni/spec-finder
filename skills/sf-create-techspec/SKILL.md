@@ -17,16 +17,20 @@ description: Translates an approved PRD into an approved, codebase-informed Tech
 
 - Ask exactly one technical question per turn and wait for the answer.
 - Use the runtime's blocking question mechanism when available. Otherwise make the question the complete response and stop.
-- Prefer 2-3 concrete options plus `Other`, with the evidence-backed recommendation first.
+- Present every answer choice with sequential uppercase labels: `A.`, `B.`, `C.`, and so on. Never present selectable answers as unlabeled bullets.
+- Every question must provide 2-3 concrete suggested answers. Add `Other` whenever those answers are not exhaustive, with the evidence-backed recommendation first as `A. (Recommended)`. Label `Other` with the next available letter.
+- End every choice prompt with: `Reply with the letter (for example, A), or the letter plus context.` Accept lowercase letters and full option text too.
 - Ask about HOW, WHERE, and WHICH only when the answer is not already dictated by approved requirements, repository conventions, or current official documentation.
 - Do not auto-resolve decisions that change public contracts, data ownership, security posture, migrations, dependencies, or required evidence.
+
+Read `references/question-protocol.md` before asking questions.
 
 ## Required inputs
 
 - A packet slug with an approved `_prd.md`.
 - Optional `_idea.md` and existing `_techspec.md` for context/update mode.
 
-If `_prd.md` is absent, stop and recommend `sf-create-prd`. Proceed from a bounded user description only after the user explicitly accepts the traceability gap; record that gap in the Executive Summary and Open Questions.
+If `_prd.md` is absent, stop and present lettered choices: `A. (Recommended) Create the PRD first`, `B. Proceed from a bounded description and accept the traceability gap`, and `C. Other`. Proceed without a PRD only after the user selects the traceability-gap option; record that gap in the Executive Summary and Open Questions.
 
 ## Mandatory phase checklist
 
@@ -83,7 +87,7 @@ If a conflict could change product behavior, stop and return it to the PRD owner
 
 ### 5. Present technical approaches
 
-- Offer 2-3 viable designs. For each include component changes, data flow, affected contracts, migration path, failure behavior, security implications, testing burden, operational cost, reversibility, and rejected complexity.
+- Offer 2-3 viable designs labeled `A.`, `B.`, and `C.` in presentation order; label another design with the next letter. For each include component changes, data flow, affected contracts, migration path, failure behavior, security implications, testing burden, operational cost, reversibility, and rejected complexity.
 - Recommend the smallest design that satisfies every approved requirement and repository constraint.
 - State the primary trade-off explicitly and identify any prerequisite or evidence gap.
 - Wait for explicit user selection before creating an accepted ADR or drafting.
@@ -107,7 +111,7 @@ If a conflict could change product behavior, stop and return it to the PRD owner
 
 ### 8. Review, save, and validate
 
-- Present one complete draft and ask for `Approve`, `Adjust`, `Rewrite`, or `Discard`.
+- Present one complete draft and ask with `A. Approve`, `B. Adjust`, `C. Rewrite`, and `D. Discard`.
 - Apply feedback and present the complete current draft again.
 - Write `.spec-finder/tasks/<slug>/_techspec.md` only after explicit approval.
 - Re-read the saved file and validate requirement traceability, evidence citations, interfaces, failure behavior, security, tests, sequencing, risks, and ADR links.
@@ -125,6 +129,6 @@ If a conflict could change product behavior, stop and return it to the PRD owner
 ## Failure rules
 
 - If codebase evidence conflicts, present both patterns and their actual usage before recommending one.
-- If official documentation is unavailable for a critical external dependency, stop or obtain explicit approval for a documented research-limited design.
+- If official documentation is unavailable for a critical external dependency, present lettered choices to wait for documentation, proceed with a documented research-limited design, or provide another direction.
 - If an approved product requirement is technically infeasible, do not weaken it silently; return the conflict for decision.
 - Preserve unrelated approved sections in update mode and identify downstream task files that require regeneration.

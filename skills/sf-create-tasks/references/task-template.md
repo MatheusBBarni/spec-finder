@@ -12,8 +12,16 @@ dependencies: []
 
 [In 2-3 sentences, state the independently testable outcome, why it matters, and its place in the approved design.]
 
+## Source Artifacts
+
+- PRD: `.spec-finder/tasks/<slug>/_prd.md`
+- TechSpec: `.spec-finder/tasks/<slug>/_techspec.md`
+
+Replace `<slug>` with the current packet slug before writing the task. Never leave this instruction or the placeholder in generated output.
+
 <critical>
-- Read the PRD, TechSpec, relevant ADRs, repository instructions, and current Git state before editing.
+- Read `.spec-finder/tasks/<slug>/_prd.md`, `.spec-finder/tasks/<slug>/_techspec.md`, relevant packet ADRs, repository instructions, and current Git state before editing. These paths must contain the current packet slug in generated output.
+- Treat this task's numeric ID as its canonical execution position; every declared dependency must already be completed and have a lower numeric ID.
 - Use `sf-memory`; read `memory/MEMORY.md` and `memory/task_NN.md` before editing and update memory before finishing.
 - Implement only this task; preserve unrelated work and do not absorb follow-up scope.
 - Reference TechSpec sections for design details instead of duplicating interfaces or architecture.

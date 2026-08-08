@@ -19,7 +19,9 @@ Turn a raw idea into the approved foundation for the Spec Finder pipeline.
 
 - Ask exactly one question per turn and wait for the answer.
 - Use the runtime's blocking question mechanism when available. If unavailable, make the question the complete response and stop.
-- Prefer 2-3 concrete options plus an `Other` path. Put the evidence-backed recommendation first and explain its trade-off.
+- Present every answer choice with sequential uppercase labels: `A.`, `B.`, `C.`, and so on. Never present selectable answers as unlabeled bullets.
+- Every question must provide 2-3 concrete suggested answers. Add an `Other` path whenever those answers are not exhaustive. Put the evidence-backed recommendation first as `A. (Recommended)` and explain its trade-off. Label `Other` with the next available letter.
+- End every choice prompt with: `Reply with the letter (for example, A), or the letter plus context.` Accept lowercase letters and full option text too.
 - Do not ask for information that repository or web research can answer.
 - Do not auto-resolve a decision that changes scope, target user, success metrics, or the selected opportunity.
 
@@ -76,7 +78,7 @@ Run both tracks concurrently when the runtime supports real parallel work; other
 - Record source URL, publication/update date when available, supported claim, and relevance.
 - Do not turn absence of evidence into evidence of absence.
 
-If external research is unavailable, disclose exactly what is missing and ask the user whether to proceed with a research-limited artifact or wait. Do not call the research phase complete without that decision.
+If external research is unavailable, disclose exactly what is missing and ask with lettered choices whether to proceed with a research-limited artifact, wait, or provide another direction. Do not call the research phase complete without that decision.
 
 ### 4. Present evidence and viability
 
@@ -95,7 +97,7 @@ Read `references/council.md` and dispatch 3-5 independent advisors through the h
 
 Require opening positions, steel-manned rebuttals, concessions or hold-firm statements, position evolution, unresolved tensions, and synthesis. Never simulate multiple advisors while claiming independent review.
 
-If real delegation is unavailable, disclose the limitation and ask whether to proceed with a labeled single-agent structured critique. This is a material evidence-quality decision.
+If real delegation is unavailable, disclose the limitation and ask with lettered choices whether to proceed with a labeled single-agent structured critique, stop, or provide another direction. This is a material evidence-quality decision.
 
 ### 6. Scan opportunities and decide
 
@@ -105,7 +107,7 @@ Read `references/product-strategist.md`. Compare at most three directions:
 - a smaller essence-first version;
 - a more ambitious or adjacent higher-leverage version.
 
-Score each with the same viability framework. Recommend one based on evidence, name its principal cost, and ask the user to select original, alternative, hybrid, or another direction. Do not draft until the user decides.
+Score each with the same viability framework. Recommend one based on evidence, name its principal cost, and present original, alternative, hybrid, and another direction as lettered answers. Do not draft until the user decides.
 
 ### 7. Record the scope decision
 
@@ -119,7 +121,7 @@ Score each with the same viability framework. Recommend one based on evidence, n
 - Read `references/idea-template.md` and fill every mandatory section.
 - Separate sourced facts from inference; cite research near the claim it supports.
 - Include 3-10 prioritized features, 3-6 measurable KPIs, at least three justified V1 exclusions, council tensions, ADR links, and unresolved questions.
-- Present the entire draft once. Ask for `Approve`, `Adjust`, `Rewrite`, or `Discard`.
+- Present the entire draft once. Ask with `A. Approve`, `B. Adjust`, `C. Rewrite`, and `D. Discard`.
 - On revision, present the complete revised draft again. Approval must apply to the current version.
 
 ### 9. Save

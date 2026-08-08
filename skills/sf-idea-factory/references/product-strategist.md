@@ -17,6 +17,6 @@ For each state:
 - reversibility;
 - Impact, Reach, Frequency, Differentiation, Defensibility, and Feasibility scores.
 
-Recommend `Original`, `Alternative`, or `Hybrid`, cite the decisive evidence, and name what the recommendation sacrifices. The user must select the direction before drafting.
+Recommend `Original`, `Alternative`, or `Hybrid`, cite the decisive evidence, and name what the recommendation sacrifices. Present the directions as `A.`, `B.`, and `C.` with the recommended direction first as `A. (Recommended)`; use `D. Other` for a different direction. The user must select a lettered direction before drafting.
 
 Look for leverage in speed, automation, intelligence, integration, collaboration, personalization, visibility, confidence, accessibility, and compounding data or habit effects. Do not add features merely to make the idea larger.

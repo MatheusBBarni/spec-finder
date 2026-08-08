@@ -12,12 +12,19 @@
 
 - Task filenames match `task_\d+.md`, normally zero-padded: `task_01.md`.
 - Meta documents use leading underscores: `_idea.md`, `_prd.md`, `_techspec.md`, `_tasks.md`.
-- Dependencies reference existing task IDs and form an acyclic graph.
+- Numeric task IDs are the canonical recommended execution order, assigned only after the logical dependency graph is complete.
+- IDs are contiguous from `task_01` through `task_NN` with no gaps in a newly generated packet.
+- Dependencies reference existing task IDs, form an acyclic graph, and always point to a strictly lower numeric ID.
+- When multiple tasks are simultaneously runnable, order them by critical-path impact, downstream work unlocked, shared-contract or migration readiness, risk reduction, and stable source-requirement order.
+- Parallelizable tasks retain deterministic numeric positions and are labeled as parallelizable in `_tasks.md`; parallelism never creates forward dependencies.
 - Completed aliases are `completed`, `done`, and `finished`.
+
+For regeneration, never silently renumber existing tasks. If current IDs violate this ordering contract, require explicit approval through lettered answers for a renumbering migration covering task files, dependencies, memory files, reports, and `_tasks.md` references.
 
 ## Required body sections
 
 - Overview
+- Source Artifacts
 - `<critical>` and `<requirements>` blocks
 - Subtasks
 - Implementation Details with Relevant Files and Dependent Files
@@ -27,3 +34,10 @@
 - Success Criteria
 
 Every task also has `memory/task_NN.md` and requires `reports/task_NN.md` before completion.
+
+## Source artifact binding
+
+- `## Source Artifacts` names the task packet's exact repository-relative `.spec-finder/tasks/<actual-slug>/_prd.md` and `.spec-finder/tasks/<actual-slug>/_techspec.md` paths.
+- The `<critical>` block repeats those exact paths in its read-before-edit instruction.
+- Generated tasks contain neither an unresolved `<slug>` placeholder nor generic-only instructions such as "read the PRD" or "read the TechSpec".
+- If the user explicitly approved higher-level tasks without a TechSpec, name the expected packet-local `_techspec.md` path as unavailable and do not direct the executor to search for another TechSpec.

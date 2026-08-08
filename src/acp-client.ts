@@ -96,7 +96,7 @@ export async function runAcpTurn(options: AcpTurnOptions): Promise<AcpTurnResult
         for (;;) {
           const message = await Promise.race([session.nextUpdate(), failure])
           if (message.kind === "stop") return { stopReason: message.stopReason }
-          options.emit({ type: "session_update", taskId: options.taskId, update: message.update })
+          options.emit({ type: "session_update", taskId: options.taskId, sessionId: session.sessionId, update: message.update })
         }
       })
     })
@@ -228,7 +228,12 @@ async function resolvePermission(request: RequestPermissionRequest, options: Acp
       : { outcome: { outcome: "cancelled" } }
   }
   if (options.interactivePermissions) {
-    return new Promise((respond) => options.emit({ type: "permission_requested", request, respond }))
+    options.emit({
+      type: "activity",
+      taskId: options.taskId,
+      message: "Permission request cancelled because the cockpit is read-only; configure permissions before rerunning.",
+    })
+    return { outcome: { outcome: "cancelled" } }
   }
   if (!process.stdin.isTTY) return { outcome: { outcome: "cancelled" } }
   const readline = createInterface({ input: process.stdin, output: process.stdout })

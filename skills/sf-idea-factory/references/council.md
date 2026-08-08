@@ -35,4 +35,4 @@ Return:
 - Never present inline roleplay as independent advisor evidence.
 - Do not give advisors different facts to manufacture disagreement.
 - Re-run one out-of-character or unsupported response once; then disclose the failure.
-- If delegation is unavailable, obtain user approval before substituting a labeled single-agent critique.
+- If delegation is unavailable, obtain user approval with lettered choices before substituting a labeled single-agent critique: `A. (Recommended) Proceed with labeled single-agent critique`, `B. Stop and wait for independent critique`, `C. Other`.

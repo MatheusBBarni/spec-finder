@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Enforce read-only ACP permission handling
 type: backend
 complexity: medium
