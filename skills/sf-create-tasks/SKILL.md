@@ -10,6 +10,7 @@ description: Decomposes an approved Spec Finder PRD and TechSpec into an approve
 - NEVER invent implementation details to compensate for a missing TechSpec.
 - NEVER create a task that depends on undeclared work, contains a cycle, separates tests from implementation, or exceeds the bounded-task limits.
 - NEVER assign task IDs before the dependency graph is complete and topologically ordered. Every declared dependency MUST have a lower numeric task ID than its consumer.
+- NEVER use generic source instructions such as "read the PRD" or "read the TechSpec" in a generated task. Every task MUST name its own packet's exact repository-relative `_prd.md` and `_techspec.md` paths.
 - NEVER report completion until every generated file and memory file has been re-read and the packet passes structural validation.
 - NEVER overwrite existing workflow memory while regenerating tasks.
 </HARD-GATE>
@@ -125,6 +126,7 @@ Wait for explicit approval of the complete graph and numbered execution order us
 
 - Write `_tasks.md` in canonical execution order with sequential IDs, status, complexity, dependencies, and concise outcomes. Include an `Execution order` section and label parallelizable groups without changing numeric order.
 - Write `task_01.md` through `task_NN.md` using `references/task-template.md`.
+- Replace every `<slug>` source-artifact placeholder in the template with the current packet slug. Do not leave placeholders or shorten the references to generic PRD or TechSpec names.
 - Use required frontmatter exactly: `status`, `title`, `type`, `complexity`, and `dependencies`.
 - Initialize `memory/MEMORY.md` plus `memory/task_NN.md` using `sf-memory`. Create missing files only; never overwrite existing memory.
 - Require `reports/task_NN.md` as a completion invariant in every task.
@@ -134,6 +136,7 @@ Wait for explicit approval of the complete graph and numbered execution order us
 Every task must contain:
 
 - `## Overview` with outcome and value;
+- `## Source Artifacts` with the exact repository-relative `.spec-finder/tasks/<actual-slug>/_prd.md` and `.spec-finder/tasks/<actual-slug>/_techspec.md` paths for that packet;
 - the complete `<critical>` block;
 - numbered MUST/SHOULD requirements;
 - 3-7 bounded `## Subtasks` describing WHAT, not code mechanics;
@@ -157,6 +160,7 @@ Re-read every generated file and verify:
 - `_tasks.md`, task filenames, task H1 numbers, memory filenames, and report paths all use the same execution-order ID;
 - every source requirement is covered exactly where intended;
 - all mandatory sections, tests, gates, memory files, and report paths exist;
+- every task names its packet's exact `_prd.md` and `_techspec.md` paths in `## Source Artifacts` and `<critical>`, contains no unresolved `<slug>` placeholder, and does not rely on generic "the PRD" or "the TechSpec" instructions;
 - task scope and complexity match discovered files and coupling;
 - existing completed tasks and memory were not overwritten.
 
@@ -179,6 +183,7 @@ Fix all validation failures and repeat validation. Report unresolved failures ra
 - Numbering tasks by PRD section, UI/backend grouping, or discovery order instead of executable dependency order.
 - Assigning IDs before the graph is complete, producing forward dependencies such as `task_02` required by `task_01`.
 - File paths guessed without codebase evidence.
+- Generic PRD or TechSpec instructions that let an executor select source artifacts from another packet.
 - Regeneration that silently renumbers tasks or erases memory.
 
 ## Failure rules

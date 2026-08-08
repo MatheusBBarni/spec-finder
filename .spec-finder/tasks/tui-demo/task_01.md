@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: failed
 title: Exercise the Spec Finder cockpit
 type: chore
 complexity: low

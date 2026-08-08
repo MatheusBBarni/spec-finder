@@ -209,9 +209,11 @@ function LiveCockpit({
   return (
     <>
       <TitleBar state={state} width={width} />
-      <text fg={colors.border} wrapMode="none">{clip("─".repeat(Math.max(width, 1)), width)}</text>
+      <box height={1} backgroundColor={colors.background}>
+        <text fg={colors.border} wrapMode="none">{clip("─".repeat(Math.max(width, 1)), width)}</text>
+      </box>
 
-      <box flexGrow={1} flexDirection={mainDirection} gap={1} paddingLeft={1} paddingRight={1} paddingTop={1}>
+      <box flexGrow={1} flexDirection={mainDirection} gap={1} paddingLeft={1} paddingRight={1} paddingTop={1} backgroundColor={colors.background}>
         <box
           width={taskPanelWidth}
           height={compact ? Math.max(8, Math.floor(height * 0.35)) : "100%"}
@@ -272,7 +274,7 @@ function LiveCockpit({
 
       {state.helpOpen ? <HelpOverlay width={width} height={height} /> : null}
 
-      <box height={1} paddingLeft={1} paddingRight={1}>
+      <box height={1} paddingLeft={1} paddingRight={1} backgroundColor={colors.background}>
         <text fg={colors.muted} wrapMode="none">{clip(footerText(state, compact), Math.max(width - 2, 1))}</text>
       </box>
     </>
@@ -322,7 +324,7 @@ function TitleBar({ state, width }: { state: CockpitState; width: number }) {
     : state.activeTaskId ? "● workflow RUNNING" : "● workflow PREPARING"
   const statusColor = state.finished?.ok === false ? colors.danger : state.finished ? colors.success : colors.active
   return (
-    <box height={2} paddingLeft={1} paddingRight={1} flexDirection="row" alignItems="center">
+    <box height={2} paddingLeft={1} paddingRight={1} flexDirection="row" alignItems="center" backgroundColor={colors.background}>
       <text fg={colors.accentBright} wrapMode="none"><strong>SPEC FINDER</strong><span fg={colors.muted}> · {state.slug || "cockpit"} · ACP COCKPIT</span></text>
       <box flexGrow={1} />
       <text fg={statusColor} wrapMode="none"><strong>{clip(status, Math.max(12, width - 20))}</strong></text>

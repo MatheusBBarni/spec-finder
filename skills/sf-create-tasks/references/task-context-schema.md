@@ -24,6 +24,7 @@ For regeneration, never silently renumber existing tasks. If current IDs violate
 ## Required body sections
 
 - Overview
+- Source Artifacts
 - `<critical>` and `<requirements>` blocks
 - Subtasks
 - Implementation Details with Relevant Files and Dependent Files
@@ -33,3 +34,10 @@ For regeneration, never silently renumber existing tasks. If current IDs violate
 - Success Criteria
 
 Every task also has `memory/task_NN.md` and requires `reports/task_NN.md` before completion.
+
+## Source artifact binding
+
+- `## Source Artifacts` names the task packet's exact repository-relative `.spec-finder/tasks/<actual-slug>/_prd.md` and `.spec-finder/tasks/<actual-slug>/_techspec.md` paths.
+- The `<critical>` block repeats those exact paths in its read-before-edit instruction.
+- Generated tasks contain neither an unresolved `<slug>` placeholder nor generic-only instructions such as "read the PRD" or "read the TechSpec".
+- If the user explicitly approved higher-level tasks without a TechSpec, name the expected packet-local `_techspec.md` path as unavailable and do not direct the executor to search for another TechSpec.
