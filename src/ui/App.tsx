@@ -1,6 +1,6 @@
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react"
-import { useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react"
 import type { TaskStatus } from "../tasks.ts"
 import {
   selectSelectedTask,
@@ -14,21 +14,31 @@ import {
 import type { TranscriptEntry, TranscriptKind } from "./transcript.ts"
 
 const colors = {
-  background: "#111318",
-  panel: "#191c24",
-  border: "#394150",
-  text: "#e6e9ef",
-  muted: "#8d95a5",
-  accent: "#f3a952",
-  success: "#78c69b",
-  danger: "#ef7d7d",
-  active: "#80a8ff",
-  thought: "#c69af1",
-  tool: "#e6c36a",
+  background: "#000000",
+  panel: "#1a1a1a",
+  surfaceElevated: "#262626",
+  border: "#3c3c3c",
+  text: "#bbbbbb",
+  textStrong: "#e6e6e6",
+  muted: "#7e7e7e",
+  dim: "#7e7e7e",
+  accent: "#1c69d4",
+  accentBright: "#ffffff",
+  success: "#0fa336",
+  danger: "#e22718",
+  warning: "#f4b400",
+  active: "#0fa336",
+  thought: "#0066b1",
+  tool: "#f4b400",
 }
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const
 const SPINNER_INTERVAL_MS = 120
+
+interface TaskTiming {
+  startedAt: number
+  elapsedMs?: number
+}
 
 interface AppProps {
   store: CockpitStore
@@ -41,15 +51,39 @@ export function App({ store, onCancel }: AppProps) {
   const { width, height } = useTerminalDimensions()
   const taskListRef = useRef<ScrollBoxRenderable>(null)
   const transcriptRef = useRef<ScrollBoxRenderable>(null)
+  const taskTimings = useRef(new Map<string, TaskTiming>())
+  const summaryDismissed = useRef(false)
   const [spinnerIndex, setSpinnerIndex] = useState(0)
+  const [clock, setClock] = useState(() => performance.now())
+  const [summaryOpen, setSummaryOpen] = useState(false)
+  const summaryOpenRef = useRef(false)
+  summaryOpenRef.current = summaryOpen
   const selectedTask = selectSelectedTask(state)
   const selectedTranscript = selectSelectedTranscript(state)
   const compact = width < 80 || height < 24
-  const expanded = width >= 120 && !compact
   const hasRunningTasks = state.tasks.some((task) => task.status === "in_progress")
   const spinner = SPINNER_FRAMES[spinnerIndex] ?? "⠋"
 
   useKeyboard((key) => {
+    const escape = key.name === "escape" || key.name === "esc" || key.sequence === "\u001b" || key.raw === "\u001b"
+    if (escape) {
+      if (summaryOpenRef.current) {
+        summaryDismissed.current = true
+        setSummaryOpen(false)
+        return
+      }
+      if (state.helpOpen) {
+        store.setHelpOpen(false)
+        return
+      }
+    }
+    if (summaryOpenRef.current) {
+      if (key.name === "q" || (key.ctrl && key.name === "c")) {
+        onCancel()
+        renderer.destroy()
+      }
+      return
+    }
     if (key.name === "q" || (key.ctrl && key.name === "c")) {
       onCancel()
       renderer.destroy()
@@ -60,7 +94,6 @@ export function App({ store, onCancel }: AppProps) {
       return
     }
     if (state.helpOpen) {
-      if (key.name === "escape") store.setHelpOpen(false)
       return
     }
     if (key.name === "tab") {
@@ -80,57 +113,119 @@ export function App({ store, onCancel }: AppProps) {
   }, [state.selectedTaskId])
 
   useEffect(() => {
+    if (state.finished) {
+      if (!summaryDismissed.current) setSummaryOpen(true)
+      return
+    }
+    if (state.slug) {
+      summaryDismissed.current = false
+      taskTimings.current.clear()
+      setSummaryOpen(false)
+    }
+  }, [state.finished, state.slug])
+
+  useEffect(() => {
+    const now = performance.now()
+    for (const task of state.tasks) {
+      const timing = taskTimings.current.get(task.id)
+      if (task.status === "in_progress" && !timing) {
+        taskTimings.current.set(task.id, { startedAt: now })
+      } else if (timing && isTerminal(task.status) && timing.elapsedMs === undefined) {
+        timing.elapsedMs = Math.max(0, now - timing.startedAt)
+      }
+    }
+    setClock(now)
     if (!hasRunningTasks) {
       setSpinnerIndex(0)
+      renderer.dropLive()
       return
     }
 
     renderer.requestLive()
     const timer = setInterval(() => {
       setSpinnerIndex((index) => (index + 1) % SPINNER_FRAMES.length)
+      setClock(performance.now())
     }, SPINNER_INTERVAL_MS)
     return () => {
       clearInterval(timer)
       renderer.dropLive()
     }
-  }, [hasRunningTasks, renderer])
-
-  const headerLines = buildHeaderLines(state, width, height, compact, expanded)
-  const mainDirection = compact ? "column" : "row"
-  const taskPanelWidth = compact ? "100%" : expanded ? 40 : Math.max(34, Math.floor(width * 0.34))
-  const compactTaskHeight = Math.max(5, Math.min(8, Math.floor((height - headerLines.length - 5) / 3)))
+  }, [hasRunningTasks, renderer, state.tasks])
 
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={colors.background}>
-      <box
-        height={headerLines.length + 2}
-        paddingLeft={1}
-        paddingRight={1}
-        flexDirection="column"
-        justifyContent="center"
-        borderStyle="single"
-        borderColor={state.finished?.ok === false ? colors.danger : colors.border}
-      >
-        <text fg={colors.accent} wrapMode="none"><strong>{headerLines[0]}</strong></text>
-        {headerLines.slice(1).map((line, index) => (
-          <text key={`header-${index}`} fg={index === 0 ? colors.text : colors.muted} wrapMode="none">{line}</text>
-        ))}
-      </box>
+      {summaryOpen ? (
+        <RunSummary state={state} width={width} />
+      ) : (
+        <LiveCockpit
+          state={state}
+          width={width}
+          height={height}
+          compact={compact}
+          selectedTask={selectedTask}
+          selectedTranscript={selectedTranscript}
+          taskListRef={taskListRef}
+          transcriptRef={transcriptRef}
+          spinner={spinner}
+          clock={clock}
+          taskTimings={taskTimings.current}
+        />
+      )}
+    </box>
+  )
+}
 
-      <box flexGrow={1} flexDirection={mainDirection} gap={1} paddingLeft={1} paddingRight={1} paddingBottom={1}>
+function LiveCockpit({
+  state,
+  width,
+  height,
+  compact,
+  selectedTask,
+  selectedTranscript,
+  taskListRef,
+  transcriptRef,
+  spinner,
+  clock,
+  taskTimings,
+}: {
+  state: CockpitState
+  width: number
+  height: number
+  compact: boolean
+  selectedTask: CockpitTask | undefined
+  selectedTranscript: readonly TranscriptEntry[]
+  taskListRef: RefObject<ScrollBoxRenderable | null>
+  transcriptRef: RefObject<ScrollBoxRenderable | null>
+  spinner: string
+  clock: number
+  taskTimings: Map<string, TaskTiming>
+}) {
+  const taskPanelWidth = compact ? "100%" : Math.max(30, Math.min(50, Math.floor(width * 0.28)))
+  const taskWidth = typeof taskPanelWidth === "number" ? taskPanelWidth : Math.max(width - 2, 12)
+  const mainDirection = compact ? "column" : "row"
+  const progressWidth = Math.max(10, taskWidth - 4)
+  const titleLimit = Math.max(10, taskWidth - 12)
+
+  return (
+    <>
+      <TitleBar state={state} width={width} />
+      <text fg={colors.border} wrapMode="none">{clip("─".repeat(Math.max(width, 1)), width)}</text>
+
+      <box flexGrow={1} flexDirection={mainDirection} gap={1} paddingLeft={1} paddingRight={1} paddingTop={1}>
         <box
           width={taskPanelWidth}
-          height={compact ? compactTaskHeight : "100%"}
+          height={compact ? Math.max(8, Math.floor(height * 0.35)) : "100%"}
           flexDirection="column"
-          borderStyle="rounded"
+          borderStyle="single"
           borderColor={state.focusedPane === "tasks" ? colors.accent : colors.border}
           backgroundColor={colors.panel}
           paddingLeft={1}
           paddingRight={1}
         >
-          <text fg={state.focusedPane === "tasks" ? colors.accent : colors.text} wrapMode="none" truncate>
-            <strong>TASKS{state.focusedPane === "tasks" ? " · FOCUS" : ""}</strong>
+          <text fg={state.focusedPane === "tasks" ? colors.accent : colors.textStrong} wrapMode="none" flexShrink={0}>
+            <strong>TASKS {taskProgressLabel(state)}</strong>
           </text>
+          <text fg={colors.active} wrapMode="none" flexShrink={0}>{progressBar(state, progressWidth)}</text>
           <scrollbox id="task-scroll" ref={taskListRef} flexGrow={1} viewportCulling>
             {state.tasks.length === 0 ? <text fg={colors.muted}>Waiting for task packet…</text> : null}
             {state.tasks.map((task) => (
@@ -138,75 +233,198 @@ export function App({ store, onCancel }: AppProps) {
                 key={task.id}
                 task={task}
                 selected={task.id === state.selectedTaskId}
-                reason={selectTaskReason(state, task.id)}
                 spinner={spinner}
-                titleLimit={compact ? Math.max(12, width - 29) : expanded ? 36 : Math.max(10, Number(taskPanelWidth) - 23)}
+                titleLimit={titleLimit}
+                elapsed={taskElapsedText(task, taskTimings, clock)}
               />
             ))}
           </scrollbox>
         </box>
 
-        <box
-          flexGrow={1}
-          flexDirection="column"
-          borderStyle="rounded"
-          borderColor={state.focusedPane === "transcript" ? colors.accent : colors.border}
-          backgroundColor={colors.panel}
-          paddingLeft={1}
-          paddingRight={1}
-        >
-          <text fg={state.focusedPane === "transcript" ? colors.accent : colors.text} wrapMode="word" flexShrink={0}>
-            <strong>{transcriptTitle(selectedTask?.id, state)}</strong>
-            {selectedTask && selectTaskReason(state, selectedTask.id) ? (
-              <><br /><span fg={colors.danger}>{`Reason: ${selectTaskReason(state, selectedTask.id)}`}</span></>
-            ) : null}
-          </text>
-          <scrollbox
-            id="transcript-scroll"
-            ref={transcriptRef}
+        <box flexGrow={1} flexDirection="column" gap={1}>
+          <TaskHeader state={state} task={selectedTask} transcript={selectedTranscript} width={width} />
+          <box
             flexGrow={1}
-            focused={state.focusedPane === "transcript" && !state.helpOpen}
-            stickyScroll
-            stickyStart="bottom"
-            viewportCulling
+            flexDirection="column"
+            borderStyle="single"
+            borderColor={state.focusedPane === "transcript" ? colors.accent : colors.border}
+            backgroundColor={colors.panel}
+            paddingLeft={1}
+            paddingRight={1}
           >
-            <text id="transcript-start" flexShrink={0}> </text>
-            {selectedTranscript.length === 0 ? <text fg={colors.muted}>No transcript yet.</text> : null}
-            {selectedTranscript.map((entry) => <TranscriptRow key={entry.id} entry={entry} />)}
-          </scrollbox>
+            <scrollbox
+              id="transcript-scroll"
+              ref={transcriptRef}
+              flexGrow={1}
+              focused={state.focusedPane === "transcript" && !state.helpOpen}
+              stickyScroll
+              stickyStart="bottom"
+              viewportCulling
+            >
+              <text id="transcript-start" flexShrink={0}> </text>
+              {selectedTranscript.length === 0 ? <text fg={colors.muted}>Waiting for ACP updates...</text> : null}
+              {selectedTranscript.map((entry) => <TranscriptRow key={entry.id} entry={entry} />)}
+            </scrollbox>
+          </box>
+          <TaskStatusStrip state={state} task={selectedTask} />
         </box>
       </box>
 
       {state.helpOpen ? <HelpOverlay width={width} height={height} /> : null}
 
-      <box height={compact ? 2 : 1} paddingLeft={1} paddingRight={1}>
-        <text fg={colors.muted} wrapMode="none" truncate>{footerText(state, compact)}</text>
+      <box height={1} paddingLeft={1} paddingRight={1}>
+        <text fg={colors.muted} wrapMode="none">{clip(footerText(state, compact), Math.max(width - 2, 1))}</text>
       </box>
-    </box>
+    </>
   )
 }
 
 function TaskRow({
   task,
   selected,
-  reason,
   spinner,
   titleLimit,
+  elapsed,
 }: {
   task: CockpitTask
   selected: boolean
-  reason: string | undefined
   spinner: string
   titleLimit: number
+  elapsed: string
 }) {
   const running = task.status === "in_progress"
-  const label = running ? "" : statusLabel(task.status)
   const marker = running ? spinner : statusIcon(task.status)
   return (
-    <text id={taskRowId(task.id)} fg={selected ? colors.accent : statusColor(task.status)} wrapMode="word" flexShrink={0}>
-      {selected ? ">" : " "}{marker} {task.id}{label ? ` [${label}]` : ""} {fit(task.title, titleLimit)}
-      {reason ? <><br /><span fg={colors.danger}>  ! {reason}</span></> : null}
-    </text>
+    <box
+      id={taskRowId(task.id)}
+      height={4}
+      flexDirection="column"
+      flexShrink={0}
+      borderStyle="single"
+      borderColor={selected ? colors.accent : colors.border}
+      backgroundColor={colors.surfaceElevated}
+      paddingLeft={1}
+      paddingRight={1}
+    >
+      <text fg={selected ? colors.textStrong : statusColor(task.status)} wrapMode="none">
+        <strong>{selected ? "> " : "  "}{marker} {task.id} </strong>{fit(task.title, titleLimit)}
+      </text>
+      <text fg={selected ? colors.muted : colors.dim} wrapMode="none">
+        {task.type} · {elapsed}
+      </text>
+    </box>
+  )
+}
+
+function TitleBar({ state, width }: { state: CockpitState; width: number }) {
+  const status = state.finished
+    ? state.finished.ok ? "● workflow COMPLETE" : "● workflow FAILED"
+    : state.activeTaskId ? "● workflow RUNNING" : "● workflow PREPARING"
+  const statusColor = state.finished?.ok === false ? colors.danger : state.finished ? colors.success : colors.active
+  return (
+    <box height={2} paddingLeft={1} paddingRight={1} flexDirection="row" alignItems="center">
+      <text fg={colors.accentBright} wrapMode="none"><strong>SPEC FINDER</strong><span fg={colors.muted}> · {state.slug || "cockpit"} · ACP COCKPIT</span></text>
+      <box flexGrow={1} />
+      <text fg={statusColor} wrapMode="none"><strong>{clip(status, Math.max(12, width - 20))}</strong></text>
+    </box>
+  )
+}
+
+function TaskHeader({
+  state,
+  task,
+  transcript,
+  width,
+}: {
+  state: CockpitState
+  task: CockpitTask | undefined
+  transcript: readonly TranscriptEntry[]
+  width: number
+}) {
+  const innerWidth = Math.max(width - 12, 24)
+  const title = task ? `${task.title.toUpperCase()}  [${task.type}]` : "TASK TRANSCRIPT"
+  const mode = task && task.id === state.activeTaskId && state.followingActiveTask ? "FOLLOWING ACTIVE" : "INSPECTING HISTORY"
+  const identity = runtimeIdentityParts(state).join(" · ")
+  const meta = transcript.length === 0 ? "No ACP transcript yet" : `${transcript.length} entries`
+  return (
+    <box
+      height={5}
+      flexDirection="column"
+      borderStyle="single"
+      borderColor={state.focusedPane === "transcript" ? colors.accent : colors.border}
+      backgroundColor={colors.panel}
+      paddingLeft={1}
+      paddingRight={1}
+    >
+      <text fg={state.focusedPane === "transcript" ? colors.accent : colors.textStrong} wrapMode="none">
+        <strong>{fit(title, innerWidth)}</strong>
+      </text>
+      <text fg={colors.muted} wrapMode="none">{fit(`TRANSCRIPT · ${task?.id ?? "none"} · ${mode}`, innerWidth)}</text>
+      <text fg={colors.dim} wrapMode="none">{fit(`${meta} · ${identity}`, innerWidth)}</text>
+    </box>
+  )
+}
+
+function TaskStatusStrip({ state, task }: { state: CockpitState; task: CockpitTask | undefined }) {
+  const reason = task ? selectTaskReason(state, task.id) : undefined
+  const label = task ? taskStatusText(task.status) : "Waiting for task"
+  const color = task ? statusColor(task.status) : colors.muted
+  return (
+    <box height={4} borderStyle="single" borderColor={color} backgroundColor={colors.panel} paddingLeft={1} paddingRight={1}>
+      <text fg={color} wrapMode="none"><strong>{task ? `${statusIcon(task.status)} ${label}` : "› Waiting for task"}</strong></text>
+      <text fg={reason ? colors.danger : colors.dim} wrapMode="none">{fit(reason ?? "Read-only progress; no workflow controls", 120)}</text>
+    </box>
+  )
+}
+
+function RunSummary({ state, width }: { state: CockpitState; width: number }) {
+  const completed = state.tasks.filter((task) => isCompleted(task.status)).length
+  const failed = state.tasks.filter((task) => task.status === "failed").length
+  const blocked = state.tasks.filter((task) => task.status === "blocked").length
+  const failures = state.tasks.filter((task) => task.status === "failed" || task.status === "blocked")
+  const panelWidth = Math.max(24, Math.min(width - 4, 86))
+  const innerWidth = Math.max(panelWidth - 4, 16)
+  const failedRun = state.finished?.ok === false || failed > 0 || blocked > 0
+  const heading = failedRun
+    ? `Execution Complete: ${completed}/${state.tasks.length} succeeded, ${failed} failed${blocked > 0 ? `, ${blocked} blocked` : ""}`
+    : `All Tasks Complete: ${completed}/${state.tasks.length} succeeded`
+
+  return (
+    <box flexGrow={1} flexDirection="column" paddingLeft={1} paddingTop={1}>
+      <box width={panelWidth} borderStyle="single" borderColor={failedRun ? colors.warning : colors.accent} backgroundColor={colors.panel} paddingLeft={1} paddingRight={1}>
+        <text fg={colors.accentBright} wrapMode="none"><strong>RUN.STATUS</strong></text>
+        <text fg={failedRun ? colors.warning : colors.accent} wrapMode="none"><strong>{fit(heading, innerWidth)}</strong></text>
+        <text fg={colors.active} wrapMode="none">{progressBar(state, innerWidth)}</text>
+        <text> </text>
+        <SummaryStat label="SUCCEEDED" value={String(completed)} color={colors.success} />
+        <SummaryStat label="FAILED" value={String(failed)} color={colors.danger} />
+        <SummaryStat label="BLOCKED" value={String(blocked)} color={colors.warning} />
+        <SummaryStat label="TOTAL" value={String(state.tasks.length)} color={colors.textStrong} />
+      </box>
+
+      {failures.length > 0 ? (
+        <box width={panelWidth} marginTop={1} borderStyle="single" borderColor={colors.danger} backgroundColor={colors.panel} paddingLeft={1} paddingRight={1}>
+          <text fg={colors.accentBright} wrapMode="none"><strong>RUN.FAILURES</strong></text>
+          {failures.map((task) => (
+            <box key={task.id} flexDirection="column" flexShrink={0}>
+              <text fg={colors.danger} wrapMode="none"><strong>FAIL {task.id}</strong><span fg={colors.muted}>  {task.status.toUpperCase()}</span></text>
+              <text fg={colors.muted} wrapMode="none">{fit(`  ${selectTaskReason(state, task.id) ?? "Task failed; inspect transcript"}`, innerWidth)}</text>
+            </box>
+          ))}
+        </box>
+      ) : null}
+
+      <box height={1} marginTop={1} paddingLeft={1}>
+        <text fg={colors.muted} wrapMode="none">[<span fg={colors.accent}>ESC</span>] BACK   [<span fg={colors.accent}>Q</span>] QUIT</text>
+      </box>
+      <box flexGrow={1} />
+    </box>
+  )
+}
+
+function SummaryStat({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <text fg={colors.muted} wrapMode="none">{label.padEnd(9, " ")} <span fg={color}><strong>{value}</strong></span></text>
   )
 }
 
@@ -332,10 +550,49 @@ function transcriptTitle(selectedTaskId: string | undefined, state: CockpitState
   return `TRANSCRIPT · ${selectedTaskId} · ${mode}${state.focusedPane === "transcript" ? " · FOCUS" : ""}`
 }
 
+function taskProgressLabel(state: CockpitState): string {
+  const settled = state.tasks.filter((task) => isCompleted(task.status) || task.status === "failed" || task.status === "blocked").length
+  return `${settled}/${state.tasks.length}`
+}
+
+function progressBar(state: CockpitState, width: number): string {
+  const total = state.tasks.length
+  if (width <= 0) return ""
+  if (total === 0) return "░".repeat(width)
+  const settled = state.tasks.filter((task) => isCompleted(task.status) || task.status === "failed" || task.status === "blocked").length
+  const filled = Math.min(width, Math.max(0, Math.round((settled / total) * width)))
+  return "█".repeat(filled) + "░".repeat(width - filled)
+}
+
+function taskElapsedText(task: CockpitTask, timings: Map<string, TaskTiming>, now: number): string {
+  const timing = timings.get(task.id)
+  if (!timing) return "00:00"
+  const elapsed = timing.elapsedMs ?? Math.max(0, now - timing.startedAt)
+  return formatElapsed(elapsed)
+}
+
+function formatElapsed(milliseconds: number): string {
+  const seconds = Math.max(0, Math.floor(milliseconds / 1000))
+  const minutes = Math.floor(seconds / 60)
+  return `${String(minutes).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`
+}
+
+function taskStatusText(status: TaskStatus): string {
+  if (isCompleted(status)) return "Task complete"
+  if (status === "in_progress") return "Task running"
+  if (status === "failed") return "Task failed"
+  if (status === "blocked") return "Task blocked"
+  return "Task pending"
+}
+
+function isTerminal(status: TaskStatus): boolean {
+  return isCompleted(status) || status === "failed"
+}
+
 function footerText(state: CockpitState, compact: boolean): string {
-  if (compact) return "Tab pane · ↑↓/Pg/Home/End navigate · ? help · q/Ctrl+C cancel"
-  if (state.focusedPane === "tasks") return "↑/↓ or j/k select · Tab transcript · ? help · q/Ctrl+C cancel"
-  return "↑/↓ line · PgUp/PgDn page · Home/End start/tail · Tab tasks · ? help · q/Ctrl+C cancel"
+  if (compact) return "FOCUS TASKS  [↑↓/JK] TASK  [TAB] FOCUS  [?] HELP  [Q] EXIT"
+  if (state.focusedPane === "tasks") return "FOCUS TASKS  [↑↓/JK] TASK  [TAB] FOCUS  [?] HELP  [Q] EXIT"
+  return "FOCUS TRANSCRIPT  [↑↓] LINE  [PG/HOME/END] SCROLL  [TAB] FOCUS  [?] HELP  [Q] EXIT"
 }
 
 function taskRowId(taskId: string): string {

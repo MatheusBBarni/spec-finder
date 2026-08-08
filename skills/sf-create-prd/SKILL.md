@@ -17,7 +17,9 @@ description: Creates or updates an approved business-focused Product Requirement
 
 - Ask exactly one question per turn and wait for the answer.
 - Use the runtime's blocking question mechanism when available. Otherwise make the question the complete response and stop.
-- Prefer 2-3 concrete options plus `Other`; lead with the evidence-backed recommendation.
+- Present every answer choice with sequential uppercase labels: `A.`, `B.`, `C.`, and so on. Never present selectable answers as unlabeled bullets.
+- Every question must provide 2-3 concrete suggested answers. Add `Other` whenever those answers are not exhaustive; lead with `A. (Recommended)` and label `Other` with the next available letter.
+- End every choice prompt with: `Reply with the letter (for example, A), or the letter plus context.` Accept lowercase letters and full option text too.
 - Ask only product questions about WHAT users need, WHY it matters, WHO needs it, constraints, priority, and measurable success.
 - Do not auto-resolve scope, rollout, target-user, capability, or success-metric decisions.
 
@@ -71,7 +73,7 @@ Present:
 - **Inferences** clearly labeled;
 - **Unknowns and conflicts** that may require a decision.
 
-If external research is unavailable, disclose the missing evidence and ask whether to proceed with a research-limited PRD or wait. Do not silently downgrade the hard gate.
+If external research is unavailable, disclose the missing evidence and ask with lettered choices whether to proceed with a research-limited PRD, wait, or provide another direction. Do not silently downgrade the hard gate.
 
 ### 3. Clarify the product need
 
@@ -82,10 +84,10 @@ If external research is unavailable, disclose the missing evidence and ask wheth
 
 ### 4. Present product approaches
 
-- Offer 2-3 meaningfully different approaches in scope, phasing, workflow, or strategy.
+- Offer 2-3 meaningfully different approaches in scope, phasing, workflow, or strategy, labeled `A.`, `B.`, and `C.` in presentation order; label another direction with the next letter.
 - For each state: included capability, excluded capability, user value, principal risk, evidence, and reversibility.
 - Recommend the smallest credible option that satisfies the verified need and name what it gives up.
-- Wait for explicit selection. If evidence is insufficient to recommend, say so and ask for the missing decision.
+- Wait for explicit selection. If evidence is insufficient to recommend, say so and present the missing decision as lettered answers rather than an open-ended prompt.
 
 ### 5. Record decisions
 
@@ -105,7 +107,7 @@ If external research is unavailable, disclose the missing evidence and ask wheth
 
 ### 7. Review and save
 
-- Present one complete draft and ask for `Approve`, `Adjust`, `Rewrite`, or `Discard`.
+- Present one complete draft and ask with `A. Approve`, `B. Adjust`, `C. Rewrite`, and `D. Discard`.
 - Apply requested changes and present the complete current draft again.
 - Write `.spec-finder/tasks/<slug>/_prd.md` only after explicit approval of that version.
 - Re-read the saved file and validate IDs, traceability, metrics, non-goals, ADR links, citations, and unresolved questions.
@@ -122,6 +124,6 @@ If external research is unavailable, disclose the missing evidence and ask wheth
 ## Failure rules
 
 - Stop if both the requested outcome and target user remain unclear after clarification.
-- If research contradicts `_idea.md`, present the conflict and ask which direction governs before drafting.
+- If research contradicts `_idea.md`, present the conflict and ask with lettered choices whether current evidence, the approved idea, or another direction governs before drafting.
 - If a material decision remains open, do not move it silently into Open Questions and save anyway.
 - Preserve unrelated approved content in update mode.

@@ -13,6 +13,7 @@ export type RuntimeOptionName = Extract<RunEvent, { type: "runtime_option" }>["n
 export interface CockpitTask {
   readonly id: string
   readonly title: string
+  readonly type: string
   readonly complexity: string
   readonly status: TaskStatus
   readonly dependencies: readonly string[]
@@ -332,6 +333,7 @@ function toCockpitTask(task: TaskFile): CockpitTask {
   return {
     id: task.id,
     title: task.frontmatter.title,
+    type: task.frontmatter.type,
     complexity: task.frontmatter.complexity,
     status: task.frontmatter.status,
     dependencies: task.frontmatter.dependencies.map((dependency) => dependency.replace(/\.md$/u, "")),

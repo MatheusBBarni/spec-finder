@@ -17,9 +17,13 @@ description: Decomposes an approved Spec Finder PRD and TechSpec into an approve
 ## Interaction contract
 
 - Use the runtime's blocking question mechanism for material task-boundary decisions. Otherwise make the question the complete response and stop.
+- Every question must provide at least two suggested answers with sequential uppercase labels: `A.`, `B.`, `C.`, and so on. Put the recommendation first as `A. (Recommended)`, add `Other` with the next available letter whenever the answers are not exhaustive, and never use unlabeled bullets or open-ended answer requests.
+- End every choice prompt with: `Reply with the letter (for example, A), or the letter plus context.` Accept lowercase letters and full option text too.
 - Present the entire proposed graph in one review, not task-by-task approval.
 - Recommend a graph, but wait for explicit approval before filesystem writes.
-- If codebase evidence conflicts with the approved TechSpec, present the conflict and ask whether to revise the TechSpec or accept a documented task-level deviation.
+- If codebase evidence conflicts with the approved TechSpec, present lettered answers for revising the TechSpec, accepting a documented task-level deviation, stopping, or another direction.
+
+Read `references/question-protocol.md` before asking questions or requesting graph approval.
 
 ## Required inputs
 
@@ -55,7 +59,7 @@ When `_techspec.md` is missing:
 - explain that tasks can specify product behavior but cannot safely assert implementation boundaries;
 - perform deeper codebase exploration;
 - list the exact design gaps that will remain;
-- ask whether to continue with higher-level tasks or stop for `sf-create-techspec`.
+- ask with lettered choices whether to stop for `sf-create-techspec`, continue with higher-level tasks, or provide another direction.
 
 Do not bury this choice in a warning and continue automatically.
 
@@ -115,7 +119,7 @@ Task invariants:
 - no more than seven primary touched files unless the user approves an indivisible critical task;
 - no copied interface definitions or architecture prose from the TechSpec.
 
-Wait for explicit approval of the complete graph and numbered execution order. Revise, re-sort, and re-present when task boundaries or dependencies change.
+Wait for explicit approval of the complete graph and numbered execution order using `A. Approve and write tasks`, `B. Revise the graph`, `C. Stop`, and `D. Other`. Revise, re-sort, and re-present when task boundaries or dependencies change.
 
 ### 6. Write files
 

@@ -19,7 +19,7 @@
 - Parallelizable tasks retain deterministic numeric positions and are labeled as parallelizable in `_tasks.md`; parallelism never creates forward dependencies.
 - Completed aliases are `completed`, `done`, and `finished`.
 
-For regeneration, never silently renumber existing tasks. If current IDs violate this ordering contract, require explicit approval for a renumbering migration covering task files, dependencies, memory files, reports, and `_tasks.md` references.
+For regeneration, never silently renumber existing tasks. If current IDs violate this ordering contract, require explicit approval through lettered answers for a renumbering migration covering task files, dependencies, memory files, reports, and `_tasks.md` references.
 
 ## Required body sections
 

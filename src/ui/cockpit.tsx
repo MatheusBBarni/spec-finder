@@ -4,9 +4,8 @@ import { App } from "./App.tsx"
 import type { CockpitStore } from "./store.ts"
 
 export async function startCockpit(store: CockpitStore, onCancel: () => void): Promise<{ close: () => void }> {
-  const renderer = await createCliRenderer({ exitOnCtrlC: false })
+  const renderer = await createCliRenderer({ exitOnCtrlC: false, backgroundColor: "black" })
   const root = createRoot(renderer)
   root.render(<App store={store} onCancel={onCancel} />)
   return { close: () => renderer.destroy() }
 }
-

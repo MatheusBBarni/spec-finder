@@ -34,26 +34,14 @@ describe("read-only progress cockpit", () => {
       const screen = await render(store, width, height)
       try {
         const frame = screen.captureCharFrame()
-        expect(frame).toContain("SPEC FINDER · demo")
-        expect(frame).toContain("Phase: running")
-        expect(frame).toContain("Active: task_02")
-        expect(frame).toContain("Tasks: 1/3 completed · 1 running")
-        expect(frame).not.toContain("Provider codex")
-        expect(frame).not.toContain("model gpt-5")
-        expect(frame).not.toContain("reasoning provider default")
-        expect(frame).not.toContain("speed fast")
-        if (width >= 120) {
-          expect(frame).toContain("codex - gpt-5 (applied) - provider default - fast (unsupported)")
-        } else {
-          expect(frame).toContain("codex -")
-        }
-        const countsHeader = frame.split("\n").find((line) => line.includes("Tasks:"))
-        expect(countsHeader).toBeDefined()
-        expect(countsHeader).not.toContain("…")
-        expect(frame).toContain("[COMPLETED]")
-        expect(frame).toMatch(/>[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s+task_02/)
-        expect(frame).not.toMatch(/task_02\s+\[[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\]/)
-        expect(frame).not.toContain("[RUNNING]")
+        expect(frame).toContain("SPEC FINDER · demo · ACP COCKPIT")
+        expect(frame).toContain("workflow RUNNING")
+        expect(frame).toContain("TASKS 1/3")
+        expect(frame).toContain("codex")
+        expect(frame).toContain("gpt-5")
+        expect(frame).toMatch(/frontend · \d{2}:\d{2}/)
+        expect(frame).toContain("✓ task_01")
+        expect(frame).toMatch(/> [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s+task_02/)
         expect(frame).toContain("TRANSCRIPT · task_02 · FOLLOWING ACTIVE")
         expect(frame).toContain("Selected task transcript")
       } finally {
@@ -105,10 +93,18 @@ describe("read-only progress cockpit", () => {
 
     try {
       const lines = screen.captureCharFrame().split("\n")
-      const headerBottom = lines.findIndex((line) => line.includes("└") && line.includes("┘"))
-      expect(headerBottom).toBeGreaterThanOrEqual(0)
-      expect(lines[headerBottom + 1]).toContain("╭")
-      expect(lines[headerBottom + 1]).toContain("╮")
+      const separator = lines.findIndex((line) => line.includes("─".repeat(20)))
+      expect(separator).toBeGreaterThanOrEqual(0)
+      expect(lines[separator + 2]).toContain("┌")
+      expect(lines[separator + 2]).toContain("┐")
+      expect(screen.captureCharFrame()).not.toContain("╭")
+
+      const panelBottom = lines.findIndex((line, index) => index > separator
+        && (line.match(/└/gu)?.length ?? 0) >= 2
+        && (line.match(/┘/gu)?.length ?? 0) >= 2)
+      const footer = lines.findIndex((line) => line.includes("FOCUS TASKS"))
+      expect(panelBottom).toBeGreaterThan(separator)
+      expect(footer).toBe(panelBottom + 1)
     } finally {
       await destroy(screen)
     }
@@ -226,17 +222,44 @@ describe("read-only progress cockpit", () => {
 
     try {
       let frame = screen.captureCharFrame()
-      expect(frame).toContain("✗ task_01 [FAILED]")
+      expect(frame).toContain("✗ task_01")
       expect(frame).toContain("Provider connection failed")
-      expect(frame).toContain("! task_02 [BLOCKED]")
-      expect(frame).toContain("Blocked because dependency")
-      expect(frame).toContain("task_01 failed")
+      expect(frame).toContain("! task_02")
+      expect(frame).toContain("Task failed")
 
       await press(screen, KeyCodes.ARROW_DOWN)
       frame = screen.captureCharFrame()
       expect(frame).toContain("TRANSCRIPT · task_02")
-      expect(frame).toContain("Reason: Blocked because dependency task_01 failed")
+      expect(frame).toContain("Blocked because dependency")
       expect(frame).toContain("✗ Error")
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+  test("shows a Compozy-style run status and failure summary after completion", async () => {
+    const store = startedStore([
+      task(1, "Provider task"),
+      task(2, "Completed task"),
+    ])
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    store.consume({ type: "task_status", taskId: "task_01", status: "failed" })
+    store.consume({ type: "activity", taskId: "task_01", message: "Provider connection failed" })
+    store.consume({ type: "task_status", taskId: "task_02", status: "completed" })
+    store.consume({ type: "run_finished", ok: false, message: "1 failed · 0 blocked" })
+    const screen = await render(store, 120, 40)
+
+    try {
+      const summary = screen.captureCharFrame()
+      expect(summary).toContain("RUN.STATUS")
+      expect(summary).toContain("Execution Complete: 1/2 succeeded, 1 failed")
+      expect(summary).toContain("RUN.FAILURES")
+      expect(summary).toContain("FAIL task_01")
+      expect(summary).toContain("Provider connection failed")
+      expect(summary).toContain("[ESC] BACK")
+
+      await pressEscape(screen)
+      expect(screen.captureCharFrame()).toContain("TRANSCRIPT · task_01")
     } finally {
       await destroy(screen)
     }
@@ -314,10 +337,9 @@ describe("read-only progress cockpit", () => {
     const compactScreen = await render(store, 70, 20)
     try {
       const frame = compactScreen.captureCharFrame()
-      expect(frame).toContain("COMPACT 70x20")
+      expect(frame).toContain("SPEC FINDER · demo")
       expect(frame).toContain("task_01")
-      expect(frame).toContain("[FAILED]")
-      expect(frame).toContain("Visible failure reason")
+      expect(frame).toContain("✗ task_01")
       assertNoControls(frame)
       expect(responded).toBeFalse()
     } finally {
@@ -329,7 +351,7 @@ describe("read-only progress cockpit", () => {
       setRendererCapabilities(reducedScreen.renderer, { rgb: false, ansi256: false })
       await reducedScreen.renderOnce()
       const frame = reducedScreen.captureCharFrame()
-      expect(frame).toContain("✗ task_01 [FAILED]")
+      expect(frame).toContain("✗ task_01")
       expect(frame).toContain("Visible failure reason")
       expect(reducedScreen.captureSpans().cols).toBe(80)
       assertNoControls(frame)
@@ -433,6 +455,14 @@ async function pressTab(
   await act(async () => {
     screen.mockInput.pressTab(modifiers)
     await Promise.resolve()
+  })
+  await screen.renderOnce()
+}
+
+async function pressEscape(screen: TestScreen): Promise<void> {
+  await act(async () => {
+    screen.mockInput.pressEscape()
+    await new Promise((resolve) => setTimeout(resolve, 100))
   })
   await screen.renderOnce()
 }
