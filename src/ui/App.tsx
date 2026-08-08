@@ -14,7 +14,10 @@ import {
 import type { TranscriptEntry, TranscriptKind } from "./transcript.ts"
 
 const colors = {
-  background: "#000000",
+  // DESIGN.md surface-soft: deliberate near-black canvas for terminal gutters.
+  // Keeping this non-zero avoids terminals that treat true black as their
+  // inherited background while preserving the intended dark hierarchy.
+  background: "#0d0d0d",
   panel: "#1a1a1a",
   surfaceElevated: "#262626",
   border: "#3c3c3c",
@@ -323,11 +326,19 @@ function TitleBar({ state, width }: { state: CockpitState; width: number }) {
     ? state.finished.ok ? "● workflow COMPLETE" : "● workflow FAILED"
     : state.activeTaskId ? "● workflow RUNNING" : "● workflow PREPARING"
   const statusColor = state.finished?.ok === false ? colors.danger : state.finished ? colors.success : colors.active
+  const contentWidth = Math.max(width - 2, 1)
+  const statusText = clip(status, Math.max(12, contentWidth))
+  const title = `SPEC FINDER · ${state.slug || "cockpit"} · ACP COCKPIT`
+  const titleLimit = Math.max(12, contentWidth - statusText.length - 1)
+  const identity = runtimeIdentityParts(state).join(" - ")
   return (
-    <box height={2} paddingLeft={1} paddingRight={1} flexDirection="row" alignItems="center" backgroundColor={colors.background}>
-      <text fg={colors.accentBright} wrapMode="none"><strong>SPEC FINDER</strong><span fg={colors.muted}> · {state.slug || "cockpit"} · ACP COCKPIT</span></text>
-      <box flexGrow={1} />
-      <text fg={statusColor} wrapMode="none"><strong>{clip(status, Math.max(12, width - 20))}</strong></text>
+    <box height={2} paddingLeft={1} paddingRight={1} flexDirection="column" backgroundColor={colors.background}>
+      <box height={1} flexDirection="row" alignItems="center">
+        <text fg={colors.accentBright} wrapMode="none"><strong>{fit(title, titleLimit)}</strong></text>
+        <box flexGrow={1} />
+        <text fg={statusColor} wrapMode="none"><strong>{statusText}</strong></text>
+      </box>
+      <text fg={colors.muted} wrapMode="none">{clip(identity, contentWidth)}</text>
     </box>
   )
 }
@@ -346,7 +357,6 @@ function TaskHeader({
   const innerWidth = Math.max(width - 12, 24)
   const title = task ? `${task.title.toUpperCase()}  [${task.type}]` : "TASK TRANSCRIPT"
   const mode = task && task.id === state.activeTaskId && state.followingActiveTask ? "FOLLOWING ACTIVE" : "INSPECTING HISTORY"
-  const identity = runtimeIdentityParts(state).join(" · ")
   const meta = transcript.length === 0 ? "No ACP transcript yet" : `${transcript.length} entries`
   return (
     <box
@@ -362,7 +372,7 @@ function TaskHeader({
         <strong>{fit(title, innerWidth)}</strong>
       </text>
       <text fg={colors.muted} wrapMode="none">{fit(`TRANSCRIPT · ${task?.id ?? "none"} · ${mode}`, innerWidth)}</text>
-      <text fg={colors.dim} wrapMode="none">{fit(`${meta} · ${identity}`, innerWidth)}</text>
+      <text fg={colors.dim} wrapMode="none">{fit(meta, innerWidth)}</text>
     </box>
   )
 }

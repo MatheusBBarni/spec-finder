@@ -35,6 +35,7 @@ describe("read-only progress cockpit", () => {
       try {
         const frame = screen.captureCharFrame()
         expect(frame).toContain("SPEC FINDER · demo · ACP COCKPIT")
+        expect(frame).toContain("codex - gpt-5 (applied) - provider default - fast (unsupported)")
         expect(frame).toContain("workflow RUNNING")
         expect(frame).toContain("TASKS 1/3")
         expect(frame).toContain("codex")
@@ -44,6 +45,11 @@ describe("read-only progress cockpit", () => {
         expect(frame).toMatch(/> [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s+task_02/)
         expect(frame).toContain("TRANSCRIPT · task_02 · FOLLOWING ACTIVE")
         expect(frame).toContain("Selected task transcript")
+        expect(frame).not.toContain("entries · codex")
+        const lines = frame.split("\n")
+        const titleLine = lines.findIndex((line) => line.includes("SPEC FINDER · demo · ACP COCKPIT"))
+        const identityLine = lines.findIndex((line) => line.includes("codex - gpt-5 (applied) - provider default - fast (unsupported)"))
+        expect(identityLine).toBe(titleLine + 1)
       } finally {
         await destroy(screen)
       }

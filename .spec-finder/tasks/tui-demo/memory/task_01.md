@@ -15,7 +15,7 @@
 - `.spec-finder/config.json` parsed successfully as version 2 with provider `codex`, model `gpt-5.6-sol`, reasoning `high`, speed `normal`, and permissions `prompt`.
 - Focused `bun run check` exited 0 with exact output `$ tsc --noEmit` and no TypeScript errors.
 - Repository `bun run verify` exited 0: TypeScript passed, 59 tests passed with 0 failures, and the Bun build completed.
-- Fresh report-phase verification on 2026-08-08 reproduced both results: `bun run check` exited 0 with exact output `$ tsc --noEmit`; `bun run verify` exited 0 with 59 passing tests, 0 failures, 292 `expect()` calls across 13 files, and a successful 17-module Bun build.
+- Final report-phase verification on 2026-08-08 reproduced both results after concurrent worktree movement: `bun run check` exited 0 with exact output `$ tsc --noEmit`; `bun run verify` exited 0 with 59 passing tests, 0 failures, 298 `expect()` calls across 13 files, and a successful 17-module Bun build.
 
 ## Files / Surfaces
 
@@ -30,5 +30,5 @@
 
 - The report phase should preserve the focused check evidence exactly and distinguish the pre-existing Git dirt from this session's task-memory-only lifecycle write.
 - Final `git status --short` showed `M .spec-finder/tasks/tui-demo/memory/task_01.md`, pre-existing `M src/ui/App.tsx`, and pre-existing untracked `.spec-finder/tasks/ordered-multiple-task-run/adrs/adr-003-coordinator-batch-envelope-active-projection.md`; the application diff remained 6 additions and 4 deletions, unchanged from baseline.
-- The report-phase worktree snapshot also contained runtime-owned `.spec-finder/tasks/tui-demo/task_01.md` status movement plus unrelated or post-session changes under `skills/sf-create-tasks/`, `src/ui/cockpit.tsx`, and `.spec-finder/tasks/ad-hoc-acp-exec/`. These were not present in the implementation session's recorded final status and are not attributable to this read-only task.
-- The final report should use a completed verdict from the requirement and terminal evidence while stating that the runtime-owned task frontmatter currently reads `failed`; the report phase must not edit that status.
+- Report-phase Git state moved concurrently. The final pre-report-handoff snapshot contained this task-memory write, `src/ui/App.tsx`, `tests/cockpit.test.tsx`, an untracked ad-hoc packet idea, and the new task report. The source, test, and ad-hoc packet changes were not present in the implementation session's recorded final status and are not attributable to this read-only task.
+- Fresh requirement mapping found no failed or blocked numbered task requirements; the runtime-owned task frontmatter currently reads `failed`, and the report phase must not edit that status.
