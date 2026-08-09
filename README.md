@@ -78,6 +78,36 @@ For logs without the cockpit:
 spec-finder run my-feature --no-ui
 ```
 
+### Ordered batch runs
+
+Batch mode is an opt-in command for a declared sequence. Use exactly one comma-separated list with
+`--multiple`; packets run serially in the order supplied and the first failure or cancellation stops the sequence:
+
+```bash
+spec-finder run --multiple first-packet,second-packet,third-packet
+spec-finder run --multiple first-packet,second-packet,third-packet --no-ui \
+  --provider codex --model gpt-5.6-sol --reasoning xhigh --speed fast
+```
+
+The batch branch supports the same runtime flags shown above: `--no-ui`, `--provider NAME`, `--model ID`,
+`--reasoning LEVEL`, and `--speed MODE`. It rejects positional slugs, a second `--multiple`, empty or duplicate
+entries, malformed or unknown packet slugs, option-like entries, unknown options, and missing flag values before
+any packet starts.
+
+Every declared packet receives one outcome:
+
+| Outcome | Meaning and recovery |
+|---|---|
+| `succeeded` | The packet completed. `already complete` means no tasks remained and still counts as success. |
+| `failed` | The packet stopped on a task, provider, permission, or report failure; later packets are `not_started`. Resolve the issue and rerun manually. |
+| `cancelled` | The operator or ACP cancelled the packet; later packets are `not_started`. Rerun manually when ready. |
+| `not_started` | The packet was declared after the stopping packet and was never launched. |
+
+An all-success (including already-complete) sequence exits 0. Preflight rejection, failure, and cancellation exit 1.
+Batch mode is serial and fail-fast: it performs no automatic retry, continue-on-error, parallel execution, or resume,
+and introduces no persistence or durable batch history, rollback, or telemetry. Earlier successful packets remain
+completed when a later packet stops.
+
 Runtime overrides are explicit and validated:
 
 ```bash
@@ -125,7 +155,8 @@ spec-finder config
 ```text
 spec-finder setup [--agent claude|codex|cursor]... [--local|--global] [--copy|--symlink]
 spec-finder upgrade
-spec-finder run <task_slug> [--no-ui]
+spec-finder run <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
+spec-finder run --multiple <slug1,slug2,...> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
 spec-finder config
 spec-finder version
 ```

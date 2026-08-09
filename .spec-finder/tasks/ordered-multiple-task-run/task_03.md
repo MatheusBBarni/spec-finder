@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Add Batch Events and Active-Packet Store Projection
 type: backend
 complexity: high

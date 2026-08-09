@@ -343,15 +343,24 @@ export async function runBatch(
   const root = options.root ?? process.cwd()
   const slugs = [...options.slugs]
 
+  options.onEvent?.({
+    type: "batch_started",
+    slugs,
+    total: slugs.length,
+    config: options.config,
+  })
+
   let preflight: BatchPreflight
   try {
     preflight = await preflightBatch(root, slugs)
   } catch {
-    return {
+    const result: BatchResult = {
       ok: false,
       status: "preflight_failed",
       packets: slugs.map((slug) => ({ slug, outcome: "not_started" })),
     }
+    emitBatchFinished(options.onEvent, result)
+    return result
   }
 
   const runner = options.packetRunner ?? runTaskPacket
@@ -366,8 +375,19 @@ export async function runBatch(
     const packet = preflight.packets[index]!
     if (options.signal.aborted) {
       appendNotStarted(summaries, preflight.packets, index)
-      return cancelledBatchResult(summaries)
+      const result = cancelledBatchResult(summaries)
+      emitBatchFinished(options.onEvent, result)
+      return result
     }
+
+    options.onEvent?.({
+      type: "batch_packet_started",
+      slug: packet.slug,
+      index,
+      total: preflight.packets.length,
+      config: options.config,
+      tasks: packet.tasks,
+    })
 
     let result: RunTaskPacketResult
     try {
@@ -387,33 +407,70 @@ export async function runBatch(
         outcome: cancelled ? "cancelled" : "failed",
         detail: "stopped",
       })
+      options.onEvent?.({
+        type: "batch_packet_finished",
+        slug: packet.slug,
+        index,
+        outcome: cancelled ? "cancelled" : "failed",
+        detail: "stopped",
+      })
       appendNotStarted(summaries, preflight.packets, index + 1)
-      return cancelled
+      const batchResult = cancelled
         ? cancelledBatchResult(summaries, packet.slug)
         : failedBatchResult(summaries, packet.slug)
+      emitBatchFinished(options.onEvent, batchResult)
+      return batchResult
     }
 
     const cancelled = options.signal.aborted || cancellationObserved || resultIndicatesCancellation(result)
     if (cancelled) {
       summaries.push({ slug: packet.slug, outcome: "cancelled", detail: "stopped" })
+      options.onEvent?.({
+        type: "batch_packet_finished",
+        slug: packet.slug,
+        index,
+        outcome: "cancelled",
+        detail: "stopped",
+      })
       appendNotStarted(summaries, preflight.packets, index + 1)
-      return cancelledBatchResult(summaries, packet.slug)
+      const batchResult = cancelledBatchResult(summaries, packet.slug)
+      emitBatchFinished(options.onEvent, batchResult)
+      return batchResult
     }
 
     if (!result || !result.ok) {
       summaries.push({ slug: packet.slug, outcome: "failed", detail: "stopped" })
+      options.onEvent?.({
+        type: "batch_packet_finished",
+        slug: packet.slug,
+        index,
+        outcome: "failed",
+        detail: "stopped",
+      })
       appendNotStarted(summaries, preflight.packets, index + 1)
-      return failedBatchResult(summaries, packet.slug)
+      const batchResult = failedBatchResult(summaries, packet.slug)
+      emitBatchFinished(options.onEvent, batchResult)
+      return batchResult
     }
 
-    summaries.push({
+    const summary = {
       slug: packet.slug,
       outcome: "succeeded",
       detail: packet.orderedTasks.length === 0 ? "already_complete" : "completed",
+    } as const
+    summaries.push(summary)
+    options.onEvent?.({
+      type: "batch_packet_finished",
+      slug: packet.slug,
+      index,
+      outcome: "succeeded",
+      detail: summary.detail,
     })
   }
 
-  return { ok: true, status: "completed", packets: summaries }
+  const result = { ok: true, status: "completed", packets: summaries } as const
+  emitBatchFinished(options.onEvent, result)
+  return result
 }
 
 // Descriptive aliases keep the coordinator seam discoverable without creating
@@ -442,6 +499,17 @@ function cancelledBatchResult(summaries: PacketSummary[], stoppingSlug?: string)
   return stoppingSlug
     ? { ok: false, status: "cancelled", packets: summaries, stoppingSlug }
     : { ok: false, status: "cancelled", packets: summaries }
+}
+
+function emitBatchFinished(listener: RunEventListener | undefined, result: BatchResult): void {
+  if (!listener) return
+  listener({
+    type: "batch_finished",
+    ok: result.ok,
+    status: result.status,
+    packets: result.packets,
+    ...(result.stoppingSlug ? { stoppingSlug: result.stoppingSlug } : {}),
+  })
 }
 
 function isCancellationEvent(event: RunEvent): boolean {

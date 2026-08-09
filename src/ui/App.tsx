@@ -1,11 +1,13 @@
 import type { ScrollBoxRenderable } from "@opentui/core"
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react"
 import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react"
+import type { PacketOutcome, PacketSummary } from "../batch.ts"
 import type { TaskStatus } from "../tasks.ts"
 import {
   selectSelectedTask,
   selectSelectedTranscript,
   selectTaskReason,
+  selectUnfinishedTasks,
   type CockpitState,
   type CockpitStore,
   type CockpitTask,
@@ -208,10 +210,12 @@ function LiveCockpit({
   const mainDirection = compact ? "column" : "row"
   const progressWidth = Math.max(10, taskWidth - 4)
   const titleLimit = Math.max(10, taskWidth - 12)
+  const unfinishedTasks = selectUnfinishedTasks(state)
 
   return (
     <>
       <TitleBar state={state} width={width} />
+      {state.packetSummaries.length > 0 || state.batchStatus !== null ? <BatchSequenceSummary state={state} width={width} compact={compact} /> : null}
       <box height={1} backgroundColor={colors.background}>
         <text fg={colors.border} wrapMode="none">{clip("─".repeat(Math.max(width, 1)), width)}</text>
       </box>
@@ -233,7 +237,8 @@ function LiveCockpit({
           <text fg={colors.active} wrapMode="none" flexShrink={0}>{progressBar(state, progressWidth)}</text>
           <scrollbox id="task-scroll" ref={taskListRef} flexGrow={1} viewportCulling>
             {state.tasks.length === 0 ? <text fg={colors.muted}>Waiting for task packet…</text> : null}
-            {state.tasks.map((task) => (
+            {state.tasks.length > 0 && unfinishedTasks.length === 0 ? <text fg={colors.muted}>No unfinished tasks</text> : null}
+            {unfinishedTasks.map((task) => (
               <TaskRow
                 key={task.id}
                 task={task}
@@ -322,10 +327,8 @@ function TaskRow({
 }
 
 function TitleBar({ state, width }: { state: CockpitState; width: number }) {
-  const status = state.finished
-    ? state.finished.ok ? "● workflow COMPLETE" : "● workflow FAILED"
-    : state.activeTaskId ? "● workflow RUNNING" : "● workflow PREPARING"
-  const statusColor = state.finished?.ok === false ? colors.danger : state.finished ? colors.success : colors.active
+  const status = workflowStatusText(state)
+  const statusColor = workflowStatusColor(state)
   const contentWidth = Math.max(width - 2, 1)
   const statusText = clip(status, Math.max(12, contentWidth))
   const title = `SPEC FINDER · ${state.slug || "cockpit"} · ACP COCKPIT`
@@ -339,6 +342,122 @@ function TitleBar({ state, width }: { state: CockpitState; width: number }) {
         <text fg={statusColor} wrapMode="none"><strong>{statusText}</strong></text>
       </box>
       <text fg={colors.muted} wrapMode="none">{clip(identity, contentWidth)}</text>
+    </box>
+  )
+}
+
+function BatchSequenceSummary({
+  state,
+  width,
+  compact,
+}: {
+  state: CockpitState
+  width: number
+  compact: boolean
+}) {
+  const panelWidth = Math.max(24, width - 2)
+  const innerWidth = Math.max(panelWidth - 4, 18)
+  const guidance = batchRecoveryGuidance(state)
+  const rows = state.packetSummaries.map((summary, index) => (
+    <BatchPacketRow
+      key={`${summary.slug}-${index}`}
+      state={state}
+      summary={summary}
+      index={index}
+      width={innerWidth}
+      compact={compact}
+    />
+  ))
+  const contentHeight = 1 + rows.length + guidance.length
+
+  return (
+    <box
+      height={contentHeight + 2}
+      width={panelWidth}
+      marginLeft={1}
+      borderStyle="single"
+      borderColor={batchPanelColor(state)}
+      backgroundColor={colors.panel}
+      paddingLeft={1}
+      paddingRight={1}
+      flexDirection="column"
+      flexShrink={0}
+    >
+      <text fg={colors.textStrong} wrapMode="none" flexShrink={0}>
+        <strong>{fit(batchHeading(state), innerWidth)}</strong>
+      </text>
+      {rows}
+      {guidance.map((line, index) => (
+        <text key={`${line}-${index}`} fg={index === guidance.length - 1 ? colors.muted : state.stoppingPacket ? colors.warning : colors.muted} wrapMode="none" flexShrink={0}>
+          {fit(line, innerWidth)}
+        </text>
+      ))}
+    </box>
+  )
+}
+
+function BatchPacketRow({
+  state,
+  summary,
+  index,
+  width,
+  compact,
+}: {
+  state: CockpitState
+  summary: PacketSummary
+  index: number
+  width: number
+  compact: boolean
+}) {
+  const displayOutcome = batchPacketDisplayOutcome(state, summary, index)
+  const icon = batchPacketIcon(displayOutcome)
+  const label = batchPacketLabel(displayOutcome)
+  const detail = summary.detail === "already_complete" ? " · already complete" : ""
+  const prefix = compact ? `${index + 1}. ` : `PACKET ${index + 1} · `
+  const primary = `${prefix}${icon} ${summary.slug} · ${label}${detail}`
+  const statusFirst = `${prefix}${icon} ${label}${detail} · ${summary.slug}`
+  return (
+    <text fg={batchPacketColor(displayOutcome)} wrapMode="none" flexShrink={0}>
+      <strong>{fit(primary.length <= width ? primary : statusFirst, width)}</strong>
+    </text>
+  )
+}
+
+function BatchRunSummary({ state, width }: { state: CockpitState; width: number }) {
+  const panelWidth = Math.max(24, Math.min(width - 2, 100))
+  const innerWidth = Math.max(panelWidth - 4, 18)
+  const guidance = batchRecoveryGuidance(state)
+  return (
+    <box flexGrow={1} flexDirection="column" paddingLeft={1} paddingTop={1}>
+      <box
+        width={panelWidth}
+        borderStyle="single"
+        borderColor={batchPanelColor(state)}
+        backgroundColor={colors.panel}
+        paddingLeft={1}
+        paddingRight={1}
+        flexDirection="column"
+      >
+        <text fg={colors.accentBright} wrapMode="none"><strong>RUN.STATUS · BATCH SEQUENCE</strong></text>
+        <text fg={batchPanelColor(state)} wrapMode="none"><strong>{fit(batchHeading(state), innerWidth)}</strong></text>
+        {state.packetSummaries.map((summary, index) => (
+          <BatchPacketRow
+            key={`${summary.slug}-${index}`}
+            state={state}
+            summary={summary}
+            index={index}
+            width={innerWidth}
+            compact={false}
+          />
+        ))}
+        {guidance.map((line, index) => <text key={`${line}-${index}`} fg={index === guidance.length - 1 ? colors.muted : state.stoppingPacket ? colors.warning : colors.muted} wrapMode="none">{fit(line, innerWidth)}</text>)}
+        {state.finished?.message ? <text fg={colors.muted} wrapMode="none">{fit(state.finished.message, innerWidth)}</text> : null}
+        <text fg={colors.active} wrapMode="none">{batchProgressBar(state, innerWidth)}</text>
+      </box>
+      <box height={1} marginTop={1} paddingLeft={1}>
+        <text fg={colors.muted} wrapMode="none">[<span fg={colors.accent}>ESC</span>] BACK   [<span fg={colors.accent}>Q</span>] QUIT   Active packet detail remains available after BACK</text>
+      </box>
+      <box flexGrow={1} />
     </box>
   )
 }
@@ -390,6 +509,8 @@ function TaskStatusStrip({ state, task }: { state: CockpitState; task: CockpitTa
 }
 
 function RunSummary({ state, width }: { state: CockpitState; width: number }) {
+  if (state.packetSummaries.length > 0 || state.batchStatus !== null) return <BatchRunSummary state={state} width={width} />
+
   const completed = state.tasks.filter((task) => isCompleted(task.status)).length
   const failed = state.tasks.filter((task) => task.status === "failed").length
   const blocked = state.tasks.filter((task) => task.status === "blocked").length
@@ -480,6 +601,149 @@ function HelpOverlay({ width, height }: { width: number; height: number }) {
       <text fg={colors.muted} marginTop={1}>View only: navigation, scrolling, help, and terminal cancellation.</text>
     </box>
   )
+}
+
+type BatchDisplayOutcome = PacketOutcome | "running"
+
+function workflowStatusText(state: CockpitState): string {
+  if (state.packetSummaries.length > 0 || state.batchStatus !== null) {
+    if (state.batchStatus === "cancelled") return "● batch CANCELLED"
+    if (state.batchStatus === "failed" || state.batchStatus === "preflight_failed") return "● batch FAILED"
+    if (state.batchStatus === "completed") return "● batch COMPLETE"
+    if (state.batchStatus === "running") return "● batch RUNNING"
+    return "● batch PREPARING"
+  }
+  return state.finished
+    ? state.finished.ok ? "● workflow COMPLETE" : "● workflow FAILED"
+    : state.activeTaskId ? "● workflow RUNNING" : "● workflow PREPARING"
+}
+
+function workflowStatusColor(state: CockpitState): string {
+  if (state.batchStatus === "cancelled") return colors.warning
+  if (state.batchStatus === "failed" || state.batchStatus === "preflight_failed" || state.finished?.ok === false) return colors.danger
+  if (state.batchStatus === "completed" || state.finished) return colors.success
+  return state.packetSummaries.length > 0 ? colors.active : state.activeTaskId ? colors.active : colors.muted
+}
+
+function batchHeading(state: CockpitState): string {
+  const active = state.activePacket
+    ? `ACTIVE PACKET: ${state.activePacket.slug}`
+    : "ACTIVE PACKET: none"
+  return `BATCH SEQUENCE · POSITION ${batchSequencePosition(state)} · ${batchStatusLabel(state)} · ${active}`
+}
+
+function batchSequencePosition(state: CockpitState): string {
+  const total = state.activePacket?.total ?? state.packetSummaries.length
+  if (total === 0) return "0/0"
+  if (state.activePacket) return `${state.activePacket.index + 1}/${total}`
+  if (state.batchStatus === "completed") return `${total}/${total}`
+  if (state.stoppingPacket) return `${state.stoppingPacket.index + 1}/${total}`
+  return `0/${total}`
+}
+
+function batchStatusLabel(state: CockpitState): string {
+  switch (state.batchStatus) {
+    case "running":
+      return "RUNNING"
+    case "completed":
+      return "COMPLETE"
+    case "failed":
+      return "FAILED"
+    case "cancelled":
+      return "CANCELLED"
+    case "preflight_failed":
+      return "PREFLIGHT FAILED"
+    default:
+      return "PREPARING"
+  }
+}
+
+function batchPacketDisplayOutcome(
+  state: CockpitState,
+  summary: PacketSummary,
+  index: number,
+): BatchDisplayOutcome {
+  if (
+    state.batchStatus === "running"
+    && state.activePacket?.index === index
+    && summary.outcome === "not_started"
+  ) return "running"
+  return summary.outcome
+}
+
+function batchPacketIcon(outcome: BatchDisplayOutcome): string {
+  switch (outcome) {
+    case "running":
+      return "▶"
+    case "succeeded":
+      return "✓"
+    case "failed":
+      return "✗"
+    case "cancelled":
+      return "⊘"
+    case "not_started":
+      return "·"
+  }
+}
+
+function batchPacketLabel(outcome: BatchDisplayOutcome): string {
+  return outcome
+}
+
+function batchPacketColor(outcome: BatchDisplayOutcome): string {
+  if (outcome === "succeeded") return colors.success
+  if (outcome === "failed") return colors.danger
+  if (outcome === "cancelled") return colors.warning
+  if (outcome === "running") return colors.active
+  return colors.text
+}
+
+function batchPanelColor(state: CockpitState): string {
+  if (state.batchStatus === "cancelled") return colors.warning
+  if (state.batchStatus === "failed" || state.batchStatus === "preflight_failed") return colors.danger
+  if (state.batchStatus === "completed") return colors.success
+  return colors.accent
+}
+
+function batchRecoveryGuidance(state: CockpitState): readonly string[] {
+  if (state.batchStatus === "preflight_failed") {
+    return [
+      "STOPPING PACKET: none · preflight_failed · no packets started",
+      "RECOVERY: no automatic retry; fix the packet list and rerun manually",
+    ]
+  }
+
+  const stopping = state.stoppingPacket
+  if (!stopping && state.batchStatus !== "failed" && state.batchStatus !== "cancelled") return []
+
+  if (!stopping) {
+    return [
+      `STOPPING PACKET: unavailable · ${state.batchStatus ?? "stopped"}`,
+      "RECOVERY: no automatic retry; resolve the issue and rerun manually",
+    ]
+  }
+
+  const later = state.notStartedPackets
+    .filter((summary) => summary.slug !== stopping.slug)
+    .map((summary) => summary.slug)
+  const laterText = later.length > 0 ? `${later.join(", ")} not_started` : "none"
+  const action = stopping.outcome === "cancelled"
+    ? "rerun manually when ready"
+    : "resolve the issue and rerun manually"
+  return [
+    `STOPPING PACKET: ${stopping.slug} · ${stopping.outcome}`,
+    `LATER PACKETS: ${laterText}`,
+    `RECOVERY: no automatic retry; ${action}`,
+  ]
+}
+
+function batchProgressBar(state: CockpitState, width: number): string {
+  if (width <= 0) return ""
+  const total = state.packetSummaries.length
+  if (total === 0) return "░".repeat(width)
+  const settled = state.packetSummaries.filter((summary) => summary.outcome !== "not_started").length
+  const filled = Math.min(width, Math.max(0, Math.round((settled / total) * width)))
+  return "█".repeat(filled) + "░".repeat(width - filled)
 }
 
 function buildHeaderLines(
