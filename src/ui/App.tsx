@@ -56,6 +56,7 @@ export function App({ store, onCancel }: AppProps) {
   const { width, height } = useTerminalDimensions()
   const taskListRef = useRef<ScrollBoxRenderable>(null)
   const transcriptRef = useRef<ScrollBoxRenderable>(null)
+  const batchSummaryRef = useRef<ScrollBoxRenderable>(null)
   const taskTimings = useRef(new Map<string, TaskTiming>())
   const summaryDismissed = useRef(false)
   const [spinnerIndex, setSpinnerIndex] = useState(0)
@@ -118,6 +119,12 @@ export function App({ store, onCancel }: AppProps) {
   }, [state.selectedTaskId])
 
   useEffect(() => {
+    if (state.packetSummaries.length === 0) return
+    const index = state.stoppingPacket?.index ?? state.activePacket?.index ?? 0
+    batchSummaryRef.current?.scrollChildIntoView(batchPacketRowId(index))
+  }, [state.activePacket?.index, state.packetSummaries.length, state.stoppingPacket?.index, summaryOpen])
+
+  useEffect(() => {
     if (state.finished) {
       if (!summaryDismissed.current) setSummaryOpen(true)
       return
@@ -160,7 +167,7 @@ export function App({ store, onCancel }: AppProps) {
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={colors.background}>
       {summaryOpen ? (
-        <RunSummary state={state} width={width} />
+        <RunSummary state={state} width={width} height={height} batchSummaryRef={batchSummaryRef} />
       ) : (
         <LiveCockpit
           state={state}
@@ -171,6 +178,7 @@ export function App({ store, onCancel }: AppProps) {
           selectedTranscript={selectedTranscript}
           taskListRef={taskListRef}
           transcriptRef={transcriptRef}
+          batchSummaryRef={batchSummaryRef}
           spinner={spinner}
           clock={clock}
           taskTimings={taskTimings.current}
@@ -189,6 +197,7 @@ function LiveCockpit({
   selectedTranscript,
   taskListRef,
   transcriptRef,
+  batchSummaryRef,
   spinner,
   clock,
   taskTimings,
@@ -201,6 +210,7 @@ function LiveCockpit({
   selectedTranscript: readonly TranscriptEntry[]
   taskListRef: RefObject<ScrollBoxRenderable | null>
   transcriptRef: RefObject<ScrollBoxRenderable | null>
+  batchSummaryRef: RefObject<ScrollBoxRenderable | null>
   spinner: string
   clock: number
   taskTimings: Map<string, TaskTiming>
@@ -215,7 +225,9 @@ function LiveCockpit({
   return (
     <>
       <TitleBar state={state} width={width} />
-      {state.packetSummaries.length > 0 || state.batchStatus !== null ? <BatchSequenceSummary state={state} width={width} compact={compact} /> : null}
+      {state.packetSummaries.length > 0 || state.batchStatus !== null
+        ? <BatchSequenceSummary state={state} width={width} height={height} compact={compact} scrollRef={batchSummaryRef} />
+        : null}
       <box height={1} backgroundColor={colors.background}>
         <text fg={colors.border} wrapMode="none">{clip("─".repeat(Math.max(width, 1)), width)}</text>
       </box>
@@ -349,26 +361,45 @@ function TitleBar({ state, width }: { state: CockpitState; width: number }) {
 function BatchSequenceSummary({
   state,
   width,
+  height,
   compact,
+  scrollRef,
 }: {
   state: CockpitState
   width: number
+  height: number
   compact: boolean
+  scrollRef: RefObject<ScrollBoxRenderable | null>
 }) {
   const panelWidth = Math.max(24, width - 2)
   const innerWidth = Math.max(panelWidth - 4, 18)
   const guidance = batchRecoveryGuidance(state)
-  const rows = state.packetSummaries.map((summary, index) => (
-    <BatchPacketRow
-      key={`${summary.slug}-${index}`}
-      state={state}
-      summary={summary}
-      index={index}
-      width={innerWidth}
-      compact={compact}
-    />
-  ))
-  const contentHeight = 1 + rows.length + guidance.length
+  if (height <= 24) {
+    const heading = `BATCH ${state.packetSummaries.length} PACKETS · ${batchHeading(state)}`
+    return (
+      <box
+        height={1 + guidance.length}
+        paddingLeft={1}
+        paddingRight={1}
+        flexDirection="column"
+        flexShrink={0}
+        backgroundColor={colors.panel}
+      >
+        <text fg={batchPanelColor(state)} wrapMode="none" flexShrink={0}>
+          <strong>{fit(heading, Math.max(width - 2, 18))}</strong>
+        </text>
+        {guidance.map((line, index) => (
+          <text key={`${line}-${index}`} fg={index === guidance.length - 1 ? colors.muted : state.stoppingPacket ? colors.warning : colors.muted} wrapMode="none" flexShrink={0}>
+            {fit(line, Math.max(width - 2, 18))}
+          </text>
+        ))}
+      </box>
+    )
+  }
+
+  const maxRows = compact ? 2 : Math.max(2, Math.min(5, Math.floor(height / 8)))
+  const rowHeight = Math.max(1, Math.min(maxRows, state.packetSummaries.length))
+  const contentHeight = 1 + rowHeight + guidance.length
 
   return (
     <box
@@ -386,7 +417,18 @@ function BatchSequenceSummary({
       <text fg={colors.textStrong} wrapMode="none" flexShrink={0}>
         <strong>{fit(batchHeading(state), innerWidth)}</strong>
       </text>
-      {rows}
+      <scrollbox id="batch-sequence-scroll" ref={scrollRef} height={rowHeight} viewportCulling>
+        {state.packetSummaries.map((summary, index) => (
+          <BatchPacketRow
+            key={`${summary.slug}-${index}`}
+            state={state}
+            summary={summary}
+            index={index}
+            width={innerWidth}
+            compact={compact}
+          />
+        ))}
+      </scrollbox>
       {guidance.map((line, index) => (
         <text key={`${line}-${index}`} fg={index === guidance.length - 1 ? colors.muted : state.stoppingPacket ? colors.warning : colors.muted} wrapMode="none" flexShrink={0}>
           {fit(line, innerWidth)}
@@ -417,16 +459,31 @@ function BatchPacketRow({
   const primary = `${prefix}${icon} ${summary.slug} · ${label}${detail}`
   const statusFirst = `${prefix}${icon} ${label}${detail} · ${summary.slug}`
   return (
-    <text fg={batchPacketColor(displayOutcome)} wrapMode="none" flexShrink={0}>
+    <text id={batchPacketRowId(index)} fg={batchPacketColor(displayOutcome)} wrapMode="none" flexShrink={0}>
       <strong>{fit(primary.length <= width ? primary : statusFirst, width)}</strong>
     </text>
   )
 }
 
-function BatchRunSummary({ state, width }: { state: CockpitState; width: number }) {
+function BatchRunSummary({
+  state,
+  width,
+  height,
+  scrollRef,
+}: {
+  state: CockpitState
+  width: number
+  height: number
+  scrollRef: RefObject<ScrollBoxRenderable | null>
+}) {
   const panelWidth = Math.max(24, Math.min(width - 2, 100))
   const innerWidth = Math.max(panelWidth - 4, 18)
   const guidance = batchRecoveryGuidance(state)
+  const messageHeight = state.finished?.message ? 1 : 0
+  const rowHeight = Math.max(1, Math.min(
+    state.packetSummaries.length,
+    height - guidance.length - messageHeight - 8,
+  ))
   return (
     <box flexGrow={1} flexDirection="column" paddingLeft={1} paddingTop={1}>
       <box
@@ -440,22 +497,24 @@ function BatchRunSummary({ state, width }: { state: CockpitState; width: number 
       >
         <text fg={colors.accentBright} wrapMode="none"><strong>RUN.STATUS · BATCH SEQUENCE</strong></text>
         <text fg={batchPanelColor(state)} wrapMode="none"><strong>{fit(batchHeading(state), innerWidth)}</strong></text>
-        {state.packetSummaries.map((summary, index) => (
-          <BatchPacketRow
-            key={`${summary.slug}-${index}`}
-            state={state}
-            summary={summary}
-            index={index}
-            width={innerWidth}
-            compact={false}
-          />
-        ))}
+        <scrollbox id="batch-run-scroll" ref={scrollRef} height={rowHeight} focused viewportCulling>
+          {state.packetSummaries.map((summary, index) => (
+            <BatchPacketRow
+              key={`${summary.slug}-${index}`}
+              state={state}
+              summary={summary}
+              index={index}
+              width={innerWidth}
+              compact={false}
+            />
+          ))}
+        </scrollbox>
         {guidance.map((line, index) => <text key={`${line}-${index}`} fg={index === guidance.length - 1 ? colors.muted : state.stoppingPacket ? colors.warning : colors.muted} wrapMode="none">{fit(line, innerWidth)}</text>)}
         {state.finished?.message ? <text fg={colors.muted} wrapMode="none">{fit(state.finished.message, innerWidth)}</text> : null}
         <text fg={colors.active} wrapMode="none">{batchProgressBar(state, innerWidth)}</text>
       </box>
       <box height={1} marginTop={1} paddingLeft={1}>
-        <text fg={colors.muted} wrapMode="none">[<span fg={colors.accent}>ESC</span>] BACK   [<span fg={colors.accent}>Q</span>] QUIT   Active packet detail remains available after BACK</text>
+        <text fg={colors.muted} wrapMode="none">[<span fg={colors.accent}>↑↓/PG/HOME/END</span>] PACKETS   [<span fg={colors.accent}>ESC</span>] BACK   [<span fg={colors.accent}>Q</span>] QUIT</text>
       </box>
       <box flexGrow={1} />
     </box>
@@ -508,8 +567,20 @@ function TaskStatusStrip({ state, task }: { state: CockpitState; task: CockpitTa
   )
 }
 
-function RunSummary({ state, width }: { state: CockpitState; width: number }) {
-  if (state.packetSummaries.length > 0 || state.batchStatus !== null) return <BatchRunSummary state={state} width={width} />
+function RunSummary({
+  state,
+  width,
+  height,
+  batchSummaryRef,
+}: {
+  state: CockpitState
+  width: number
+  height: number
+  batchSummaryRef: RefObject<ScrollBoxRenderable | null>
+}) {
+  if (state.packetSummaries.length > 0 || state.batchStatus !== null) {
+    return <BatchRunSummary state={state} width={width} height={height} scrollRef={batchSummaryRef} />
+  }
 
   const completed = state.tasks.filter((task) => isCompleted(task.status)).length
   const failed = state.tasks.filter((task) => task.status === "failed").length
@@ -874,6 +945,10 @@ function footerText(state: CockpitState, compact: boolean): string {
 
 function taskRowId(taskId: string): string {
   return `task-row-${taskId}`
+}
+
+function batchPacketRowId(index: number): string {
+  return `batch-packet-row-${index}`
 }
 
 function statusIcon(status: TaskStatus): string {

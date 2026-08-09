@@ -116,7 +116,7 @@ export class CockpitStore {
       case "run_started": {
         // A packet engine nested inside a batch still emits its legacy
         // lifecycle events. They must not reset the batch projection.
-        if (this.state.batchStatus === "running") break
+        if (this.state.batchStatus !== null) break
         this.sequence = 0
         const tasks = event.tasks.map(toCockpitTask)
         const transcripts = Object.fromEntries(tasks.map((task) => [task.id, [] as readonly TranscriptEntry[]]))
@@ -171,7 +171,7 @@ export class CockpitStore {
         // a second permission-control path in the cockpit.
         break
       case "run_finished":
-        if (this.state.batchStatus === "running") break
+        if (this.state.batchStatus !== null) break
         this.set({ ...this.state, finished: { ok: event.ok, message: event.message }, activeTaskId: null })
         break
     }
@@ -369,7 +369,7 @@ export class CockpitStore {
       ? localTaskId
       : remainingTasks.some((task) => task.id === this.state.selectedTaskId)
         ? this.state.selectedTaskId
-        : firstUnfinishedTaskId(remainingTasks)
+        : firstUnfinishedTaskId(remainingTasks) ?? (isCompleted(status) ? localTaskId : null)
     let transcripts = this.state.transcripts
     let taskReasons = this.state.taskReasons
 
@@ -436,13 +436,15 @@ export class CockpitStore {
 
   private localTaskId(taskId: string): string | null {
     if (this.state.batchStatus === null) return taskId
+    if (this.state.batchStatus !== "running") return null
     const activePacket = this.state.activePacket
     if (!activePacket) return null
 
     const separator = taskId.indexOf("/")
-    const qualifier = separator < 0 ? undefined : taskId.slice(0, separator)
-    const localTaskId = separator < 0 ? taskId : taskId.slice(separator + 1)
-    if (qualifier !== undefined && qualifier !== activePacket.slug) return null
+    if (separator < 1) return null
+    const qualifier = taskId.slice(0, separator)
+    const localTaskId = taskId.slice(separator + 1)
+    if (qualifier !== activePacket.slug) return null
     return this.state.tasks.some((task) => task.id === localTaskId) ? localTaskId : null
   }
 

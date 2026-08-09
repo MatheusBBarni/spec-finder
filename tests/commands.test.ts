@@ -264,12 +264,18 @@ describe("run command batch integration", () => {
       output: preflightTerminal.output,
       loadConfig: async () => DEFAULT_CONFIG,
       runBatch: async (options) => {
-        options.onEvent?.({ type: "batch_finished", ...preflight })
+        options.onEvent?.({
+          type: "batch_finished",
+          ...preflight,
+          message: "batch preflight failed:\n- packet missing: task packet not found",
+        })
         return preflight
       },
     })
     expect(preflightExit).toBe(1)
     expect(preflightTerminal.text()).toContain("batch: preflight failed; no packets started")
+    expect(preflightTerminal.text()).toContain("packet missing: task packet not found")
+    expect(preflightTerminal.text()).not.toContain("batch: starting")
     expect(preflightTerminal.text()).toContain("batch: packet outcome: missing not_started")
   })
 

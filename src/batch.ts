@@ -343,6 +343,20 @@ export async function runBatch(
   const root = options.root ?? process.cwd()
   const slugs = [...options.slugs]
 
+  let preflight: BatchPreflight
+  try {
+    preflight = await preflightBatch(root, slugs)
+  } catch (error) {
+    if (!(error instanceof BatchPreflightError)) throw error
+    const result: BatchResult = {
+      ok: false,
+      status: "preflight_failed",
+      packets: slugs.map((slug) => ({ slug, outcome: "not_started" })),
+    }
+    emitBatchFinished(options.onEvent, result, error.message)
+    return result
+  }
+
   options.onEvent?.({
     type: "batch_started",
     slugs,
@@ -350,29 +364,16 @@ export async function runBatch(
     config: options.config,
   })
 
-  let preflight: BatchPreflight
-  try {
-    preflight = await preflightBatch(root, slugs)
-  } catch {
-    const result: BatchResult = {
-      ok: false,
-      status: "preflight_failed",
-      packets: slugs.map((slug) => ({ slug, outcome: "not_started" })),
-    }
-    emitBatchFinished(options.onEvent, result)
-    return result
-  }
-
   const runner = options.packetRunner ?? runTaskPacket
   let cancellationObserved = false
-  const emit: RunEventListener = (event) => {
-    if (isCancellationEvent(event)) cancellationObserved = true
-    options.onEvent?.(event)
-  }
   const summaries: PacketSummary[] = []
 
   for (let index = 0; index < preflight.packets.length; index += 1) {
     const packet = preflight.packets[index]!
+    const emit: RunEventListener = (event) => {
+      if (isCancellationEvent(event)) cancellationObserved = true
+      options.onEvent?.(scopePacketTaskEvent(packet.slug, event))
+    }
     if (options.signal.aborted) {
       appendNotStarted(summaries, preflight.packets, index)
       const result = cancelledBatchResult(summaries)
@@ -501,7 +502,11 @@ function cancelledBatchResult(summaries: PacketSummary[], stoppingSlug?: string)
     : { ok: false, status: "cancelled", packets: summaries }
 }
 
-function emitBatchFinished(listener: RunEventListener | undefined, result: BatchResult): void {
+function emitBatchFinished(
+  listener: RunEventListener | undefined,
+  result: BatchResult,
+  message?: string,
+): void {
   if (!listener) return
   listener({
     type: "batch_finished",
@@ -509,7 +514,26 @@ function emitBatchFinished(listener: RunEventListener | undefined, result: Batch
     status: result.status,
     packets: result.packets,
     ...(result.stoppingSlug ? { stoppingSlug: result.stoppingSlug } : {}),
+    ...(message ? { message } : {}),
   })
+}
+
+function scopePacketTaskEvent(slug: string, event: RunEvent): RunEvent {
+  switch (event.type) {
+    case "task_status":
+    case "session_update":
+      return { ...event, taskId: qualifyTaskId(slug, event.taskId) }
+    case "activity":
+      return event.taskId
+        ? { ...event, taskId: qualifyTaskId(slug, event.taskId) }
+        : event
+    default:
+      return event
+  }
+}
+
+function qualifyTaskId(slug: string, taskId: string): string {
+  return taskId.includes("/") ? taskId : `${slug}/${taskId}`
 }
 
 function isCancellationEvent(event: RunEvent): boolean {

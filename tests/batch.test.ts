@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test"
+import type { SessionUpdate } from "@agentclientprotocol/sdk"
 import { access, mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DEFAULT_CONFIG } from "../src/config.ts"
+import type { RunEvent, RunEventListener } from "../src/events.ts"
+import { CockpitStore, selectTaskTranscript } from "../src/ui/store.ts"
 import {
   runBatch,
   parseMultipleArgs,
@@ -132,6 +135,7 @@ describe("batch preflight and serial coordination", () => {
     const root = await createRoot()
     const alpha = await createPacket(root, "alpha")
     const calls: string[] = []
+    const events: RunEvent[] = []
     const runner: PacketRunner = async (options) => {
       calls.push(options.slug)
       return { ok: true, completed: 1, failed: 0, blocked: 0 }
@@ -143,9 +147,14 @@ describe("batch preflight and serial coordination", () => {
       config: DEFAULT_CONFIG,
       signal: new AbortController().signal,
       packetRunner: runner,
+      onEvent: (event) => events.push(event),
     })
 
     expect(calls).toEqual([])
+    expect(events.some((event) => event.type === "batch_started")).toBe(false)
+    const finished = events.find((event) => event.type === "batch_finished")
+    expect(finished).toMatchObject({ type: "batch_finished", status: "preflight_failed" })
+    expect(finished?.type === "batch_finished" ? finished.message : undefined).toContain("packet missing")
     expect(result).toEqual({
       ok: false,
       status: "preflight_failed",
@@ -214,6 +223,78 @@ describe("batch preflight and serial coordination", () => {
         { slug: "gamma", outcome: "not_started" },
       ],
     })
+  })
+
+  test("scopes nested task events and rejects delayed output from an earlier packet", async () => {
+    const root = await createRoot()
+    await createPacket(root, "alpha")
+    await createPacket(root, "beta")
+    const store = new CockpitStore()
+    const taskEventIds: string[] = []
+    let alphaEmit: RunEventListener | undefined
+
+    const result = await runBatch({
+      root,
+      slugs: ["alpha", "beta"],
+      config: DEFAULT_CONFIG,
+      signal: new AbortController().signal,
+      onEvent: (event) => {
+        if (event.type === "task_status" || event.type === "session_update") {
+          taskEventIds.push(event.taskId)
+        } else if (event.type === "activity" && event.taskId) {
+          taskEventIds.push(event.taskId)
+        }
+        store.consume(event)
+      },
+      packetRunner: async (options) => {
+        if (options.slug === "alpha") {
+          alphaEmit = options.emit
+          options.emit({ type: "task_status", taskId: "task_01", status: "in_progress" })
+          options.emit({ type: "activity", taskId: "task_01", message: "alpha output" })
+          options.emit({
+            type: "session_update",
+            taskId: "task_01",
+            sessionId: "alpha-session",
+            update: message("alpha-message", "alpha streamed output"),
+          })
+          return { ok: true, completed: 1, failed: 0, blocked: 0 }
+        }
+
+        options.emit({ type: "task_status", taskId: "task_01", status: "in_progress" })
+        alphaEmit?.({ type: "activity", taskId: "task_01", message: "late alpha output" })
+        alphaEmit?.({
+          type: "session_update",
+          taskId: "task_01",
+          sessionId: "alpha-session",
+          update: message("alpha-late-message", "late alpha streamed output"),
+        })
+        options.emit({ type: "activity", taskId: "task_01", message: "beta output" })
+        options.emit({
+          type: "session_update",
+          taskId: "task_01",
+          sessionId: "beta-session",
+          update: message("beta-message", "beta streamed output"),
+        })
+        return { ok: true, completed: 1, failed: 0, blocked: 0 }
+      },
+    })
+
+    expect(result.ok).toBe(true)
+    expect(taskEventIds).toEqual([
+      "alpha/task_01",
+      "alpha/task_01",
+      "alpha/task_01",
+      "beta/task_01",
+      "alpha/task_01",
+      "alpha/task_01",
+      "beta/task_01",
+      "beta/task_01",
+    ])
+    const transcript = selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)
+    expect(transcript).toContain("beta output")
+    expect(transcript).toContain("beta streamed output")
+    expect(transcript).not.toContain("late alpha output")
+    expect(transcript).not.toContain("late alpha streamed output")
   })
 
   test("normalizes shared abort and ACP cancellation to cancelled", async () => {
@@ -421,4 +502,12 @@ async function expectMissing(path: string): Promise<void> {
     exists = false
   }
   expect(exists).toBe(false)
+}
+
+function message(messageId: string, text: string): SessionUpdate {
+  return {
+    sessionUpdate: "agent_message_chunk",
+    messageId,
+    content: { type: "text", text },
+  }
 }

@@ -278,8 +278,8 @@ describe("cockpit store", () => {
       total: 3,
       tasks: [task(1, "Alpha task")],
     })
-    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
-    store.consume({ type: "activity", taskId: "task_01", message: "Alpha output" })
+    store.consume({ type: "task_status", taskId: "alpha/task_01", status: "in_progress" })
+    store.consume({ type: "activity", taskId: "alpha/task_01", message: "Alpha output" })
     store.consume({ type: "batch_packet_finished", slug: "alpha", index: 0, outcome: "succeeded", detail: "completed" })
 
     store.consume({
@@ -312,8 +312,8 @@ describe("cockpit store", () => {
       total: 2,
       tasks: [task(1, "Alpha task")],
     })
-    store.consume({ type: "task_status", taskId: "task_01", status: "failed" })
-    store.consume({ type: "activity", taskId: "task_01", message: "Alpha failure" })
+    store.consume({ type: "task_status", taskId: "alpha/task_01", status: "failed" })
+    store.consume({ type: "activity", taskId: "alpha/task_01", message: "Alpha failure" })
     const alphaSnapshot = store.getSnapshot()
 
     store.consume({ type: "batch_packet_finished", slug: "alpha", index: 0, outcome: "failed", detail: "stopped" })
@@ -324,8 +324,9 @@ describe("cockpit store", () => {
       total: 2,
       tasks: [task(1, "Beta task")],
     })
-    store.consume({ type: "task_status", taskId: "task_01", status: "failed" })
-    store.consume({ type: "activity", taskId: "task_01", message: "Beta failure" })
+    store.consume({ type: "task_status", taskId: "beta/task_01", status: "failed" })
+    store.consume({ type: "activity", taskId: "beta/task_01", message: "Beta failure" })
+    store.consume({ type: "activity", taskId: "task_01", message: "bare stale event" })
     store.consume({ type: "activity", taskId: "alpha/task_01", message: "stale alpha event" })
 
     expect(Object.keys(alphaSnapshot.transcripts)).toEqual(["alpha/task_01"])
@@ -333,6 +334,7 @@ describe("cockpit store", () => {
     expect(Object.keys(store.getSnapshot().transcripts)).toEqual(["beta/task_01"])
     expect(selectTaskReason(store.getSnapshot(), "task_01")).toBe("Beta failure")
     expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).toContain("Beta failure")
+    expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).not.toContain("bare stale event")
     expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).not.toContain("stale alpha event")
   })
 
@@ -375,6 +377,50 @@ describe("cockpit store", () => {
       ok: false,
       message: "Batch cancelled at cancelled; later packets were not started",
     })
+  })
+
+  test("retains final transcript inspection and ignores late nested lifecycle events", () => {
+    const store = new CockpitStore()
+    store.consume({ type: "batch_started", slugs: ["alpha"], total: 1, config: DEFAULT_CONFIG })
+    store.consume({
+      type: "batch_packet_started",
+      slug: "alpha",
+      index: 0,
+      total: 1,
+      tasks: [task(1, "Final task")],
+    })
+    store.consume({ type: "task_status", taskId: "alpha/task_01", status: "in_progress" })
+    store.consume({ type: "activity", taskId: "alpha/task_01", message: "retained final output" })
+    store.consume({ type: "task_status", taskId: "alpha/task_01", status: "completed" })
+
+    expect(store.getSnapshot().selectedTaskId).toBe("task_01")
+    expect(selectUnfinishedTasks(store.getSnapshot())).toEqual([])
+    expect(selectSelectedTranscript(store.getSnapshot()).map((entry) => entry.text)).toEqual([
+      "retained final output",
+      "Task completed",
+    ])
+
+    store.consume({
+      type: "batch_packet_finished",
+      slug: "alpha",
+      index: 0,
+      outcome: "succeeded",
+      detail: "completed",
+    })
+    store.consume({
+      type: "batch_finished",
+      ok: true,
+      status: "completed",
+      packets: [{ slug: "alpha", outcome: "succeeded", detail: "completed" }],
+    })
+    const terminalState = store.getSnapshot()
+
+    store.consume({ type: "run_started", slug: "late", config: DEFAULT_CONFIG, tasks: [task(1, "Late reset")] })
+    store.consume({ type: "run_finished", ok: false, message: "late nested finish" })
+    store.consume({ type: "activity", taskId: "alpha/task_01", message: "late terminal output" })
+
+    expect(store.getSnapshot()).toBe(terminalState)
+    expect(selectSelectedTranscript(store.getSnapshot()).map((entry) => entry.text)).not.toContain("late terminal output")
   })
 })
 
