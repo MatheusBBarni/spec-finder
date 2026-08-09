@@ -8,6 +8,7 @@ import {
   selectSelectedTranscript,
   selectPacketTaskView,
   selectTaskCheckpoint,
+  selectTaskFailureDetail,
   selectTaskReason,
   selectVisibleTasks,
   type CockpitState,
@@ -51,9 +52,10 @@ export interface TaskTiming {
 interface AppProps {
   store: CockpitStore
   onCancel: () => void
+  onDismiss: () => void
 }
 
-export function App({ store, onCancel }: AppProps) {
+export function App({ store, onCancel, onDismiss }: AppProps) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
   const renderer = useRenderer()
   const { width, height } = useTerminalDimensions()
@@ -71,6 +73,7 @@ export function App({ store, onCancel }: AppProps) {
   summaryOpenRef.current = summaryOpen
   const compact = width < 80 || height < 24
   const batchMode = isBatchCockpit(state)
+  const retainedFailureReview = isRetainedFailureReview(state)
   const taskState = selectPacketTaskView(state, batchCursorIndex, batchTaskCursorIndex)
   const selectedTask = selectSelectedTask(taskState)
   const selectedTranscript = selectSelectedTranscript(taskState)
@@ -81,6 +84,10 @@ export function App({ store, onCancel }: AppProps) {
     const escape = key.name === "escape" || key.name === "esc" || key.sequence === "\u001b" || key.raw === "\u001b"
     if (escape) {
       if (summaryOpenRef.current) {
+        if (retainedFailureReview) {
+          onDismiss()
+          return
+        }
         summaryDismissed.current = true
         setSummaryOpen(false)
         return
@@ -92,14 +99,13 @@ export function App({ store, onCancel }: AppProps) {
     }
     if (summaryOpenRef.current) {
       if (key.name === "q" || (key.ctrl && key.name === "c")) {
-        onCancel()
-        renderer.destroy()
+        if (retainedFailureReview) onDismiss()
+        else onCancel()
       }
       return
     }
     if (key.name === "q" || (key.ctrl && key.name === "c")) {
       onCancel()
-      renderer.destroy()
       return
     }
     if (key.name === "?") {
@@ -199,7 +205,9 @@ export function App({ store, onCancel }: AppProps) {
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={colors.background}>
       {summaryOpen ? (
-        <RunSummary state={state} width={width} height={height} batchSummaryRef={batchSummaryRef} />
+        retainedFailureReview
+          ? <FailureReview state={state} width={width} height={height} />
+          : <RunSummary state={state} width={width} height={height} batchSummaryRef={batchSummaryRef} />
       ) : (
         <LiveCockpit
           state={taskState}
@@ -218,6 +226,78 @@ export function App({ store, onCancel }: AppProps) {
           taskTimings={taskTimings.current}
         />
       )}
+    </box>
+  )
+}
+
+function FailureReview({ state, width, height }: { state: CockpitState; width: number; height: number }) {
+  const packetIndex = state.stoppingPacket?.index ?? state.activePacket?.index ?? 0
+  const taskState = state.batchStatus === null ? state : selectPacketTaskView(state, packetIndex, 0)
+  const failedTask = taskState.tasks.find((task) => (
+    task.status === "failed" || task.status === "blocked" || task.checkpoint?.state === "blocked"
+  ))
+  const detail = failedTask ? selectTaskFailureDetail(taskState, failedTask.id) : undefined
+  const surfacedError = detail ?? "No surfaced task error was provided."
+  const completed = taskState.tasks.filter((task) => isCompleted(task.status)).length
+  const failed = taskState.tasks.filter((task) => task.status === "failed").length
+  const blocked = taskState.tasks.filter((task) => task.status === "blocked").length
+  const checkpointBlocked = taskState.tasks.filter((task) => task.checkpoint?.state === "blocked").length
+  const delivered = Math.max(0, completed - checkpointBlocked)
+  const panelWidth = Math.max(24, Math.min(width - 2, 100))
+  const innerWidth = Math.max(panelWidth - 4, 18)
+  const taskIdentity = failedTask
+    ? `${taskState.slug}/${failedTask.id}`
+    : (state.stoppingPacket?.slug ?? taskState.slug) || "unavailable"
+  const heading = checkpointBlocked > 0
+    ? `Execution Complete: ${delivered}/${taskState.tasks.length} delivered, ${checkpointBlocked} checkpoint blocked`
+    : `Execution Complete: ${completed}/${taskState.tasks.length} succeeded, ${failed} failed${blocked > 0 ? `, ${blocked} blocked` : ""}`
+  const packetOutcomes = state.packetSummaries.length > 0
+    ? state.packetSummaries.map((summary) => `${summary.slug} ${summary.outcome}`).join(" · ")
+    : null
+  const panelHeight = Math.max(10, height - 3)
+  const fixedRows = 10
+    + (packetOutcomes ? 1 : 0)
+    + (state.stoppingPacket ? 1 : 0)
+    + (checkpointBlocked > 0 ? 1 : 0)
+  const detailHeight = Math.max(2, panelHeight - fixedRows)
+  return (
+    <box width="100%" height="100%" flexDirection="column" paddingLeft={1} paddingTop={1}>
+      <box
+        width={panelWidth}
+        height={panelHeight}
+        flexShrink={0}
+        flexDirection="column"
+        borderStyle="single"
+        borderColor={colors.danger}
+        backgroundColor={colors.panel}
+        paddingLeft={1}
+        paddingRight={1}
+      >
+        <text fg={colors.accentBright} wrapMode="none"><strong>{state.batchStatus === null ? "RUN.STATUS" : "RUN.STATUS · BATCH SEQUENCE"}</strong></text>
+        <text fg={colors.danger} wrapMode="none"><strong>{fit(state.batchStatus === null ? heading : batchHeading(state), innerWidth)}</strong></text>
+        {packetOutcomes ? <text fg={colors.muted} wrapMode="none">{fit(`PACKETS: ${packetOutcomes}`, innerWidth)}</text> : null}
+        {state.stoppingPacket ? <text fg={colors.warning} wrapMode="none">{fit(`STOPPING PACKET: ${state.stoppingPacket.slug} (${state.stoppingPacket.outcome})`, innerWidth)}</text> : null}
+        <text fg={colors.accentBright} wrapMode="none"><strong>RUN.FAILURES</strong></text>
+        <text fg={colors.danger} wrapMode="none"><strong>{fit(`${failedTask ? failureLabel(failedTask) : "FAIL"} ${failedTask?.id ?? "unavailable"} · TASK: ${taskIdentity}`, innerWidth)}</strong></text>
+        <text fg={colors.textStrong} wrapMode="none">{fit(`OUTCOME: FAILED · SUCCEEDED ${delivered} · FAILED ${failed} · BLOCKED ${blocked} · TOTAL ${taskState.tasks.length}`, innerWidth)}</text>
+        {checkpointBlocked > 0 ? <text fg={colors.warning} wrapMode="none">CHECKPOINT DELIVERY: 0 created · {checkpointBlocked} blocked</text> : null}
+        <text fg={colors.muted} wrapMode="none">{fit(state.batchStatus === null ? heading : state.finished?.message ?? "Batch failed", innerWidth)}</text>
+        <text fg={colors.accentBright}><strong>ERROR</strong></text>
+        <scrollbox
+          id="failure-detail-scroll"
+          height={detailHeight}
+          scrollY
+          focused
+          viewportCulling
+          contentOptions={{ flexDirection: "column" }}
+        >
+          <text fg={detail ? colors.danger : colors.warning} wrapMode="word" flexShrink={0}>{surfacedError}</text>
+        </scrollbox>
+        <text fg={colors.warning} wrapMode="word">Resolve the listed error, then rerun the task packet.</text>
+      </box>
+      <box height={1} marginTop={1} paddingLeft={1}>
+        <text fg={colors.muted} wrapMode="none">[<span fg={colors.accent}>ESC</span>/<span fg={colors.accent}>Q</span>/<span fg={colors.accent}>CTRL+C</span>] DISMISS</text>
+      </box>
     </box>
   )
 }
@@ -1107,6 +1187,11 @@ function footerText(state: CockpitState, compact: boolean): string {
 
 function isBatchCockpit(state: CockpitState): boolean {
   return state.packetSummaries.length > 0 || state.batchStatus !== null
+}
+
+function isRetainedFailureReview(state: CockpitState): boolean {
+  if (state.finished?.ok !== false) return false
+  return state.batchStatus !== "cancelled" && state.batchStatus !== "preflight_failed"
 }
 
 function taskRowId(taskId: string): string {

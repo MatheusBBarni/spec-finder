@@ -32,7 +32,7 @@ import {
 } from "./setup.ts"
 import { isValidTaskSlug, loadTaskPacket, validateTasks, type TaskFile } from "./tasks.ts"
 import { CockpitStore } from "./ui/store.ts"
-import { startCockpit } from "./ui/cockpit.tsx"
+import { startCockpit, type CockpitSession } from "./ui/cockpit.tsx"
 import {
   setupMultiSelect,
   setupSelect,
@@ -104,6 +104,8 @@ export interface RunCommandOptions {
   root?: string
   /** Test and embedding seam; defaults to process.stdout. */
   output?: Writable & { isTTY?: boolean }
+  /** Test and embedding seam; defaults to process.stdin. */
+  input?: { isTTY?: boolean }
   /** Override the normal config loader for deterministic command tests. */
   loadConfig?: (root: string) => Promise<SpecFinderConfig>
   /** Override the coordinator while preserving the command lifecycle contract. */
@@ -112,7 +114,7 @@ export interface RunCommandOptions {
   runTaskPacket?: (options: RunOptions) => Promise<RunResult>
   /** Override cockpit startup for renderer lifecycle tests. */
   startCockpit?: typeof startCockpit
-  /** Force terminal mode in tests; otherwise --no-ui or a non-TTY selects it. */
+  /** Force no-UI mode in tests; otherwise flags or non-TTY streams select it. */
   noUi?: boolean
 }
 
@@ -529,14 +531,18 @@ async function runSingleCommand(args: readonly string[], options: RunCommandOpti
   const slug = args.find((arg) => !arg.startsWith("-"))
   if (!slug) throw new Error("usage: spec-finder run <task_slug> [--no-ui]")
   const output = options.output ?? process.stdout
+  const input = options.input ?? process.stdin
   const root = options.root ?? await findWorkspaceRoot()
   const lease = await acquireRunLock(root)
   const load = options.loadConfig ?? loadConfig
-  let cockpit: { close: () => void } | null = null
+  let cockpit: CockpitSession | null = null
   try {
     let config = await load(root)
     config = applyRunOverrides(config, args)
-    const noUi = options.noUi ?? (args.includes("--no-ui") || output.isTTY !== true)
+    const noUi = options.noUi === true
+      || args.includes("--no-ui")
+      || input.isTTY !== true
+      || output.isTTY !== true
     const controller = new AbortController()
     const store = new CockpitStore()
     const consoleListener = createSingleConsoleListener(output)
@@ -552,6 +558,7 @@ async function runSingleCommand(args: readonly string[], options: RunCommandOpti
       emit,
       interactivePermissions: !noUi,
     })
+    if (!result.ok && !controller.signal.aborted) await cockpit?.waitForDismissal()
     return result.ok ? 0 : 1
   } finally {
     cockpit?.close()
@@ -561,15 +568,19 @@ async function runSingleCommand(args: readonly string[], options: RunCommandOpti
 
 async function runBatchCommand(args: BatchArguments, options: RunCommandOptions): Promise<number> {
   const output = options.output ?? process.stdout
+  const input = options.input ?? process.stdin
   const root = options.root ?? await findWorkspaceRoot()
   const lease = await acquireRunLock(root)
   const load = options.loadConfig ?? loadConfig
-  let cockpit: { close: () => void } | null = null
+  let cockpit: CockpitSession | null = null
 
   try {
     let config = await load(root)
     config = applyRunOverrides(config, args.runtimeArgs)
-    const noUi = options.noUi ?? (args.runtimeArgs.includes("--no-ui") || output.isTTY !== true)
+    const noUi = options.noUi === true
+      || args.runtimeArgs.includes("--no-ui")
+      || input.isTTY !== true
+      || output.isTTY !== true
     const controller = new AbortController()
     const store = new CockpitStore()
     const consoleListener = createBatchConsoleListener(output)
@@ -585,6 +596,7 @@ async function runBatchCommand(args: BatchArguments, options: RunCommandOptions)
       onEvent: emit,
       interactivePermissions: !noUi,
     })
+    if (result.status === "failed" && !controller.signal.aborted) await cockpit?.waitForDismissal()
     return batchExitCode(result)
   } finally {
     cockpit?.close()

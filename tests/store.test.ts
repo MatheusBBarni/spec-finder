@@ -8,6 +8,7 @@ import {
   selectSelectedTask,
   selectSelectedTranscript,
   selectTaskCheckpoint,
+  selectTaskFailureDetail,
   selectTaskReason,
   selectTaskTranscript,
   selectUnfinishedTasks,
@@ -148,6 +149,9 @@ describe("cockpit store", () => {
       message: "Provider connection failed\nAdditional transport detail",
     })
     expect(selectTaskReason(store.getSnapshot(), "task_01")).toBe("Provider connection failed")
+    expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBe(
+      "Provider connection failed\nAdditional transport detail",
+    )
     expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.kind)).toEqual([
       "error",
       "error",
@@ -160,6 +164,26 @@ describe("cockpit store", () => {
       kind: "error",
       text: "Blocked because dependency task_01 failed",
     })
+  })
+
+  test("clears exact failure details when a task resumes and when a new run starts", () => {
+    const store = startedStore([task(1, "Retryable")])
+    store.consume({ type: "task_status", taskId: "task_01", status: "failed" })
+    expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBeUndefined()
+    store.consume({
+      type: "activity",
+      taskId: "task_01",
+      message: "  First line\nSecond line  ",
+    })
+    expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBe("First line\nSecond line")
+
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBeUndefined()
+
+    store.consume({ type: "task_status", taskId: "task_01", status: "failed" })
+    store.consume({ type: "activity", taskId: "task_01", message: "Later failure" })
+    store.consume({ type: "run_started", slug: "next", config: DEFAULT_CONFIG, tasks: [task(1, "Fresh task")] })
+    expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBeUndefined()
   })
 
   test("surfaces an explicit report-handoff reason for a blocked task", () => {
@@ -435,8 +459,10 @@ describe("cockpit store", () => {
 
     expect(Object.keys(alphaSnapshot.transcripts)).toEqual(["alpha/task_01"])
     expect(selectTaskReason(alphaSnapshot, "task_01")).toBe("Alpha failure")
+    expect(selectTaskFailureDetail(alphaSnapshot, "task_01")).toBe("Alpha failure")
     expect(Object.keys(store.getSnapshot().transcripts)).toEqual(["alpha/task_01", "beta/task_01"])
     expect(selectTaskReason(store.getSnapshot(), "task_01")).toBe("Beta failure")
+    expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBe("Beta failure")
     expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).toContain("Beta failure")
     expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).not.toContain("bare stale event")
     expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).not.toContain("stale alpha event")

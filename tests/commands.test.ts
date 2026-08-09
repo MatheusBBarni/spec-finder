@@ -154,6 +154,125 @@ describe("setup command options", () => {
 })
 
 describe("run command batch integration", () => {
+  test("retains interactive single and batch failures until dismissal", async () => {
+    for (const mode of ["single", "batch"] as const) {
+      const root = await mkdtemp(join(tmpdir(), `spec-finder-${mode}-failure-review-`))
+      const terminal = commandOutput(true)
+      let dismiss: (() => void) | undefined
+      let waitCalls = 0
+      let closeCalls = 0
+      const dismissal = new Promise<void>((resolve) => { dismiss = resolve })
+      const session = {
+        waitForDismissal: () => {
+          waitCalls += 1
+          return dismissal
+        },
+        close: () => { closeCalls += 1 },
+      }
+
+      try {
+        const result = mode === "single"
+          ? runCommand(["alpha"], {
+              root,
+              input: { isTTY: true },
+              output: terminal.output,
+              loadConfig: async () => DEFAULT_CONFIG,
+              startCockpit: async () => session,
+              runTaskPacket: async () => ({ ok: false, completed: 0, failed: 1, blocked: 0 }),
+            })
+          : runCommand(["--multiple", "alpha,beta"], {
+              root,
+              input: { isTTY: true },
+              output: terminal.output,
+              loadConfig: async () => DEFAULT_CONFIG,
+              startCockpit: async () => session,
+              runBatch: async () => ({
+                ok: false,
+                status: "failed",
+                stoppingSlug: "alpha",
+                packets: [
+                  { slug: "alpha", outcome: "failed", detail: "stopped" },
+                  { slug: "beta", outcome: "not_started" },
+                ],
+              }),
+            })
+        let settled = false
+        void result.then(() => { settled = true })
+        for (let attempt = 0; attempt < 20 && waitCalls === 0; attempt += 1) await Bun.sleep(1)
+
+        expect(waitCalls).toBe(1)
+        expect(settled).toBeFalse()
+        dismiss?.()
+        expect(await result).toBe(1)
+        expect(closeCalls).toBe(1)
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    }
+  })
+
+  test("requires both terminal streams before starting the cockpit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-non-tty-review-"))
+    let starts = 0
+    try {
+      const result = await runCommand(["alpha"], {
+        root,
+        input: { isTTY: false },
+        output: commandOutput(true).output,
+        loadConfig: async () => DEFAULT_CONFIG,
+        startCockpit: async () => {
+          starts += 1
+          return { close: () => undefined, waitForDismissal: async () => undefined }
+        },
+        runTaskPacket: async () => ({ ok: false, completed: 0, failed: 1, blocked: 0 }),
+      })
+      expect(result).toBe(1)
+      expect(starts).toBe(0)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("does not wait for successful, cancelled, or preflight-failed interactive outcomes", async () => {
+    const scenarios = ["success", "cancelled", "preflight"] as const
+    for (const scenario of scenarios) {
+      const root = await mkdtemp(join(tmpdir(), `spec-finder-${scenario}-review-`))
+      let waitCalls = 0
+      let closeCalls = 0
+      try {
+        const common = {
+          root,
+          input: { isTTY: true },
+          output: commandOutput(true).output,
+          loadConfig: async () => DEFAULT_CONFIG,
+          startCockpit: async () => ({
+            waitForDismissal: async () => { waitCalls += 1 },
+            close: () => { closeCalls += 1 },
+          }),
+        }
+        const result = scenario === "success"
+          ? await runCommand(["alpha"], {
+              ...common,
+              runTaskPacket: async () => ({ ok: true, completed: 1, failed: 0, blocked: 0 }),
+            })
+          : await runCommand(["--multiple", "alpha"], {
+              ...common,
+              runBatch: async () => ({
+                ok: false,
+                status: scenario === "cancelled" ? "cancelled" : "preflight_failed",
+                packets: [{ slug: "alpha", outcome: scenario === "cancelled" ? "cancelled" : "not_started" }],
+              }),
+            })
+
+        expect(result).toBe(scenario === "success" ? 0 : 1)
+        expect(waitCalls).toBe(0)
+        expect(closeCalls).toBe(1)
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    }
+  })
+
   test("routes validated batch arguments once with shared signal/config and deterministic success output", async () => {
     const terminal = commandOutput()
     const signals: AbortSignal[] = []
@@ -296,7 +415,7 @@ describe("run command batch integration", () => {
       },
       startCockpit: async () => {
         rendererCalls += 1
-        return { close: () => undefined }
+        return { close: () => undefined, waitForDismissal: async () => undefined }
       },
       runBatch: async () => {
         coordinatorCalls += 1
@@ -314,9 +433,13 @@ describe("run command batch integration", () => {
     await expect(runCommand(["--multiple", "alpha,beta"], {
       root: "/tmp/spec-finder-command-test",
       output: output.output,
+      input: { isTTY: true },
       noUi: false,
       loadConfig: async () => DEFAULT_CONFIG,
-      startCockpit: async () => ({ close: () => { closeCalls += 1 } }),
+      startCockpit: async () => ({
+        close: () => { closeCalls += 1 },
+        waitForDismissal: async () => undefined,
+      }),
       runBatch: async () => { throw new Error("preflight exploded") },
     })).rejects.toThrow("preflight exploded")
     expect(closeCalls).toBe(1)

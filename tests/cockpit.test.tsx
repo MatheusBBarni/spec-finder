@@ -7,6 +7,7 @@ import { act } from "react"
 import { DEFAULT_CONFIG, type SpecFinderConfig } from "../src/config.ts"
 import type { TaskFile, TaskStatus } from "../src/tasks.ts"
 import { App, taskElapsedText, type TaskTiming } from "../src/ui/App.tsx"
+import { createCockpitSessionController } from "../src/ui/cockpit.tsx"
 import { CockpitStore } from "../src/ui/store.ts"
 
 type TestScreen = Awaited<ReturnType<typeof testRender>>
@@ -158,7 +159,7 @@ describe("read-only progress cockpit", () => {
     }
   })
 
-  test("makes an exhausted task retry and manual packet recovery explicit", async () => {
+  test("shows the failed packet diagnostic and approved recovery guidance", async () => {
     const store = startedBatchStore(["alpha", "beta", "gamma"], 0, [task(1, "Alpha task")])
     store.consume({ type: "batch_packet_finished", slug: "alpha", index: 0, outcome: "succeeded", detail: "completed" })
     store.consume({ type: "batch_packet_started", slug: "beta", index: 1, total: 3, tasks: [task(1, "Beta task")] })
@@ -185,15 +186,9 @@ describe("read-only progress cockpit", () => {
       expect(summary).toContain("failed")
       expect(summary).toContain("STOPPING PACKET: beta")
       expect(summary).toContain("gamma not_started")
-      expect(summary).toContain("task retry exhausted")
-      expect(summary).toContain("no automatic packet retry")
-      expect(summary).toContain("rerun manually")
-
-      await pressEscape(screen)
-      const live = screen.captureCharFrame()
-      expect(live).toContain("✗ 2 beta FAILED")
-      expect(live).toContain("TRANSCRIPT · task_01 · INSPECTING HISTORY")
-      expect(live).toContain("Beta provider failed")
+      expect(summary).toContain("TASK: beta/task_01")
+      expect(summary).toContain("Beta provider failed")
+      expect(summary).toContain("Resolve the listed error, then rerun the task packet.")
     } finally {
       await destroy(screen)
     }
@@ -216,7 +211,7 @@ describe("read-only progress cockpit", () => {
       ],
     })
 
-    const screen = await testRender(<App store={store} onCancel={() => {}} />, { width: 70, height: 20 })
+    const screen = await testRender(<App store={store} onCancel={() => {}} onDismiss={() => {}} />, { width: 70, height: 20, exitOnCtrlC: false })
     try {
       setRendererCapabilities(screen.renderer, { rgb: false, ansi256: false })
       await screen.renderOnce()
@@ -652,12 +647,78 @@ describe("read-only progress cockpit", () => {
       expect(summary).toContain("RUN.FAILURES")
       expect(summary).toContain("FAIL task_01")
       expect(summary).toContain("Provider connection failed")
-      expect(summary).toContain("[ESC] BACK")
-
-      await pressEscape(screen)
-      expect(screen.captureCharFrame()).toContain("TRANSCRIPT · task_01")
+      expect(summary).toContain("DISMISS")
+      expect(summary).toContain("Resolve the listed error, then rerun the task packet.")
     } finally {
       await destroy(screen)
+    }
+  })
+
+  test("dismisses a settled failure with Esc, q, or Ctrl+C without cancelling or destroying the renderer", async () => {
+    for (const key of ["escape", "q", "ctrl-c"] as const) {
+      const store = startedStore([task(1, "Failed task")])
+      store.consume({ type: "task_status", taskId: "task_01", status: "failed" })
+      store.consume({ type: "activity", taskId: "task_01", message: "Failure detail" })
+      store.consume({ type: "run_finished", ok: false, message: "1 failed" })
+      let cancelled = 0
+      let dismissed = 0
+      const screen = await testRender(
+        <App
+          store={store}
+          onCancel={() => { cancelled += 1 }}
+          onDismiss={() => { dismissed += 1 }}
+        />,
+        { width: 80, height: 24, exitOnCtrlC: false },
+      )
+      await screen.renderOnce()
+      await act(async () => { await Promise.resolve() })
+      await screen.renderOnce()
+      expect(screen.captureCharFrame()).toContain("RUN.FAILURES")
+
+      await act(async () => {
+        if (key === "escape") screen.mockInput.pressEscape()
+        else if (key === "q") screen.mockInput.pressKey("q")
+        else screen.mockInput.pressCtrlC()
+        if (key === "escape") await Bun.sleep(100)
+        else await Promise.resolve()
+      })
+
+      expect({ key, dismissed }).toEqual({ key, dismissed: 1 })
+      expect(cancelled).toBe(0)
+      expect(screen.renderer.isDestroyed).toBeFalse()
+      await destroy(screen)
+    }
+  })
+
+  test("keeps complete multiline failure details scrollable and makes missing details explicit", async () => {
+    const store = startedStore([task(1, "Long failure")])
+    store.consume({ type: "task_status", taskId: "task_01", status: "failed" })
+    store.consume({
+      type: "activity",
+      taskId: "task_01",
+      message: Array.from({ length: 30 }, (_, index) => `DIAGNOSTIC-${String(index).padStart(2, "0")} complete detail`).join("\n"),
+    })
+    store.consume({ type: "run_finished", ok: false, message: "1 failed" })
+    const screen = await render(store, 80, 24)
+    try {
+      const detailScroll = renderable<ScrollBoxRenderable>(screen, "failure-detail-scroll")
+      expect(detailScroll.scrollHeight).toBeGreaterThan(detailScroll.height)
+      expect(screen.captureCharFrame()).toContain("DIAGNOSTIC-00 complete detail")
+      await press(screen, KeyCodes.END)
+      expect(screen.captureCharFrame()).toContain("DIAGNOSTIC-29 complete detail")
+      expect(screen.captureCharFrame()).toContain("Resolve the listed error, then rerun the task packet.")
+    } finally {
+      await destroy(screen)
+    }
+
+    const missingStore = startedStore([task(1, "Missing detail")])
+    missingStore.consume({ type: "task_status", taskId: "task_01", status: "failed" })
+    missingStore.consume({ type: "run_finished", ok: false, message: "1 failed" })
+    const missingScreen = await render(missingStore, 80, 24)
+    try {
+      expect(missingScreen.captureCharFrame()).toContain("No surfaced task error was provided.")
+    } finally {
+      await destroy(missingScreen)
     }
   })
 
@@ -781,7 +842,7 @@ describe("read-only progress cockpit", () => {
       await destroy(compactScreen)
     }
 
-    const reducedScreen = await testRender(<App store={store} onCancel={() => {}} />, { width: 80, height: 24 })
+    const reducedScreen = await testRender(<App store={store} onCancel={() => {}} onDismiss={() => {}} />, { width: 80, height: 24, exitOnCtrlC: false })
     try {
       setRendererCapabilities(reducedScreen.renderer, { rgb: false, ansi256: false })
       await reducedScreen.renderOnce()
@@ -817,7 +878,7 @@ describe("read-only progress cockpit", () => {
 
     for (const key of ["q", "ctrl-c"] as const) {
       let cancelled = 0
-      const exitScreen = await testRender(<App store={store} onCancel={() => { cancelled += 1 }} />, { width: 80, height: 24 })
+      const exitScreen = await testRender(<App store={store} onCancel={() => { cancelled += 1 }} onDismiss={() => {}} />, { width: 80, height: 24, exitOnCtrlC: false })
       await exitScreen.renderOnce()
       await act(async () => {
         if (key === "q") exitScreen.mockInput.pressKey("q")
@@ -825,8 +886,36 @@ describe("read-only progress cockpit", () => {
         await Promise.resolve()
       })
       expect(cancelled).toBe(1)
-      expect(exitScreen.renderer.isDestroyed).toBeTrue()
+      expect(exitScreen.renderer.isDestroyed).toBeFalse()
+      await destroy(exitScreen)
     }
+  })
+})
+
+describe("cockpit session lifecycle", () => {
+  test("resolves dismissal and closes the renderer idempotently", async () => {
+    let closeCalls = 0
+    const session = createCockpitSessionController(() => { closeCalls += 1 })
+    let dismissed = false
+    const waiting = session.waitForDismissal().then(() => { dismissed = true })
+
+    await Promise.resolve()
+    expect(dismissed).toBeFalse()
+    session.dismiss()
+    session.dismiss()
+    await waiting
+    expect(dismissed).toBeTrue()
+
+    session.close()
+    session.close()
+    expect(closeCalls).toBe(1)
+  })
+
+  test("close releases a pending dismissal wait", async () => {
+    const session = createCockpitSessionController(() => undefined)
+    const waiting = session.waitForDismissal()
+    session.close()
+    await expect(waiting).resolves.toBeUndefined()
   })
 })
 
@@ -884,7 +973,7 @@ function taskId(number: number): string {
 }
 
 async function render(store: CockpitStore, width: number, height: number): Promise<TestScreen> {
-  const screen = await testRender(<App store={store} onCancel={() => {}} />, { width, height })
+  const screen = await testRender(<App store={store} onCancel={() => {}} onDismiss={() => {}} />, { width, height, exitOnCtrlC: false })
   await screen.renderOnce()
   return screen
 }
