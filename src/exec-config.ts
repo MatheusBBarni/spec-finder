@@ -26,7 +26,7 @@ const SPEED_VALUES = ["auto", "normal", "fast"] as const
 const SHARED_CONFIG_KEYS = new Set(Object.keys(configSchema.shape))
 
 const runtimeSchema = z.object({
-  version: z.literal(2),
+  version: z.union([z.literal(2), z.literal(3)]),
   provider: z.enum(PROVIDERS),
   model: z.string().trim().min(1),
   reasoning: z.enum(REASONING_VALUES),

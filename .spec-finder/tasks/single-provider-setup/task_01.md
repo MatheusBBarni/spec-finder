@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Add Versioned Setup Configuration and Provider Policy
 type: backend
 complexity: high

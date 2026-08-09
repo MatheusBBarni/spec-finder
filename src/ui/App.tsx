@@ -1,5 +1,5 @@
 import type { ScrollBoxRenderable } from "@opentui/core"
-import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react"
+import { useKeyboard, useTerminalDimensions } from "@opentui/react"
 import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react"
 import type { PacketOutcome, PacketSummary } from "../batch.ts"
 import type { TaskStatus } from "../tasks.ts"
@@ -57,7 +57,6 @@ interface AppProps {
 
 export function App({ store, onCancel, onDismiss }: AppProps) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
-  const renderer = useRenderer()
   const { width, height } = useTerminalDimensions()
   const taskListRef = useRef<ScrollBoxRenderable>(null)
   const transcriptRef = useRef<ScrollBoxRenderable>(null)
@@ -187,20 +186,15 @@ export function App({ store, onCancel, onDismiss }: AppProps) {
     setClock(now)
     if (!hasRunningTasks) {
       setSpinnerIndex(0)
-      renderer.dropLive()
       return
     }
 
-    renderer.requestLive()
     const timer = setInterval(() => {
       setSpinnerIndex((index) => (index + 1) % SPINNER_FRAMES.length)
       setClock(performance.now())
     }, SPINNER_INTERVAL_MS)
-    return () => {
-      clearInterval(timer)
-      renderer.dropLive()
-    }
-  }, [hasRunningTasks, renderer, taskState.tasks])
+    return () => clearInterval(timer)
+  }, [hasRunningTasks, taskState.tasks])
 
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={colors.background}>

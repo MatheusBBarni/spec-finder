@@ -34,6 +34,39 @@ describe("read-only progress cockpit", () => {
     expect(taskElapsedText(tasks[4]!, timings, 5_000)).toBe("00:02")
   })
 
+  test("advances the active timer without changing another live renderer request", async () => {
+    const store = startedStore([task(1, "Timed task")])
+    const screen = await render(store, 80, 24)
+    screen.renderer.requestLive()
+
+    try {
+      await mutate(screen, () => {
+        store.consume({ type: "task_status", taskId: "task_01", status: "pending" })
+      })
+      expect(screen.renderer.liveRequestCount).toBe(1)
+
+      await mutate(screen, () => {
+        store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+      })
+      expect(screen.renderer.liveRequestCount).toBe(1)
+      expect(screen.captureCharFrame()).toContain("frontend · 00:00")
+
+      await act(async () => {
+        await Bun.sleep(1_100)
+      })
+      const frame = await screen.waitForFrame((value) => value.includes("frontend · 00:01"))
+      expect(frame).toContain("frontend · 00:01")
+
+      await mutate(screen, () => {
+        store.consume({ type: "task_status", taskId: "task_01", status: "completed" })
+      })
+      expect(screen.renderer.liveRequestCount).toBe(1)
+    } finally {
+      screen.renderer.dropLive()
+      await destroy(screen)
+    }
+  })
+
   test("renders orientation, truthful option outcomes, task semantics, and selected history at required sizes", async () => {
     const store = startedStore([
       task(1, "Inspect packet", [], "completed"),

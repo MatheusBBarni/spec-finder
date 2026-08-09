@@ -9,7 +9,7 @@ import {
   type BatchRunOptions,
   type PacketSummary,
 } from "./batch.ts"
-import { loadConfig, parseConfig, type SpecFinderConfig } from "./config.ts"
+import { applyRuntimeConfigOverrides, loadConfig, type SpecFinderConfig } from "./config.ts"
 import {
   createCheckpointService,
   type CheckpointOutcome,
@@ -717,8 +717,7 @@ function applyRunOverrides(config: SpecFinderConfig, args: readonly string[]): S
   const model = valueFor(args, "--model")
   const reasoning = valueFor(args, "--reasoning")
   const speed = valueFor(args, "--speed")
-  return parseConfig({
-    ...config,
+  return applyRuntimeConfigOverrides(config, {
     ...(provider ? { provider: provider as SpecFinderConfig["provider"] } : {}),
     ...(model ? { model } : {}),
     ...(reasoning ? { reasoning: reasoning as SpecFinderConfig["reasoning"] } : {}),

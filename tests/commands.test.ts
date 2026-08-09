@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { PassThrough } from "node:stream"
-import { DEFAULT_CONFIG } from "../src/config.ts"
+import { DEFAULT_CONFIG, parseConfig, type SpecFinderConfig } from "../src/config.ts"
 import type { CheckpointServiceContract } from "../src/checkpoints.ts"
 import { checkpointCommand, runCommand, resolveSetupOptions } from "../src/commands.ts"
 import type { BatchResult } from "../src/batch.ts"
@@ -154,6 +154,39 @@ describe("setup command options", () => {
 })
 
 describe("run command batch integration", () => {
+  test("layers a provider override over configured v3 metadata without changing its destination", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-configured-override-"))
+    const stored = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "codex",
+      setup: { status: "configured", scope: "local", destination: ".agents/skills" },
+    })
+    let received: SpecFinderConfig | undefined
+
+    try {
+      const result = await runCommand(["demo", "--no-ui", "--provider", "claude"], {
+        root,
+        output: commandOutput().output,
+        loadConfig: async () => stored,
+        runTaskPacket: async (options) => {
+          received = options.config
+          return { ok: true, completed: 1, failed: 0, blocked: 0 }
+        },
+      })
+
+      expect(result).toBe(0)
+      expect(received?.provider).toBe("claude")
+      expect(received?.setup).toBe(stored.setup)
+      expect(received?.setup).toEqual({
+        status: "configured",
+        scope: "local",
+        destination: ".agents/skills",
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test("retains interactive single and batch failures until dismissal", async () => {
     for (const mode of ["single", "batch"] as const) {
       const root = await mkdtemp(join(tmpdir(), `spec-finder-${mode}-failure-review-`))
