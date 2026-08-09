@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Document release and recovery operations
 type: docs
 complexity: low

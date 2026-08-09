@@ -17,6 +17,42 @@ status_of() {
     | tr -d '[:space:]'
 }
 
+frontmatter_checkpoint_field_of() {
+  field="$2"
+  awk -v field="$field" '
+    BEGIN { frontmatter = 0; checkpoint = 0 }
+    NR == 1 && $0 == "---" { frontmatter = 1; next }
+    frontmatter && $0 == "---" { exit }
+    !frontmatter { next }
+
+    # Accept the dotted form as well as the block form so report-only
+    # classification remains tolerant of equivalent frontmatter notation.
+    $0 ~ ("^[[:space:]]*checkpoint[.]" field ":[[:space:]]*") {
+      value = $0
+      sub("^[[:space:]]*checkpoint[.]" field ":[[:space:]]*", "", value)
+      print value
+      exit
+    }
+
+    $0 ~ /^[[:space:]]*checkpoint:[[:space:]]*$/ { checkpoint = 1; next }
+    checkpoint && $0 !~ /^[[:space:]]/ { checkpoint = 0 }
+    checkpoint && $0 ~ ("^[[:space:]]+" field ":[[:space:]]*") {
+      value = $0
+      sub("^[[:space:]]+" field ":[[:space:]]*", "", value)
+      print value
+      exit
+    }
+  ' "$1" | sed -E "s/^[[:space:]]+//; s/[[:space:]]+$//; s/^['\"]//; s/['\"]$//"
+}
+
+checkpoint_state_of() {
+  frontmatter_checkpoint_field_of "$1" state
+}
+
+checkpoint_error_of() {
+  frontmatter_checkpoint_field_of "$1" error
+}
+
 printf '%-32s %-12s %-9s %-9s %-14s %s\n' "FOLDER" "VERDICT" "DONE" "TRACKED" "INDEX" "UNCHECKED"
 printf '%-32s %-12s %-9s %-9s %-14s %s\n' "------" "-------" "----" "-------" "-----" "---------"
 
@@ -30,13 +66,20 @@ for directory in "$TASKS_DIR"/*/; do
   completed=0
   other=0
   statuses=""
+  blocked=0
 
   for task in "$directory"task_*.md; do
     [ -f "$task" ] || continue
     total=$((total + 1))
     status="$(status_of "$task")"
+    checkpoint_state="$(checkpoint_state_of "$task")"
     if [ "$status" = "completed" ]; then
       completed=$((completed + 1))
+      if [ "$checkpoint_state" = "blocked" ]; then
+        blocked=$((blocked + 1))
+        blocker="$(checkpoint_error_of "$task" | tr '\r\n\t' '   ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
+        statuses="${statuses}checkpoint-blocked${blocker:+($blocker)},"
+      fi
     else
       other=$((other + 1))
       statuses="${statuses}${status:-missing},"
@@ -45,7 +88,7 @@ for directory in "$TASKS_DIR"/*/; do
 
   if [ "$total" -eq 0 ]; then
     verdict="EARLY-STAGE"
-  elif [ "$completed" -eq "$total" ]; then
+  elif [ "$completed" -eq "$total" ] && [ "$blocked" -eq 0 ]; then
     verdict="DONE"
   else
     verdict="REMAINING"

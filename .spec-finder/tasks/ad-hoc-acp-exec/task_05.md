@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Extract the ACP v1 Turn Core and Preserve Packet Semantics
 type: refactor
 complexity: high

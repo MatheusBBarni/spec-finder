@@ -9,7 +9,7 @@ import type {
   RunEventListener,
 } from "../events.ts"
 import type { PacketOutcome, PacketSummary } from "../batch.ts"
-import type { TaskFile, TaskStatus } from "../tasks.ts"
+import type { CheckpointRecord, TaskFile, TaskStatus } from "../tasks.ts"
 import {
   appendTranscriptLines,
   applySessionUpdate,
@@ -19,6 +19,11 @@ import {
 export type CockpitPane = "tasks" | "transcript"
 export type RuntimeOptionName = Extract<RunEvent, { type: "runtime_option" }>["name"]
 
+export type CockpitCheckpoint =
+  | { readonly state: "active" }
+  | { readonly state: "created"; readonly commit?: string }
+  | { readonly state: "blocked"; readonly reason: string }
+
 export interface CockpitTask {
   readonly id: string
   readonly title: string
@@ -26,6 +31,8 @@ export interface CockpitTask {
   readonly complexity: string
   readonly status: TaskStatus
   readonly dependencies: readonly string[]
+  /** Checkpoint delivery is independent from the task lifecycle status. */
+  readonly checkpoint: CockpitCheckpoint | null
 }
 
 export interface RuntimeOptionOutcome {
@@ -52,6 +59,9 @@ export interface CockpitState {
   readonly slug: string
   readonly config: Readonly<SpecFinderConfig> | null
   readonly tasks: readonly CockpitTask[]
+  readonly visibleTaskIds: readonly string[]
+  /** Preserves delivery outcomes after a batch advances to another packet. */
+  readonly checkpointOutcomes: Readonly<Record<string, CockpitCheckpoint>>
   readonly activeTaskId: string | null
   readonly selectedTaskId: string | null
   readonly focusedPane: CockpitPane
@@ -64,6 +74,10 @@ export interface CockpitState {
   readonly finished: Readonly<{ ok: boolean; message: string }> | null
   readonly batchStatus: CockpitBatchStatus
   readonly packetSummaries: readonly PacketSummary[]
+  /** Read-only task snapshots retained for every packet tab. */
+  readonly packetTasks: Readonly<Record<string, readonly CockpitTask[]>>
+  /** Session-stable visibility keeps completed tasks until the cockpit reopens. */
+  readonly packetVisibleTaskIds: Readonly<Record<string, readonly string[]>>
   readonly activePacket: ActivePacketContext | null
   readonly stoppingPacket: StoppingPacketContext | null
   readonly notStartedPackets: readonly PacketSummary[]
@@ -74,6 +88,8 @@ function createInitialState(): CockpitState {
     slug: "",
     config: null,
     tasks: [],
+    visibleTaskIds: [],
+    checkpointOutcomes: {},
     activeTaskId: null,
     selectedTaskId: null,
     focusedPane: "tasks",
@@ -86,6 +102,8 @@ function createInitialState(): CockpitState {
     finished: null,
     batchStatus: null,
     packetSummaries: [],
+    packetTasks: {},
+    packetVisibleTaskIds: {},
     activePacket: null,
     stoppingPacket: null,
     notStartedPackets: [],
@@ -119,15 +137,20 @@ export class CockpitStore {
         if (this.state.batchStatus !== null) break
         this.sequence = 0
         const tasks = event.tasks.map(toCockpitTask)
+        const visibleTaskIds = unfinishedTasks(tasks).map((task) => task.id)
         const transcripts = Object.fromEntries(tasks.map((task) => [task.id, [] as readonly TranscriptEntry[]]))
+        const checkpointOutcomes = checkpointOutcomeRecord(tasks)
         const runActivity = appendTranscriptLines([], "activity", `Starting ${event.slug}`, this.nextSequence())
         this.set({
           ...createInitialState(),
           slug: event.slug,
           config: event.config,
           tasks,
-          selectedTaskId: firstUnfinishedTaskId(tasks),
+          visibleTaskIds,
+          selectedTaskId: visibleTaskIds[0] ?? null,
           transcripts,
+          checkpointOutcomes,
+          taskReasons: checkpointReasons(tasks),
           runActivity,
         })
         break
@@ -146,6 +169,9 @@ export class CockpitStore {
         break
       case "task_status":
         this.consumeTaskStatus(event.taskId, event.status)
+        break
+      case "checkpoint":
+        this.consumeCheckpoint(event.taskId, event)
         break
       case "activity":
         if (event.taskId) this.consumeTaskActivity(event.taskId, event.message)
@@ -170,10 +196,19 @@ export class CockpitStore {
         // Preserve the raw event contract for non-TUI consumers without creating
         // a second permission-control path in the cockpit.
         break
-      case "run_finished":
+      case "run_finished": {
         if (this.state.batchStatus !== null) break
-        this.set({ ...this.state, finished: { ok: event.ok, message: event.message }, activeTaskId: null })
+        const blockedDelivery = hasCheckpointBlocked(this.state)
+        const message = blockedDelivery && event.ok
+          ? `${event.message}; checkpoint delivery blocked`
+          : event.message
+        this.set({
+          ...this.state,
+          finished: { ok: event.ok && !blockedDelivery, message },
+          activeTaskId: null,
+        })
         break
+      }
     }
   }
 
@@ -185,6 +220,25 @@ export class CockpitStore {
       ?? event.summaries?.map((summary) => summary.slug)
       ?? []
     const packetSummaries = slugs.map((slug): PacketSummary => ({ slug, outcome: "not_started" }))
+    const packetTasks = Object.fromEntries(slugs.map((slug, index) => {
+      const descriptor = event.packets?.find((packet) => packet.slug === slug || packet.index === index)
+      return [slug, (descriptor?.tasks ?? []).map(toCockpitTask)]
+    }))
+    const packetVisibleTaskIds = Object.fromEntries(Object.entries(packetTasks).map(([slug, tasks]) => (
+      [slug, unfinishedTasks(tasks).map((task) => task.id)]
+    )))
+    const firstSlug = slugs[0]
+    const tasks = firstSlug ? packetTasks[firstSlug] ?? [] : []
+    const visibleTaskIds = firstSlug ? packetVisibleTaskIds[firstSlug] ?? [] : []
+    const transcripts = Object.fromEntries(Object.entries(packetTasks).flatMap(([slug, tasks]) => (
+      tasks.map((task) => [qualifiedTaskKey(slug, task.id), [] as readonly TranscriptEntry[]])
+    )))
+    const taskReasons = Object.fromEntries(Object.entries(packetTasks).flatMap(([slug, tasks]) => (
+      Object.entries(checkpointReasons(tasks, (task) => qualifiedTaskKey(slug, task.id)))
+    )))
+    const checkpointOutcomes = Object.fromEntries(Object.entries(packetTasks).flatMap(([slug, tasks]) => (
+      Object.entries(checkpointOutcomeRecord(tasks, (task) => qualifiedTaskKey(slug, task.id)))
+    )))
     const detail = event.config === undefined ? this.state.config : event.config
     const runActivity = appendTranscriptLines(
       [],
@@ -195,18 +249,22 @@ export class CockpitStore {
 
     this.set({
       ...this.state,
-      slug: "",
+      slug: firstSlug ?? "",
       config: detail,
-      tasks: [],
+      tasks,
+      visibleTaskIds,
+      checkpointOutcomes,
       activeTaskId: null,
-      selectedTaskId: null,
-      transcripts: {},
-      taskReasons: {},
+      selectedTaskId: visibleTaskIds[0] ?? null,
+      transcripts,
+      taskReasons,
       runActivity,
       runtimeOptions: {},
       finished: null,
       batchStatus: "running",
       packetSummaries,
+      packetTasks,
+      packetVisibleTaskIds,
       activePacket: null,
       stoppingPacket: null,
       notStartedPackets: packetSummaries,
@@ -218,14 +276,22 @@ export class CockpitStore {
     const slug = packet?.slug ?? event.slug
     const index = packet?.index ?? event.index
     const tasks = (event.tasks ?? event.taskFiles ?? []).map(toCockpitTask)
+    const visibleTaskIds = unfinishedTasks(tasks).map((task) => task.id)
     const activePacket: ActivePacketContext = {
       slug,
       index,
       total: packet?.total ?? event.total ?? this.state.packetSummaries.length,
     }
-    const transcripts = Object.fromEntries(
-      tasks.map((task) => [qualifiedTaskKey(slug, task.id), [] as readonly TranscriptEntry[]]),
-    )
+    const transcripts = {
+      ...this.state.transcripts,
+      ...Object.fromEntries(tasks.map((task) => [
+        qualifiedTaskKey(slug, task.id),
+        this.state.transcripts[qualifiedTaskKey(slug, task.id)] ?? [] as readonly TranscriptEntry[],
+      ])),
+    }
+    const packetCheckpointOutcomes = checkpointOutcomeRecord(tasks, (task) => qualifiedTaskKey(slug, task.id))
+    const packetTasks = { ...this.state.packetTasks, [slug]: tasks }
+    const packetVisibleTaskIds = { ...this.state.packetVisibleTaskIds, [slug]: visibleTaskIds }
     const packetSummaries = this.state.packetSummaries.map((summary, index) => (
       summary.slug === slug || index === activePacket.index
         ? { ...summary, slug, outcome: "not_started" as const }
@@ -237,14 +303,21 @@ export class CockpitStore {
       slug,
       config: event.config ?? this.state.config,
       tasks,
+      visibleTaskIds,
+      checkpointOutcomes: { ...this.state.checkpointOutcomes, ...packetCheckpointOutcomes },
       activeTaskId: null,
-      selectedTaskId: firstUnfinishedTaskId(tasks),
+      selectedTaskId: visibleTaskIds[0] ?? null,
       transcripts,
-      taskReasons: {},
+      taskReasons: {
+        ...this.state.taskReasons,
+        ...checkpointReasons(tasks, (task) => qualifiedTaskKey(slug, task.id)),
+      },
       runtimeOptions: {},
       finished: null,
       batchStatus: "running",
       packetSummaries,
+      packetTasks,
+      packetVisibleTaskIds,
       activePacket,
       stoppingPacket: null,
       notStartedPackets: packetSummaries.filter((summary) => summary.outcome === "not_started"),
@@ -284,31 +357,36 @@ export class CockpitStore {
         : event.result
           ? clonePacketSummaries(event.result.packets)
           : this.state.packetSummaries
-    const status = normalizeBatchStatus(event.status ?? event.outcome ?? event.result?.status)
+    const blockedDelivery = hasCheckpointBlocked(this.state)
+    const normalizedStatus = normalizeBatchStatus(event.status ?? event.outcome ?? event.result?.status)
       ?? (event.ok ? "completed" : "failed")
+    const status = blockedDelivery && normalizedStatus === "completed" ? "failed" : normalizedStatus
     const stoppingPacket = event.stoppingPacket
       ? event.stoppingPacket
       : event.stoppingSlug
         ? stoppingPacketFromSummaries(packetSummaries, event.stoppingSlug, this.state.activePacket)
         : this.state.stoppingPacket
-    const message = event.message ?? formatBatchFinishedMessage(status, stoppingPacket, packetSummaries)
+    const baseMessage = event.message ?? formatBatchFinishedMessage(status, stoppingPacket, packetSummaries)
+    const message = blockedDelivery && event.ok
+      ? `${baseMessage}; checkpoint delivery blocked`
+      : baseMessage
     this.set({
       ...this.state,
       batchStatus: status,
       packetSummaries,
       stoppingPacket,
       notStartedPackets: packetSummaries.filter((summary) => summary.outcome === "not_started"),
-      finished: { ok: event.ok, message },
+      finished: { ok: event.ok && !blockedDelivery, message },
       activeTaskId: null,
     })
   }
 
   selectTask(taskId: string): void {
-    const tasks = unfinishedTasks(this.state.tasks)
+    const tasks = sessionVisibleTasks(this.state)
     const activeTaskId = tasks.some((task) => task.id === this.state.activeTaskId)
       ? this.state.activeTaskId
       : null
-    const fallbackId = activeTaskId ?? firstUnfinishedTaskId(tasks)
+    const fallbackId = activeTaskId ?? tasks[0]?.id ?? null
     const selectedTaskId = tasks.some((task) => task.id === taskId) ? taskId : fallbackId
     if (selectedTaskId === null) {
       if (this.state.selectedTaskId === null && !this.state.followingActiveTask) return
@@ -321,7 +399,7 @@ export class CockpitStore {
   }
 
   moveTask(delta: number): void {
-    const tasks = unfinishedTasks(this.state.tasks)
+    const tasks = sessionVisibleTasks(this.state)
     if (tasks.length === 0 || !Number.isFinite(delta) || delta === 0) return
     const currentIndex = tasks.findIndex((task) => task.id === this.state.selectedTaskId)
     const startIndex = currentIndex < 0 ? 0 : currentIndex
@@ -361,15 +439,18 @@ export class CockpitStore {
     if (!localTaskId) return
     const transcriptKey = this.taskKey(localTaskId)
     const tasks = this.state.tasks.map((task) => task.id === localTaskId ? { ...task, status } : task)
+    const packetTasks = this.state.activePacket
+      ? { ...this.state.packetTasks, [this.state.activePacket.slug]: tasks }
+      : this.state.packetTasks
     const activeTaskId = status === "in_progress"
       ? localTaskId
       : this.state.activeTaskId === localTaskId ? null : this.state.activeTaskId
-    const remainingTasks = unfinishedTasks(tasks)
+    const visibleTasks = sessionVisibleTasks({ ...this.state, tasks })
     const selectedTaskId = status === "in_progress" && this.state.followingActiveTask
       ? localTaskId
-      : remainingTasks.some((task) => task.id === this.state.selectedTaskId)
+      : visibleTasks.some((task) => task.id === this.state.selectedTaskId)
         ? this.state.selectedTaskId
-        : firstUnfinishedTaskId(remainingTasks) ?? (isCompleted(status) ? localTaskId : null)
+        : visibleTasks[0]?.id ?? null
     let transcripts = this.state.transcripts
     let taskReasons = this.state.taskReasons
 
@@ -394,7 +475,45 @@ export class CockpitStore {
     }
 
     taskReasons = refreshBlockedReasons(tasks, taskReasons, (id) => this.taskKey(id))
-    this.set({ ...this.state, tasks, activeTaskId, selectedTaskId, transcripts, taskReasons })
+    taskReasons = refreshCheckpointReasons(tasks, taskReasons, (id) => this.taskKey(id))
+    this.set({ ...this.state, tasks, packetTasks, activeTaskId, selectedTaskId, transcripts, taskReasons })
+  }
+
+  private consumeCheckpoint(
+    taskId: string,
+    event: Extract<RunEvent, { type: "checkpoint" }>,
+  ): void {
+    const localTaskId = this.localTaskId(taskId)
+    if (!localTaskId) return
+    const task = this.state.tasks.find((candidate) => candidate.id === localTaskId)
+    if (!task) return
+    const transcriptKey = this.taskKey(localTaskId)
+    const checkpoint: CockpitCheckpoint = event.state === "created"
+      ? event.commit === undefined
+        ? { state: "created" }
+        : { state: "created", commit: event.commit }
+      : { state: "blocked", reason: boundedCheckpointReason(event.reason) }
+    const tasks = this.state.tasks.map((candidate) => candidate.id === localTaskId
+      ? { ...candidate, checkpoint }
+      : candidate)
+    const packetTasks = this.state.activePacket
+      ? { ...this.state.packetTasks, [this.state.activePacket.slug]: tasks }
+      : this.state.packetTasks
+    const checkpointOutcomes = { ...this.state.checkpointOutcomes, [transcriptKey]: checkpoint }
+    if (checkpoint.state === "created") {
+      const detail = checkpoint.commit === undefined
+        ? "Local checkpoint created"
+        : `Local checkpoint created: ${checkpoint.commit}`
+      const transcripts = appendTaskLines(this.state.transcripts, transcriptKey, "outcome", detail, this.nextSequence())
+      const taskReasons = withoutKey(this.state.taskReasons, transcriptKey)
+      this.set({ ...this.state, tasks, packetTasks, checkpointOutcomes, transcripts, taskReasons })
+      return
+    }
+
+    const detail = `Checkpoint blocked: ${checkpoint.reason}`
+    const transcripts = appendTaskLines(this.state.transcripts, transcriptKey, "error", detail, this.nextSequence())
+    const taskReasons = { ...this.state.taskReasons, [transcriptKey]: checkpoint.reason }
+    this.set({ ...this.state, tasks, packetTasks, checkpointOutcomes, transcripts, taskReasons })
   }
 
   private consumeTaskActivity(taskId: string, message: string): void {
@@ -403,11 +522,12 @@ export class CockpitStore {
     const transcriptKey = this.taskKey(localTaskId)
     const trimmed = message.trim()
     if (!trimmed || !(transcriptKey in this.state.transcripts)) return
-    const failed = this.state.tasks.find((task) => task.id === localTaskId)?.status === "failed"
-    const kind = failed ? "error" : "activity"
+    const status = this.state.tasks.find((task) => task.id === localTaskId)?.status
+    const unsuccessful = status === "failed" || status === "blocked"
+    const kind = unsuccessful ? "error" : "activity"
     const transcripts = appendTaskLines(this.state.transcripts, transcriptKey, kind, trimmed, this.nextSequence())
-    const taskReasons = failed
-      ? { ...this.state.taskReasons, [transcriptKey]: formatTaskReason("failed", trimmed, []) ?? trimmed }
+    const taskReasons = unsuccessful
+      ? { ...this.state.taskReasons, [transcriptKey]: formatTaskReason(status, trimmed, []) ?? trimmed }
       : this.state.taskReasons
     this.set({ ...this.state, transcripts, taskReasons })
   }
@@ -465,12 +585,17 @@ export function selectTask(state: CockpitState, taskId: string): CockpitTask | u
   return state.tasks.find((task) => task.id === taskId)
 }
 
-/**
- * The runner retains completed tasks for truthful counts and summaries, while
- * the navigator is reserved for work that can still need attention.
- */
+/** The runner retains completed tasks for truthful counts and summaries. */
 export function selectUnfinishedTasks(state: CockpitState): readonly CockpitTask[] {
   return unfinishedTasks(state.tasks)
+}
+
+/**
+ * Tasks visible when the current packet cockpit opened. Completing a task does
+ * not remove it from this session, so its final transcript stays navigable.
+ */
+export function selectVisibleTasks(state: CockpitState): readonly CockpitTask[] {
+  return sessionVisibleTasks(state)
 }
 
 export function selectSelectedTask(state: CockpitState): CockpitTask | undefined {
@@ -486,9 +611,50 @@ export function selectSelectedTranscript(state: CockpitState): readonly Transcri
   return state.selectedTaskId ? selectTaskTranscript(state, state.selectedTaskId) : []
 }
 
+/**
+ * Projects one parent packet into the existing read-only task/detail layout.
+ * The runtime-owned active packet remains unchanged in the source state.
+ */
+export function selectPacketTaskView(
+  state: CockpitState,
+  packetIndex: number,
+  selectedTaskIndex: number,
+): CockpitState {
+  if (state.batchStatus === null || packetIndex === state.activePacket?.index) return state
+  const summary = state.packetSummaries[packetIndex]
+  if (!summary) return state
+
+  const tasks = state.packetTasks[summary.slug] ?? []
+  const visibleTaskIds = state.packetVisibleTaskIds[summary.slug] ?? unfinishedTasks(tasks).map((task) => task.id)
+  const visibleTasks = tasks.filter((task) => visibleTaskIds.includes(task.id))
+  const boundedIndex = Math.max(0, Math.min(Math.max(visibleTasks.length - 1, 0), Math.trunc(selectedTaskIndex)))
+
+  return {
+    ...state,
+    slug: summary.slug,
+    tasks,
+    visibleTaskIds,
+    activeTaskId: null,
+    selectedTaskId: visibleTasks[boundedIndex]?.id ?? null,
+    followingActiveTask: false,
+    activePacket: {
+      slug: summary.slug,
+      index: packetIndex,
+      total: state.packetSummaries.length,
+    },
+  }
+}
+
 export function selectTaskReason(state: CockpitState, taskId: string): string | undefined {
   const key = state.activePacket ? qualifiedTaskKey(state.activePacket.slug, taskId) : taskId
   return state.taskReasons[key]
+}
+
+export function selectTaskCheckpoint(state: CockpitState, taskId: string): CockpitCheckpoint | undefined {
+  const task = selectTask(state, taskId)
+  if (task?.checkpoint) return task.checkpoint
+  const key = state.activePacket ? qualifiedTaskKey(state.activePacket.slug, taskId) : taskId
+  return state.checkpointOutcomes[key]
 }
 
 export function formatTaskReason(
@@ -498,6 +664,8 @@ export function formatTaskReason(
 ): string | undefined {
   if (status === "failed") return firstMeaningfulLine(activity) ?? "Task failed; see latest activity"
   if (status !== "blocked") return undefined
+  const explicit = firstMeaningfulLine(activity)
+  if (explicit) return explicit
   if (failedDependencyIds.length === 0) return "Task blocked; see dependency status"
   if (failedDependencyIds.length === 1) return `Blocked because dependency ${failedDependencyIds[0]} failed`
   const last = failedDependencyIds.at(-1)
@@ -531,6 +699,21 @@ function refreshBlockedReasons(
   return next
 }
 
+function refreshCheckpointReasons(
+  tasks: readonly CockpitTask[],
+  reasons: Readonly<Record<string, string>>,
+  keyForTask: (taskId: string) => string = (taskId) => taskId,
+): Readonly<Record<string, string>> {
+  let next = reasons
+  for (const task of tasks) {
+    if (task.checkpoint?.state !== "blocked") continue
+    const key = keyForTask(task.id)
+    const reason = task.checkpoint.reason
+    if (next[key] !== reason) next = { ...next, [key]: reason }
+  }
+  return next
+}
+
 function findFailedDependencies(tasks: readonly CockpitTask[], taskId: string): string[] {
   const task = tasks.find((candidate) => candidate.id === taskId)
   if (!task) return []
@@ -558,11 +741,12 @@ function isCompleted(status: TaskStatus): boolean {
 }
 
 function unfinishedTasks(tasks: readonly CockpitTask[]): readonly CockpitTask[] {
-  return tasks.filter((task) => !isCompleted(task.status))
+  return tasks.filter((task) => !isCompleted(task.status) || task.checkpoint?.state === "blocked" || task.checkpoint?.state === "active")
 }
 
-function firstUnfinishedTaskId(tasks: readonly CockpitTask[]): string | null {
-  return unfinishedTasks(tasks)[0]?.id ?? null
+function sessionVisibleTasks(state: Pick<CockpitState, "tasks" | "visibleTaskIds">): readonly CockpitTask[] {
+  const visibleTaskIds = new Set(state.visibleTaskIds)
+  return state.tasks.filter((task) => visibleTaskIds.has(task.id))
 }
 
 function qualifiedTaskKey(slug: string, taskId: string): string {
@@ -652,5 +836,42 @@ function toCockpitTask(task: TaskFile): CockpitTask {
     complexity: task.frontmatter.complexity,
     status: task.frontmatter.status,
     dependencies: task.frontmatter.dependencies.map((dependency) => dependency.replace(/\.md$/u, "")),
+    checkpoint: toCockpitCheckpoint(task.frontmatter.checkpoint),
   }
+}
+
+function toCockpitCheckpoint(record: CheckpointRecord | undefined): CockpitCheckpoint | null {
+  if (!record) return null
+  if (record.state === "active") return { state: "active" }
+  return { state: "blocked", reason: boundedCheckpointReason(record.error) }
+}
+
+function checkpointOutcomeRecord(
+  tasks: readonly CockpitTask[],
+  keyForTask: (task: CockpitTask) => string = (task) => task.id,
+): Readonly<Record<string, CockpitCheckpoint>> {
+  return Object.fromEntries(tasks.flatMap((task) => task.checkpoint
+    ? [[keyForTask(task), task.checkpoint] as const]
+    : []))
+}
+
+function checkpointReasons(
+  tasks: readonly CockpitTask[],
+  keyForTask: (task: CockpitTask) => string = (task) => task.id,
+): Readonly<Record<string, string>> {
+  return Object.fromEntries(tasks.flatMap((task) => task.checkpoint?.state === "blocked"
+    ? [[keyForTask(task), task.checkpoint.reason] as const]
+    : []))
+}
+
+function boundedCheckpointReason(reason: string): string {
+  const normalized = reason.replace(/[\r\n\s]+/gu, " ").trim()
+  return normalized.length <= 1024 ? normalized : `${normalized.slice(0, 1023)}…`
+}
+
+function hasCheckpointBlocked(
+  state: Pick<CockpitState, "tasks" | "checkpointOutcomes">,
+): boolean {
+  return state.tasks.some((task) => task.checkpoint?.state === "blocked")
+    || Object.values(state.checkpointOutcomes).some((checkpoint) => checkpoint.state === "blocked")
 }

@@ -1,6 +1,14 @@
 #!/usr/bin/env bun
 import { ConfigError } from "./config.ts"
-import { configCommand, runCommand, setupCommand, upgradeCommand, versionCommand } from "./commands.ts"
+import {
+  checkpointCommand,
+  configCommand,
+  execCommand,
+  runCommand,
+  setupCommand,
+  upgradeCommand,
+  versionCommand,
+} from "./commands.ts"
 
 const HELP = `spec-finder — skill-driven specifications with an ACP cockpit
 
@@ -9,6 +17,9 @@ Usage:
   spec-finder upgrade
   spec-finder run <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
   spec-finder run --multiple <slug1,slug2,...> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
+  spec-finder exec "<prompt>" [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
+  spec-finder checkpoint begin <task_slug> <task_id>
+  spec-finder checkpoint complete <task_slug> <task_id>
   spec-finder config
   spec-finder version
 
@@ -19,8 +30,32 @@ Batch mode:
   Supported runtime flags retain their single-run meanings: --no-ui, --provider NAME, --model ID,
   --reasoning LEVEL, and --speed MODE.
   Outcomes are succeeded (including already complete), failed, cancelled, and not_started.
-  A failure or cancellation stops later packets; no automatic retry occurs. Resolve the issue and rerun manually.
+  A failed task phase retries once. Exhausted failure or cancellation stops later packets; no automatic packet retry occurs.
+  Resolve the issue and rerun manually.
   Batch mode adds no persistence, rollback, resume, parallelism, or telemetry.
+
+  Checkpoint mode:
+  checkpoint begin|complete uses only .spec-finder/config.json auto_commit: true and the shared local Git service.
+  It creates local recovery checkpoints only; it never pushes, opens a PR, or implies review or merge.
+  Legacy auto-commit=true|false invocation tokens are rejected; configure auto_commit in JSON and rerun.
+
+Exec mode:
+  Executes exactly one fresh ACP turn without packet, task, report, memory, cockpit, or history state.
+  Grammar: spec-finder exec "<prompt>" [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
+  Accepts exactly one non-empty positional prompt; flags may appear before or after it, stdin is not prompt input.
+  Unknown options, extra positionals, option-like or missing values fail before spawn. Repeated flags use the last value.
+  --provider is one of claude, codex, or cursor; --model is non-empty; --reasoning is auto|low|medium|high|xhigh|max|ultra;
+  --speed is auto|normal|fast. CLI flags > nearest repository .spec-finder/config.json > ~/.spec-finder/config.json.
+  The nearest complete repository profile wins before the complete user profile; fields are not merged.
+  Repository and user files are complete fallback profiles, not field-by-field merges. Existing invalid profiles fail before spawn.
+  Workspace is the canonical nearest non-symlink .spec-finder ancestor, or the canonical current directory when absent.
+  Permission policy comes only from the user profile (prompt|approve-all|deny, otherwise prompt); it is approval policy, not an OS sandbox.
+  Host callbacks use direct canonical host access under that policy. The current exec path is read-only: all real providers
+  and write-capable access remain unavailable because task 09 certification is blocked; packet providers are separate.
+  Progress and terminal status go to stderr; only a successful final answer goes to stdout (after end_turn and confirmed cleanup).
+  Exits: 0 completed; 1 permission/refusal/limit/provider/cleanup failure; 2 invalid invocation/configuration/certification;
+  130 cancelled. Ctrl-C requests semantic cancellation and returns exit 130, settles pending permissions, and performs bounded cleanup.
+  Exec creates no packet, task, report, memory, checkpoint, transcript, history, trust, telemetry, or usage state.
 `
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
@@ -29,6 +64,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     case "setup": return setupCommand(args)
     case "upgrade": return upgradeCommand()
     case "run": return runCommand(args)
+    case "checkpoint": return checkpointCommand(args)
+    case "exec": return execCommand(args)
     case "config": return configCommand()
     case "version":
     case "--version":

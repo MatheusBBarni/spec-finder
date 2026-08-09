@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Add Exec Provider Launch Policy and Certification Gate
 type: backend
 complexity: medium

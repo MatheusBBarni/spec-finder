@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Resolve Exec Invocation, Runtime, and Permission Policy
 type: backend
 complexity: high

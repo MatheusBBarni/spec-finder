@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Implement Canonical Workspace Host Access
 type: backend
 complexity: high

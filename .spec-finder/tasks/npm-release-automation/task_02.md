@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Add no-publish release validation
 type: infra
 complexity: medium

@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Persist checkpoint delivery state in task metadata
 type: backend
 complexity: medium

@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Publish Exec Documentation and Release Evidence
 type: docs
 complexity: medium

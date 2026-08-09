@@ -11,7 +11,7 @@ Write `.spec-finder/TASKS_REPORT.md`:
 
 Generated: <YYYY-MM-DD>
 
-Completion is determined by the canonical `status:` field in every `task_NN.md`. A packet moves to `.spec-finder/tasks_done/` only when it contains at least one task and every task is exactly `completed`.
+Completion is determined by the canonical `status:` field in every `task_NN.md`. A packet moves to `.spec-finder/tasks_done/` only when it contains at least one task, every task is exactly `completed`, and no completed task has `checkpoint.state: blocked`. A blocked checkpoint remains recoverable in the active packet.
 
 ## Summary
 
@@ -25,7 +25,7 @@ Completion is determined by the canonical `status:` field in every `task_NN.md`.
 
 ## Remaining
 
-For each REMAINING packet, include packet, title, completed/total, non-completed statuses, dependencies or blockers when known, index state, and unchecked-box count.
+For each REMAINING packet, include packet, title, completed/total, non-completed statuses, dependencies or blockers when known, checkpoint-delivery blockers (including their reason) when present, index state, and unchecked-box count.
 
 For each EARLY-STAGE packet, list present artifacts and state that task generation is still required.
 

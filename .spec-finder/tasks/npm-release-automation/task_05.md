@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Prove releases with platform smoke and summary
 type: infra
 complexity: high

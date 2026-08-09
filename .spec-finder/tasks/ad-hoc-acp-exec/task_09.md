@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Certify and Enable Guarded Exec Capabilities
 type: infra
 complexity: high

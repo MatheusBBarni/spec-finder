@@ -26,6 +26,11 @@ export interface TranscriptEntry {
   streaming?: boolean
 }
 
+export interface TranscriptPresentation {
+  label: string
+  subtitle: string
+}
+
 type TextTranscriptKind = Extract<TranscriptKind, "activity" | "error" | "outcome">
 
 const TEXT_LABELS: Record<TextTranscriptKind, string> = {
@@ -101,6 +106,28 @@ export function appendTranscriptLines(
       text: line,
     })),
   ]
+}
+
+export function transcriptPresentation(entry: TranscriptEntry): TranscriptPresentation {
+  if (entry.kind === "tool" || entry.kind === "tool_update") {
+    return {
+      label: "Action",
+      subtitle: actionSubtitle(entry),
+    }
+  }
+
+  if (entry.kind === "unknown") {
+    return {
+      label: entry.label,
+      subtitle: unknownSubtitle(entry.text),
+    }
+  }
+
+  const compact = compactText(entry.text)
+  return {
+    label: entry.label,
+    subtitle: compact ? conciseLine(compact, entry.kind === "error" ? 160 : 100) : "",
+  }
 }
 
 function mergeContentChunk(
@@ -369,4 +396,68 @@ function stableStringify(value: unknown): string {
   }
 
   return JSON.stringify(normalize(value), null, 2)
+}
+
+function actionSubtitle(entry: TranscriptEntry): string {
+  const intent = `${entry.label}\n${entry.text}`.toLowerCase()
+
+  if (/\b(search|find|grep|ripgrep|glob|locate|rg)\b/u.test(intent)) {
+    return "Searching project"
+  }
+  if (/\b(test|tests|testing|verify|verification|check|build|compile|compilation|lint|typecheck)\b/u.test(intent)) {
+    return "Running verification"
+  }
+  if (/\b(diff|edit|write|patch|apply|update|create|delete|remove|move|rename)\b/u.test(intent)) {
+    return "Applying changes"
+  }
+  if (/\b(read|reading|open|opening|inspect|view|cat|sed|head|tail)\b/u.test(intent)) {
+    return "Reading project context"
+  }
+  if (/\b(fetch|browse|request|download|http|web)\b/u.test(intent)) {
+    return "Fetching information"
+  }
+  if (/\b(execute|executing|command|shell|terminal|run|rtk|bun|npm|git)\b/u.test(intent)) {
+    return "Running command"
+  }
+  return "Processing request"
+}
+
+function unknownSubtitle(value: string): string {
+  try {
+    const payload = JSON.parse(value) as unknown
+    if (isRecord(payload) && typeof payload.detail === "string") {
+      return conciseLine(payload.detail, 100)
+    }
+  } catch {
+    // Some providers emit plain text for extension updates.
+  }
+
+  const compact = compactText(value)
+  return compact.startsWith("{") || compact.startsWith("[")
+    ? "Update received"
+    : conciseLine(compact, 100)
+}
+
+function compactText(value: string): string {
+  return value
+    .replace(/\r\n?/gu, "\n")
+    .replace(/[ \t]+\n/gu, "\n")
+    .replace(/\n[ \t]+/gu, "\n")
+    .replace(/\n{3,}/gu, "\n\n")
+    .trim()
+}
+
+function conciseLine(value: string, limit: number): string {
+  const firstLine = value.split("\n").find((line) => line.trim().length > 0) ?? ""
+  const plain = firstLine
+    .replace(/^\s{0,3}(?:#{1,6}\s+|[-+*]\s+|>\s*)/u, "")
+    .replace(/[*`~]/gu, "")
+    .trim()
+  const firstSentence = plain.match(/^.*?[.!?](?=\s|$)/u)?.[0] ?? plain
+  return fitText(firstSentence, limit)
+}
+
+function fitText(value: string, limit: number): string {
+  if (limit <= 1) return value.slice(0, Math.max(0, limit))
+  return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`
 }

@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Render checkpoint outcomes in the cockpit
 type: frontend
 complexity: medium

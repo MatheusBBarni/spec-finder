@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Enforce Safe Exec Output and Success-Only Stdout
 type: backend
 complexity: medium

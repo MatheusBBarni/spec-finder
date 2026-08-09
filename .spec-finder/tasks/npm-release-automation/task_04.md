@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Orchestrate publication and reconciliation
 type: infra
 complexity: high

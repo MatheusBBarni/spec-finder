@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Freeze Packet ACP Behavior and Define Neutral Turn Contracts
 type: refactor
 complexity: medium

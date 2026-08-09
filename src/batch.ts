@@ -360,6 +360,12 @@ export async function runBatch(
   options.onEvent?.({
     type: "batch_started",
     slugs,
+    packets: preflight.packets.map((packet, index) => ({
+      slug: packet.slug,
+      index,
+      outcome: "not_started",
+      tasks: packet.tasks,
+    })),
     total: slugs.length,
     config: options.config,
   })
@@ -522,6 +528,8 @@ function scopePacketTaskEvent(slug: string, event: RunEvent): RunEvent {
   switch (event.type) {
     case "task_status":
     case "session_update":
+      return { ...event, taskId: qualifyTaskId(slug, event.taskId) }
+    case "checkpoint":
       return { ...event, taskId: qualifyTaskId(slug, event.taskId) }
     case "activity":
       return event.taskId

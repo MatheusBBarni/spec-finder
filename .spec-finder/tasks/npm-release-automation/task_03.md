@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Establish secure release-workflow preflight
 type: infra
 complexity: high

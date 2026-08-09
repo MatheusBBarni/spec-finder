@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Keep blocked deliveries out of task archives
 type: infra
 complexity: medium

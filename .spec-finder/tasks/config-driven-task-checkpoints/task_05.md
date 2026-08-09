@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Expose checkpoint phases to manual batch execution
 type: backend
 complexity: medium

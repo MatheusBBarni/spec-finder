@@ -1,0 +1,1138 @@
+name: Stable release
+
+# One maintainer-dispatched workflow owns the stable public identity. Remote
+# state is refreshed after the read-only candidate handoff and before every
+# mutating job; reconciliation is additive and never republishes npm.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Release a new version or reconcile an existing partial release
+        required: true
+        type: choice
+        default: release
+        options:
+          - release
+          - reconcile
+
+# Default-deny at the workflow boundary; every job declares its own need.
+permissions: {}
+
+# Stable-release runs must not cancel one another while public state is being
+# read or mutated.
+concurrency:
+  group: stable-release
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Candidate preflight
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      accepted: ${{ steps.accepted.outputs.accepted }}
+      candidate_artifact: ${{ steps.accepted.outputs.artifact_name }}
+      mode: ${{ steps.candidate.outputs.mode }}
+      source_ref: ${{ steps.source.outputs.source_ref }}
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      tag: ${{ steps.candidate.outputs.tag }}
+      version: ${{ steps.candidate.outputs.version }}
+    steps:
+      - name: Validate dispatch mode
+        id: mode
+        env:
+          RELEASE_MODE: ${{ inputs.mode }}
+        shell: bash
+        run: |
+          # shellcheck disable=SC2016
+          set -euo pipefail
+          case "${RELEASE_MODE}" in
+            release|reconcile) ;;
+            *)
+              echo "::error::unsupported release mode; choose release or reconcile" >&2
+              exit 1
+              ;;
+          esac
+          printf 'mode=%s\n' "${RELEASE_MODE}" >> "${GITHUB_OUTPUT}"
+
+      - name: Guard canonical main source
+        id: source-guard
+        env:
+          SOURCE_REF: ${{ github.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${SOURCE_REF}" != "refs/heads/main" ]]; then
+            echo "::error::stable releases may run only from refs/heads/main (got ${SOURCE_REF})" >&2
+            exit 1
+          fi
+
+      - name: Checkout exact dispatched source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Capture full source identity
+        id: source
+        env:
+          EXPECTED_REF: refs/heads/main
+          SOURCE_REF: ${{ github.ref }}
+          EVENT_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${SOURCE_REF}" != "${EXPECTED_REF}" ]]; then
+            echo "::error::checked-out source ref is not main" >&2
+            exit 1
+          fi
+          if [[ ! "${EVENT_SHA}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::github.sha is not a full commit SHA" >&2
+            exit 1
+          fi
+
+          checked_out_sha="$(git rev-parse --verify 'HEAD^{commit}')"
+          tree_sha="$(git rev-parse --verify 'HEAD^{tree}')"
+          if [[ "${checked_out_sha}" != "${EVENT_SHA}" ]]; then
+            echo "::error::checked-out commit does not match the dispatched SHA" >&2
+            exit 1
+          fi
+          if [[ ! "${tree_sha}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::checked-out tree identity is not a full SHA" >&2
+            exit 1
+          fi
+
+          {
+            printf 'source_ref=%s\n' "${SOURCE_REF}"
+            printf 'source_sha=%s\n' "${EVENT_SHA}"
+            printf 'checked_out_sha=%s\n' "${checked_out_sha}"
+            printf 'tree_sha=%s\n' "${tree_sha}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run deterministic release-candidate gate
+        run: bun run release:check
+
+      - name: Run repository verification gate
+        run: bun run verify
+
+      - name: Capture accepted candidate and state
+        id: candidate
+        env:
+          NPM_CONFIG_CACHE: ${{ runner.temp }}/spec-finder-npm-cache
+          NPM_CONFIG_OFFLINE: "true"
+          RELEASE_MODE: ${{ inputs.mode }}
+          SOURCE_REF: ${{ steps.source.outputs.source_ref }}
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          CHECKED_OUT_SHA: ${{ steps.source.outputs.checked_out_sha }}
+          TREE_SHA: ${{ steps.source.outputs.tree_sha }}
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          report_path="${RUNNER_TEMP}/spec-finder-pack-report.json"
+          npm pack --dry-run --json --ignore-scripts > "${report_path}"
+          # shellcheck disable=SC2016
+          PACK_REPORT_PATH="${report_path}" bun -e '
+            import { validateCandidate } from "./scripts/release/contract.ts"
+
+            const reportPath = Bun.env.PACK_REPORT_PATH
+            const sourceRef = Bun.env.SOURCE_REF
+            const sourceSha = Bun.env.SOURCE_SHA
+            const checkedOutSha = Bun.env.CHECKED_OUT_SHA
+            const treeSha = Bun.env.TREE_SHA
+            const mode = Bun.env.RELEASE_MODE
+            const repository = Bun.env.REPOSITORY
+            const runId = Bun.env.WORKFLOW_RUN_ID
+            if (!reportPath || !sourceRef || !sourceSha || !checkedOutSha || !treeSha || !mode || !repository || !runId) {
+              throw new Error("candidate handoff is missing source or workflow identity")
+            }
+
+            const reportText = await Bun.file(reportPath).text()
+            const jsonStart = reportText.indexOf("[")
+            if (jsonStart < 0) throw new Error("npm pack report did not contain JSON")
+            const report = JSON.parse(reportText.slice(jsonStart)) as unknown
+            if (!Array.isArray(report) || report.length !== 1 || typeof report[0] !== "object" || report[0] === null) {
+              throw new Error("npm pack report must contain exactly one package")
+            }
+            const packageReport = report[0] as { name?: unknown; version?: unknown; files?: unknown }
+            if (!Array.isArray(packageReport.files)) {
+              throw new Error("npm pack report did not contain a files list")
+            }
+            const packedPaths = packageReport.files.map((file) => {
+              if (typeof file !== "object" || file === null || typeof (file as { path?: unknown }).path !== "string") {
+                throw new Error("npm pack report contained a file without a path")
+              }
+              return (file as { path: string }).path
+            })
+
+            const candidateResult = validateCandidate({
+              name: packageReport.name,
+              version: packageReport.version,
+              sourceRef,
+              sourceSha,
+              tag: typeof packageReport.version === "string" ? `v${packageReport.version}` : undefined,
+              packedPaths,
+            })
+            if (!candidateResult.ok) throw new Error(candidateResult.reason)
+
+            const candidate = {
+              schemaVersion: 1,
+              kind: "spec-finder.release-candidate",
+              accepted: true,
+              mode,
+              candidate: candidateResult.candidate,
+              source: {
+                repository,
+                ref: sourceRef,
+                commitSha: sourceSha,
+                checkedOutSha,
+                treeSha,
+              },
+              state: {
+                phase: "preflight",
+                localGates: {
+                  releaseCheck: "passed",
+                  verify: "passed",
+                },
+                remoteState: null,
+                mutationEligible: false,
+              },
+              workflow: {
+                runId,
+              },
+            }
+            await Bun.write("release-candidate.json", `${JSON.stringify(candidate, null, 2)}\n`)
+            console.log(`accepted ${candidateResult.candidate.name}@${candidateResult.candidate.version}`)
+          '
+          {
+            printf 'artifact_name=release-candidate\n'
+            printf 'mode=%s\n' "${RELEASE_MODE}"
+          } >> "${GITHUB_OUTPUT}"
+          version="$(bun -e 'const p = await Bun.file("package.json").json(); console.log(p.version)')"
+          {
+            printf 'version=%s\n' "${version}"
+            printf 'tag=v%s\n' "${version}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Upload deterministic candidate handoff
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-candidate
+          path: release-candidate.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Mark preflight accepted
+        id: accepted
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s release-candidate.json
+          {
+            printf 'accepted=true\n'
+            printf 'artifact_name=release-candidate\n'
+          } >> "${GITHUB_OUTPUT}"
+
+  remote_state:
+    name: Refresh remote release state
+    if: ${{ needs.preflight.result == 'success' && needs.preflight.outputs.accepted == 'true' }}
+    needs:
+      - preflight
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      action: ${{ steps.classify.outputs.action }}
+      status: ${{ steps.classify.outputs.status }}
+      npm_state: ${{ steps.classify.outputs.npm_state }}
+      tag_state: ${{ steps.classify.outputs.tag_state }}
+      release_state: ${{ steps.classify.outputs.release_state }}
+      state_artifact: ${{ steps.classify.outputs.artifact_name }}
+    steps:
+      - name: Checkout exact dispatched source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Download accepted candidate handoff
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-candidate
+          path: candidate
+
+      - name: Revalidate accepted candidate before remote queries
+        env:
+          CANDIDATE_PATH: candidate/release-candidate.json
+          RELEASE_MODE: ${{ inputs.mode }}
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
+          SOURCE_REF: ${{ needs.preflight.outputs.source_ref }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          CANDIDATE_PATH="${CANDIDATE_PATH}" RELEASE_MODE="${RELEASE_MODE}" SOURCE_SHA="${SOURCE_SHA}" SOURCE_REF="${SOURCE_REF}" VERSION="${VERSION}" bun -e '
+            import { validateCandidate } from "./scripts/release/contract.ts"
+
+            const document = await Bun.file(Bun.env.CANDIDATE_PATH!).json() as {
+              accepted?: unknown
+              mode?: unknown
+              candidate?: { name?: unknown; version?: unknown; tag?: unknown; sourceSha?: unknown; sourceRef?: unknown; packedPaths?: unknown }
+              source?: { commitSha?: unknown; ref?: unknown }
+            }
+            const candidate = document.candidate
+            const source = document.source
+            const result = validateCandidate(candidate ?? {})
+            if (!result.ok || document.accepted !== true || document.mode !== Bun.env.RELEASE_MODE) {
+              throw new Error("candidate handoff is not accepted for the dispatched mode")
+            }
+            if (result.candidate.version !== Bun.env.VERSION || result.candidate.sourceSha !== Bun.env.SOURCE_SHA || result.candidate.sourceRef !== Bun.env.SOURCE_REF) {
+              throw new Error("candidate handoff identity does not match preflight outputs")
+            }
+            if (source?.commitSha !== Bun.env.SOURCE_SHA || source?.ref !== Bun.env.SOURCE_REF) {
+              throw new Error("candidate source identity does not match preflight outputs")
+            }
+          '
+
+      - name: Query exact npm version
+        id: npm
+        env:
+          NPM_CONFIG_CACHE: ${{ runner.temp }}/spec-finder-release-npm-cache
+          PACKAGE_NAME: spec-finder
+          VERSION: ${{ needs.preflight.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          output_path="${RUNNER_TEMP}/spec-finder-npm-version.json"
+          error_path="${RUNNER_TEMP}/spec-finder-npm-version.err"
+          set +e
+          npm view "${PACKAGE_NAME}@${VERSION}" version --json > "${output_path}" 2> "${error_path}"
+          npm_status=$?
+          set -e
+
+          if [[ "${npm_status}" -eq 0 ]]; then
+            observed_version="$(NPM_OUTPUT_PATH="${output_path}" bun -e 'const value = await Bun.file(Bun.env.NPM_OUTPUT_PATH!).json(); if (typeof value !== "string") process.exit(2); console.log(value)')"
+            if [[ "${observed_version}" == "${VERSION}" ]]; then
+              state=published
+            else
+              state=mismatch
+            fi
+          elif grep -Eiq 'E404|404 Not Found|not found' "${error_path}"; then
+            state=absent
+          else
+            cat "${error_path}" >&2
+            echo "::error::npm registry query failed; remote state is not safe to infer" >&2
+            exit "${npm_status}"
+          fi
+          printf 'state=%s\n' "${state}" >> "${GITHUB_OUTPUT}"
+
+      - name: Query and verify exact annotated tag
+        id: tag
+        env:
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote_lines="$(git ls-remote origin "refs/tags/${TAG}" 2> "${RUNNER_TEMP}/spec-finder-tag.err")" || {
+            cat "${RUNNER_TEMP}/spec-finder-tag.err" >&2
+            echo "::error::git tag query failed; remote state is not safe to infer" >&2
+            exit 1
+          }
+
+          if [[ -z "${remote_lines}" ]]; then
+            state=absent
+          else
+            git fetch --no-tags origin "refs/tags/${TAG}"
+            tag_type="$(git cat-file -t FETCH_HEAD)"
+            tag_target="$(git rev-parse --verify 'FETCH_HEAD^{commit}')"
+            if [[ "${tag_type}" == "tag" && "${tag_target}" == "${SOURCE_SHA}" ]]; then
+              state=matching
+            else
+              state=mismatch
+            fi
+          fi
+          printf 'state=%s\n' "${state}" >> "${GITHUB_OUTPUT}"
+
+      - name: Query matching GitHub Release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_path="${RUNNER_TEMP}/spec-finder-release.json"
+          release_error="${RUNNER_TEMP}/spec-finder-release.err"
+          set +e
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" > "${release_path}" 2> "${release_error}"
+          release_status=$?
+          set -e
+
+          if [[ "${release_status}" -eq 0 ]]; then
+            # shellcheck disable=SC2016
+            RELEASE_PATH="${release_path}" TAG="${TAG}" SOURCE_SHA="${SOURCE_SHA}" OUTPUT_PATH="${GITHUB_OUTPUT}" bun -e '
+              const payload = await Bun.file(Bun.env.RELEASE_PATH!).json() as { tag_name?: unknown; target_commitish?: unknown }
+              const target = payload.target_commitish
+              const matches = payload.tag_name === Bun.env.TAG && (target === undefined || target === "" || target === "main" || target === Bun.env.SOURCE_SHA)
+              await Bun.write(Bun.env.OUTPUT_PATH!, `state=${matches ? "matching" : "mismatch"}\n`)
+            '
+          elif grep -Eiq 'HTTP 404|Not Found|404' "${release_error}"; then
+            printf 'state=absent\n' >> "${GITHUB_OUTPUT}"
+          else
+            cat "${release_error}" >&2
+            echo "::error::GitHub Release query failed; remote state is not safe to infer" >&2
+            exit "${release_status}"
+          fi
+
+      - name: Classify remote state and write handoff
+        id: classify
+        env:
+          CANDIDATE_PATH: candidate/release-candidate.json
+          RELEASE_MODE: ${{ inputs.mode }}
+          NPM_STATE: ${{ steps.npm.outputs.state }}
+          TAG_STATE: ${{ steps.tag.outputs.state }}
+          RELEASE_STATE: ${{ steps.release.outputs.state }}
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
+          SOURCE_REF: ${{ needs.preflight.outputs.source_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2016
+          CANDIDATE_PATH="${CANDIDATE_PATH}" RELEASE_MODE="${RELEASE_MODE}" NPM_STATE="${NPM_STATE}" TAG_STATE="${TAG_STATE}" RELEASE_STATE="${RELEASE_STATE}" SOURCE_SHA="${SOURCE_SHA}" SOURCE_REF="${SOURCE_REF}" bun -e '
+            import { classifyState } from "./scripts/release/contract.ts"
+
+            const document = await Bun.file(Bun.env.CANDIDATE_PATH!).json() as { candidate?: unknown; source?: unknown }
+            const state = {
+              npm: Bun.env.NPM_STATE,
+              tag: Bun.env.TAG_STATE,
+              release: Bun.env.RELEASE_STATE,
+            }
+            const decision = classifyState(Bun.env.RELEASE_MODE as "release" | "reconcile", state as never)
+            const handoff = {
+              schemaVersion: 1,
+              kind: "spec-finder.release-state",
+              accepted: decision.ok,
+              mode: Bun.env.RELEASE_MODE,
+              candidate: document.candidate,
+              source: document.source,
+              state: {
+                phase: "remote-preflight",
+                remoteState: state,
+                mutationEligible: decision.ok,
+                decision,
+              },
+            }
+            await Bun.write("release-state.json", `${JSON.stringify(handoff, null, 2)}\n`)
+            const output = Bun.env.GITHUB_OUTPUT!
+            await Bun.write(output, [
+              `action=${decision.action}`,
+              `status=${decision.status}`,
+              `npm_state=${state.npm}`,
+              `tag_state=${state.tag}`,
+              `release_state=${state.release}`,
+              "artifact_name=release-state",
+              "",
+            ].join("\n"))
+          '
+
+      - name: Upload refreshed remote-state handoff
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-state
+          path: release-state.json
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish npm package (release only)
+    if: >-
+      needs.preflight.result == 'success' &&
+      needs.preflight.outputs.accepted == 'true' &&
+      needs.remote_state.result == 'success' &&
+      needs.remote_state.outputs.action == 'publish' &&
+      inputs.mode == 'release'
+    needs:
+      - preflight
+      - remote_state
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      package_url: ${{ steps.publish.outputs.package_url }}
+      published_version: ${{ steps.publish.outputs.published_version }}
+      artifact_name: ${{ steps.publish.outputs.artifact_name }}
+    steps:
+      - name: Checkout exact release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.0
+        with:
+          ref: ${{ needs.preflight.outputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Download accepted candidate handoff
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-candidate
+          path: candidate
+
+      - name: Recheck accepted candidate before publish
+        env:
+          CANDIDATE_PATH: candidate/release-candidate.json
+          RELEASE_MODE: ${{ inputs.mode }}
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
+          SOURCE_REF: ${{ needs.preflight.outputs.source_ref }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun run release:check
+          CANDIDATE_PATH="${CANDIDATE_PATH}" RELEASE_MODE="${RELEASE_MODE}" SOURCE_SHA="${SOURCE_SHA}" SOURCE_REF="${SOURCE_REF}" VERSION="${VERSION}" bun -e '
+            import { validateCandidate } from "./scripts/release/contract.ts"
+
+            const document = await Bun.file(Bun.env.CANDIDATE_PATH!).json() as { accepted?: unknown; mode?: unknown; candidate?: Record<string, unknown>; source?: { commitSha?: unknown; ref?: unknown } }
+            const result = validateCandidate(document.candidate ?? {})
+            if (!result.ok || document.accepted !== true || document.mode !== Bun.env.RELEASE_MODE) {
+              throw new Error("publish candidate handoff is not accepted for release mode")
+            }
+            if (result.candidate.version !== Bun.env.VERSION || result.candidate.sourceSha !== Bun.env.SOURCE_SHA || result.candidate.sourceRef !== Bun.env.SOURCE_REF || document.source?.commitSha !== Bun.env.SOURCE_SHA) {
+              throw new Error("publish candidate identity does not match the reviewed source")
+            }
+          '
+
+      - name: Publish exact stable package through OIDC
+        id: publish
+        env:
+          NPM_CONFIG_CACHE: ${{ runner.temp }}/spec-finder-release-npm-cache
+          PACKAGE_NAME: spec-finder
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
+          SOURCE_REF: ${{ needs.preflight.outputs.source_ref }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        shell: bash
+        run: |
+          # shellcheck disable=SC2016
+          set -euo pipefail
+          if [[ "${{ inputs.mode }}" != "release" ]]; then
+            echo "::error::npm publish is reachable only in release mode" >&2
+            exit 1
+          fi
+          npm publish --access public --provenance
+          observed_json="$(npm view "${PACKAGE_NAME}@${VERSION}" version --json)"
+          observed_version="${observed_json//\"/}"
+          if [[ "${observed_version}" != "${VERSION}" ]]; then
+            echo "::error::published npm identity does not match the reviewed version" >&2
+            exit 1
+          fi
+          package_url="https://www.npmjs.com/package/${PACKAGE_NAME}/v/${VERSION}"
+          {
+            printf 'package_url=%s\n' "${package_url}"
+            printf 'published_version=%s\n' "${observed_version}"
+            printf 'artifact_name=published-package\n'
+          } >> "${GITHUB_OUTPUT}"
+          # shellcheck disable=SC2016
+          PACKAGE_URL="${package_url}" PACKAGE_NAME="${PACKAGE_NAME}" VERSION="${VERSION}" SOURCE_SHA="${SOURCE_SHA}" SOURCE_REF="${SOURCE_REF}" bun -e '
+            const record = {
+              schemaVersion: 1,
+              kind: "spec-finder.published-package",
+              package: { name: Bun.env.PACKAGE_NAME, version: Bun.env.VERSION, url: Bun.env.PACKAGE_URL },
+              source: { ref: Bun.env.SOURCE_REF, commitSha: Bun.env.SOURCE_SHA },
+              state: "published",
+            }
+            await Bun.write("published-package.json", `${JSON.stringify(record, null, 2)}\n`)
+          '
+
+      - name: Upload exact published package identity
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: published-package
+          path: published-package.json
+          if-no-files-found: error
+          retention-days: 7
+
+  metadata:
+    name: Reconcile tag and GitHub Release metadata
+    if: >-
+      always() &&
+      needs.preflight.result == 'success' &&
+      needs.preflight.outputs.accepted == 'true' &&
+      needs.remote_state.result == 'success' &&
+      (
+        (inputs.mode == 'release' && needs.publish.result == 'success') ||
+        (inputs.mode == 'reconcile' && needs.remote_state.outputs.npm_state == 'published' && needs.remote_state.outputs.status != 'blocked')
+      )
+    needs:
+      - preflight
+      - remote_state
+      - publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      package_url: ${{ steps.release.outputs.package_url }}
+      tag_url: ${{ steps.tag.outputs.tag_url }}
+      release_url: ${{ steps.release.outputs.release_url }}
+      artifact_name: ${{ steps.release.outputs.artifact_name }}
+    steps:
+      - name: Checkout exact release source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.0
+        with:
+          ref: ${{ needs.preflight.outputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Download accepted candidate handoff
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-candidate
+          path: candidate
+
+      - name: Revalidate candidate and npm publication before metadata mutation
+        env:
+          CANDIDATE_PATH: candidate/release-candidate.json
+          RELEASE_MODE: ${{ inputs.mode }}
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
+          SOURCE_REF: ${{ needs.preflight.outputs.source_ref }}
+          PACKAGE_NAME: spec-finder
+          VERSION: ${{ needs.preflight.outputs.version }}
+        shell: bash
+        run: |
+          # shellcheck disable=SC2016,SC2129
+          set -euo pipefail
+          CANDIDATE_PATH="${CANDIDATE_PATH}" RELEASE_MODE="${RELEASE_MODE}" SOURCE_SHA="${SOURCE_SHA}" SOURCE_REF="${SOURCE_REF}" VERSION="${VERSION}" bun -e '
+            import { validateCandidate } from "./scripts/release/contract.ts"
+
+            const document = await Bun.file(Bun.env.CANDIDATE_PATH!).json() as { accepted?: unknown; mode?: unknown; candidate?: Record<string, unknown>; source?: { commitSha?: unknown; ref?: unknown } }
+            const result = validateCandidate(document.candidate ?? {})
+            if (!result.ok || document.accepted !== true || document.mode !== Bun.env.RELEASE_MODE) {
+              throw new Error("metadata candidate handoff is not accepted for the dispatched mode")
+            }
+            if (result.candidate.version !== Bun.env.VERSION || result.candidate.sourceSha !== Bun.env.SOURCE_SHA || result.candidate.sourceRef !== Bun.env.SOURCE_REF || document.source?.commitSha !== Bun.env.SOURCE_SHA) {
+              throw new Error("metadata candidate identity does not match the reviewed source")
+            }
+          '
+
+          npm_output="${RUNNER_TEMP}/spec-finder-metadata-npm.json"
+          npm view "${PACKAGE_NAME}@${VERSION}" version --json > "${npm_output}"
+          observed_version="$(NPM_OUTPUT_PATH="${npm_output}" bun -e 'const value = await Bun.file(Bun.env.NPM_OUTPUT_PATH!).json(); if (typeof value !== "string") process.exit(2); console.log(value)')"
+          if [[ "${observed_version}" != "${VERSION}" ]]; then
+            echo "::error::metadata reconciliation requires the exact npm version to be published" >&2
+            exit 1
+          fi
+
+      - name: Create or verify exact annotated tag
+        id: tag
+        env:
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        shell: bash
+        run: |
+          # shellcheck disable=SC2016,SC2129
+          set -euo pipefail
+          remote_lines="$(git ls-remote origin "refs/tags/${TAG}" 2> "${RUNNER_TEMP}/spec-finder-metadata-tag.err")" || {
+            cat "${RUNNER_TEMP}/spec-finder-metadata-tag.err" >&2
+            exit 1
+          }
+          if [[ -z "${remote_lines}" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "${TAG}" "${SOURCE_SHA}" -m "spec-finder ${TAG}"
+            git push origin "refs/tags/${TAG}"
+          fi
+
+          git fetch --no-tags origin "refs/tags/${TAG}"
+          tag_type="$(git cat-file -t FETCH_HEAD)"
+          tag_target="$(git rev-parse --verify 'FETCH_HEAD^{commit}')"
+          if [[ "${tag_type}" != "tag" || "${tag_target}" != "${SOURCE_SHA}" ]]; then
+            echo "::error::annotated tag does not match the reviewed source SHA; refusing Release creation" >&2
+            exit 1
+          fi
+          printf 'tag_url=https://github.com/MatheusBBarni/spec-finder/releases/tag/%s\n' "${TAG}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create or verify GitHub Release with generated notes
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        shell: bash
+        run: |
+          # shellcheck disable=SC2016,SC2129
+          set -euo pipefail
+          release_path="${RUNNER_TEMP}/spec-finder-metadata-release.json"
+          release_error="${RUNNER_TEMP}/spec-finder-metadata-release.err"
+          set +e
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" > "${release_path}" 2> "${release_error}"
+          release_status=$?
+          set -e
+
+          if [[ "${release_status}" -eq 0 ]]; then
+            RELEASE_PATH="${release_path}" TAG="${TAG}" SOURCE_SHA="${SOURCE_SHA}" bun -e '
+              const payload = await Bun.file(Bun.env.RELEASE_PATH!).json() as { tag_name?: unknown; target_commitish?: unknown }
+              const target = payload.target_commitish
+              if (payload.tag_name !== Bun.env.TAG || (target !== undefined && target !== "" && target !== "main" && target !== Bun.env.SOURCE_SHA)) {
+                throw new Error("existing GitHub Release identity does not match the reviewed tag or source")
+              }
+            '
+          elif grep -Eiq 'HTTP 404|Not Found|404' "${release_error}"; then
+            gh release create "${TAG}" --verify-tag --generate-notes --title "spec-finder ${TAG}"
+          else
+            cat "${release_error}" >&2
+            exit "${release_status}"
+          fi
+
+          body_path="${RUNNER_TEMP}/spec-finder-release-notes.md"
+          gh release view "${TAG}" --json body --jq .body > "${body_path}"
+          FOOTER_PATH="${RUNNER_TEMP}/spec-finder-release-footer.md" VERSION="${VERSION}" bun -e '
+            import { formatReleaseFooter } from "./scripts/release/contract.ts"
+
+            const footer = formatReleaseFooter(Bun.env.VERSION!)
+            await Bun.write(Bun.env.FOOTER_PATH!, footer)
+          '
+          if ! grep -Fq '<!-- spec-finder-release-footer -->' "${body_path}"; then
+            {
+              printf '\n\n'
+              cat "${RUNNER_TEMP}/spec-finder-release-footer.md"
+              printf '\n'
+            } >> "${body_path}"
+            # The release was verified above or created against the existing
+            # tag; this edit preserves generated notes and only adds the fixed
+            # repository-owned footer.
+            gh release edit "${TAG}" --notes-file "${body_path}"
+          fi
+
+          final_release_path="${RUNNER_TEMP}/spec-finder-final-release.json"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" > "${final_release_path}"
+          # shellcheck disable=SC2016
+          RELEASE_PATH="${final_release_path}" TAG="${TAG}" SOURCE_SHA="${SOURCE_SHA}" VERSION="${VERSION}" GITHUB_OUTPUT="${GITHUB_OUTPUT}" bun -e '
+            const payload = await Bun.file(Bun.env.RELEASE_PATH!).json() as { id?: unknown; tag_name?: unknown; target_commitish?: unknown; body?: unknown; html_url?: unknown }
+            const body = typeof payload.body === "string" ? payload.body : ""
+            const target = payload.target_commitish
+            if (payload.tag_name !== Bun.env.TAG || (target !== undefined && target !== "" && target !== "main" && target !== Bun.env.SOURCE_SHA)) {
+              throw new Error("final GitHub Release identity does not match the reviewed tag or source")
+            }
+            if (!body.includes("<!-- spec-finder-release-footer -->") || !body.includes(`npm install --global spec-finder@${Bun.env.VERSION}`) || !body.includes("spec-finder upgrade")) {
+              throw new Error("GitHub Release body is missing the repository-owned installer footer")
+            }
+            if (typeof payload.id !== "number" || typeof payload.html_url !== "string") {
+              throw new Error("GitHub Release response did not contain a stable public identity")
+            }
+            const tagUrl = `https://github.com/MatheusBBarni/spec-finder/releases/tag/${Bun.env.TAG}`
+            await Bun.write("release-metadata.json", `${JSON.stringify({
+              schemaVersion: 1,
+              kind: "spec-finder.release-metadata",
+              package: { name: "spec-finder", version: Bun.env.VERSION, url: `https://www.npmjs.com/package/spec-finder/v/${Bun.env.VERSION}`, state: "published" },
+              tag: { name: Bun.env.TAG, sourceSha: Bun.env.SOURCE_SHA, url: tagUrl, state: "matching" },
+              release: { id: payload.id, tagName: payload.tag_name, url: payload.html_url, state: "matching" },
+              state: { phase: "metadata", result: "partial", nextAction: "Run platform smoke before declaring the release complete." },
+            }, null, 2)}\n`)
+            await Bun.write(Bun.env.GITHUB_OUTPUT!, [
+              `package_url=https://www.npmjs.com/package/spec-finder/v/${Bun.env.VERSION}`,
+              `tag_url=${tagUrl}`,
+              `release_url=${payload.html_url}`,
+              "artifact_name=release-metadata",
+              "",
+            ].join("\n"))
+          '
+
+      - name: Upload release metadata identity
+        if: ${{ always() && steps.release.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-metadata
+          path: release-metadata.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Record metadata recovery boundary
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          {
+            echo "## Public metadata reconciliation"
+            echo
+            echo "- npm publication is immutable and is never retried by this job"
+            echo "- tag and GitHub Release writes are additive and fail closed on identity mismatch"
+            if [[ "${{ job.status }}" != "success" ]]; then
+              echo "- Result: partial; inspect the package/tag/Release state and run reconcile mode"
+            else
+              echo "- Result: public metadata present; platform smoke remains a separate completion gate"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  smoke:
+    name: Post-publication smoke (${{ matrix.platform }})
+    if: >-
+      always() &&
+      needs.preflight.result == 'success' &&
+      needs.preflight.outputs.accepted == 'true' &&
+      needs.remote_state.result == 'success' &&
+      needs.remote_state.outputs.status != 'blocked' &&
+      needs.metadata.result == 'success'
+    needs:
+      - preflight
+      - remote_state
+      - publish
+      - metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu
+            os: ubuntu-latest
+          - platform: windows
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    permissions: {}
+    steps:
+      - name: Setup Bun runtime
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Prepare isolated Ubuntu workspace, home, prefix, and PATH
+        if: ${{ matrix.platform == 'ubuntu' }}
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          smoke_root="${RUNNER_TEMP}/spec-finder-smoke-ubuntu"
+          smoke_workspace="${smoke_root}/workspace"
+          smoke_home="${smoke_root}/home"
+          smoke_prefix="${smoke_root}/npm-prefix"
+          smoke_cache="${smoke_root}/npm-cache"
+          smoke_tmp="${smoke_root}/tmp"
+          mkdir -p "${smoke_workspace}" "${smoke_home}" "${smoke_prefix}" "${smoke_cache}" "${smoke_tmp}"
+          {
+            printf 'SMOKE_WORKSPACE=%s\n' "${smoke_workspace}"
+            printf 'SMOKE_HOME=%s\n' "${smoke_home}"
+            printf 'NPM_CONFIG_PREFIX=%s\n' "${smoke_prefix}"
+            printf 'NPM_CONFIG_CACHE=%s\n' "${smoke_cache}"
+            printf 'NPM_CONFIG_USERCONFIG=%s/.npmrc\n' "${smoke_home}"
+            printf 'HOME=%s\n' "${smoke_home}"
+            printf 'XDG_CONFIG_HOME=%s/.config\n' "${smoke_home}"
+            printf 'XDG_CACHE_HOME=%s/.cache\n' "${smoke_home}"
+            printf 'TMPDIR=%s\n' "${smoke_tmp}"
+            printf 'PATH=%s/bin:%s\n' "${smoke_prefix}" "${PATH}"
+          } >> "${GITHUB_ENV}"
+          printf 'isolated Ubuntu smoke workspace prepared for spec-finder@%s\n' "${VERSION}"
+
+      - name: Prepare isolated Windows workspace, profile, prefix, and PATH
+        if: ${{ matrix.platform == 'windows' }}
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          $smokeRoot = Join-Path $env:RUNNER_TEMP "spec-finder-smoke-windows"
+          $smokeWorkspace = Join-Path $smokeRoot "workspace"
+          $smokeProfile = Join-Path $smokeRoot "profile"
+          $smokePrefix = Join-Path $smokeRoot "npm-prefix"
+          $smokeCache = Join-Path $smokeRoot "npm-cache"
+          $smokeAppData = Join-Path $smokeRoot "app-data"
+          $smokeLocalAppData = Join-Path $smokeRoot "local-app-data"
+          $smokeTemp = Join-Path $smokeRoot "tmp"
+          New-Item -ItemType Directory -Force -Path $smokeWorkspace, $smokeProfile, $smokePrefix, $smokeCache, $smokeAppData, $smokeLocalAppData, $smokeTemp | Out-Null
+          @(
+            "SMOKE_WORKSPACE=$smokeWorkspace"
+            "SMOKE_HOME=$smokeProfile"
+            "USERPROFILE=$smokeProfile"
+            "APPDATA=$smokeAppData"
+            "LOCALAPPDATA=$smokeLocalAppData"
+            "NPM_CONFIG_PREFIX=$smokePrefix"
+            "NPM_CONFIG_CACHE=$smokeCache"
+            "NPM_CONFIG_USERCONFIG=$(Join-Path $smokeProfile '.npmrc')"
+            "TEMP=$smokeTemp"
+            "TMP=$smokeTemp"
+            "PATH=$smokePrefix;$env:PATH"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Output "isolated Windows smoke workspace prepared for spec-finder@$env:VERSION"
+
+      - name: Install and exercise exact package on Ubuntu
+        if: ${{ matrix.platform == 'ubuntu' }}
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd "${SMOKE_WORKSPACE}"
+          configured_prefix="$(npm config get prefix)"
+          test "${configured_prefix}" = "${NPM_CONFIG_PREFIX}"
+          npm install --global "spec-finder@${VERSION}" --prefix "${NPM_CONFIG_PREFIX}"
+          installed_version="$(spec-finder version)"
+          test "${installed_version}" = "${VERSION}"
+          spec-finder setup
+          latest_json="$(npm view spec-finder@latest version --json)"
+          latest_version="${latest_json//\"/}"
+          test "${latest_version}" = "${VERSION}"
+          spec-finder upgrade
+          upgraded_version="$(spec-finder version)"
+          test "${upgraded_version}" = "${VERSION}"
+
+      - name: Install and exercise exact package on Windows
+        if: ${{ matrix.platform == 'windows' }}
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          Set-Location $env:SMOKE_WORKSPACE
+          $configuredPrefix = (& npm.cmd config get prefix | Out-String).Trim().TrimEnd('\')
+          $expectedPrefix = $env:NPM_CONFIG_PREFIX.TrimEnd('\')
+          if ($configuredPrefix -ne $expectedPrefix) { throw "npm global prefix '$configuredPrefix' does not match isolated prefix '$expectedPrefix'" }
+          npm.cmd install --global "spec-finder@$env:VERSION" --prefix "$env:NPM_CONFIG_PREFIX"
+          $installedVersion = (& spec-finder version | Out-String).Trim()
+          if ($installedVersion -ne $env:VERSION) { throw "installed spec-finder version '$installedVersion' does not match '$env:VERSION'" }
+          & spec-finder setup
+          $latestVersion = (& npm.cmd view spec-finder@latest version --json | Out-String).Trim().Trim('"')
+          if ($latestVersion -ne $env:VERSION) { throw "npm latest '$latestVersion' does not match '$env:VERSION'; exact upgrade evidence is unavailable" }
+          & spec-finder upgrade
+          $upgradedVersion = (& spec-finder version | Out-String).Trim()
+          if ($upgradedVersion -ne $env:VERSION) { throw "upgraded spec-finder version '$upgradedVersion' does not match '$env:VERSION'" }
+
+      - name: Record Ubuntu smoke evidence
+        if: ${{ always() && matrix.platform == 'ubuntu' }}
+        shell: bash
+        env:
+          SMOKE_JOB_STATUS: ${{ job.status }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          result=failed
+          if [[ "${SMOKE_JOB_STATUS}" == "success" ]]; then result=passed; fi
+          cat > smoke-result.json <<EOF
+          {
+            "schemaVersion": 1,
+            "kind": "spec-finder.platform-smoke",
+            "platform": "ubuntu",
+            "runner": "ubuntu-latest",
+            "version": "${VERSION}",
+            "result": "${result}",
+            "isolated": true,
+            "checks": ["npm install --global spec-finder@<version>", "spec-finder version", "spec-finder setup", "spec-finder upgrade"]
+          }
+          EOF
+
+      - name: Record Windows smoke evidence
+        if: ${{ always() && matrix.platform == 'windows' }}
+        shell: pwsh
+        env:
+          SMOKE_JOB_STATUS: ${{ job.status }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          $result = if ($env:SMOKE_JOB_STATUS -eq "success") { "passed" } else { "failed" }
+          $evidence = [ordered]@{
+            schemaVersion = 1
+            kind = "spec-finder.platform-smoke"
+            platform = "windows"
+            runner = "windows-latest"
+            version = $env:VERSION
+            result = $result
+            isolated = $true
+            checks = @("npm install --global spec-finder@<version>", "spec-finder version", "spec-finder setup", "spec-finder upgrade")
+          }
+          $evidence | ConvertTo-Json -Depth 4 | Set-Content -Path smoke-result.json -Encoding utf8
+
+      - name: Upload platform smoke evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: smoke-${{ matrix.platform }}
+          path: smoke-result.json
+          if-no-files-found: error
+          retention-days: 7
+
+  summary:
+    name: Stable release outcome summary
+    if: ${{ always() }}
+    needs:
+      - preflight
+      - remote_state
+      - publish
+      - metadata
+      - smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout summary formatter
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Bun for summary formatter
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Download platform smoke evidence
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: smoke-*
+          path: smoke-artifacts
+
+      - name: Emit final plain-text release summary
+        if: ${{ always() }}
+        env:
+          MODE: ${{ inputs.mode }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          SOURCE_REF: ${{ needs.preflight.outputs.source_ref || github.ref }}
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha || github.sha }}
+          PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          PREFLIGHT_ACCEPTED: ${{ needs.preflight.outputs.accepted }}
+          REMOTE_RESULT: ${{ needs.remote_state.result }}
+          REMOTE_STATUS: ${{ needs.remote_state.outputs.status }}
+          REMOTE_ACTION: ${{ needs.remote_state.outputs.action }}
+          NPM_STATE: ${{ needs.remote_state.outputs.npm_state }}
+          TAG_STATE: ${{ needs.remote_state.outputs.tag_state }}
+          RELEASE_STATE: ${{ needs.remote_state.outputs.release_state }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+          METADATA_RESULT: ${{ needs.metadata.result }}
+          PACKAGE_URL: ${{ needs.metadata.outputs.package_url || needs.publish.outputs.package_url }}
+          TAG_URL: ${{ needs.metadata.outputs.tag_url }}
+          RELEASE_URL: ${{ needs.metadata.outputs.release_url }}
+        shell: bash
+        run: |
+          # shellcheck disable=SC2016
+          set -euo pipefail
+          if [[ -z "${VERSION}" ]]; then VERSION=0.0.0; fi
+          if [[ -z "${MODE}" ]]; then MODE=release; fi
+
+          if command -v bun >/dev/null 2>&1 && [[ -f scripts/release/contract.ts ]]; then
+            set +e
+            # shellcheck disable=SC2016
+            bun -e '
+              import { existsSync } from "node:fs"
+              import { formatSummary } from "./scripts/release/contract.ts"
+
+              const env = Bun.env
+              async function smokeStatus(platform: "ubuntu" | "windows"): Promise<string> {
+                const path = `smoke-artifacts/smoke-${platform}/smoke-result.json`
+                if (!existsSync(path)) return "not_run"
+                try {
+                  const record = await Bun.file(path).json() as { version?: unknown; result?: unknown }
+                  if (record.version !== env.VERSION) return "failed"
+                  return record.result === "passed" ? "passed" : "failed"
+                } catch {
+                  return "failed"
+                }
+              }
+
+              const smoke = {
+                ubuntu: await smokeStatus("ubuntu"),
+                windows: await smokeStatus("windows"),
+              }
+              const preflightPassed = env.PREFLIGHT_RESULT === "success" && env.PREFLIGHT_ACCEPTED === "true"
+              const remotePassed = env.REMOTE_RESULT === "success" && env.REMOTE_STATUS !== "blocked"
+              const metadataPassed = env.METADATA_RESULT === "success"
+              const packageReady = env.MODE === "reconcile"
+                ? env.NPM_STATE === "published"
+                : env.PUBLISH_RESULT === "success"
+              const packageUrl = env.PACKAGE_URL || (packageReady ? `https://www.npmjs.com/package/spec-finder/v/${env.VERSION}` : undefined)
+              const tagUrl = env.TAG_URL || (env.TAG_STATE === "matching" ? `https://github.com/MatheusBBarni/spec-finder/releases/tag/v${env.VERSION}` : undefined)
+              const releaseUrl = env.RELEASE_URL || (env.RELEASE_STATE === "matching" ? `https://github.com/MatheusBBarni/spec-finder/releases/tag/v${env.VERSION}` : undefined)
+              const publicLinksReady = Boolean(packageUrl && tagUrl && releaseUrl)
+
+              let result: "complete" | "blocked" | "partial"
+              if (!preflightPassed || !remotePassed) {
+                result = "blocked"
+              } else if (metadataPassed && packageReady && publicLinksReady && smoke.ubuntu === "passed" && smoke.windows === "passed") {
+                result = "complete"
+              } else {
+                result = "partial"
+              }
+
+              const manualIdentityCorrection = preflightPassed && remotePassed && env.REMOTE_ACTION === "none" && !metadataPassed
+              const nextAction = manualIdentityCorrection
+                ? "Stop for manual identity correction; do not force-update tags, Releases, or npm versions."
+                : result === "partial"
+                  ? "Run reconcile mode for the same main version; do not republish npm."
+                  : undefined
+
+              const summary = formatSummary({
+                name: "spec-finder",
+                version: env.VERSION,
+                mode: env.MODE,
+                result,
+                sourceRef: env.SOURCE_REF,
+                sourceSha: env.SOURCE_SHA,
+                packageUrl,
+                tagUrl,
+                releaseUrl,
+                packageState: packageReady ? "published" : "not available",
+                tagState: tagUrl ? "matching" : "not available",
+                releaseState: releaseUrl ? "matching" : "not available",
+                preflight: preflightPassed ? "passed" : "blocked",
+                smoke,
+                ...(nextAction === undefined ? {} : { nextAction }),
+              })
+              await Bun.write("release-summary.txt", `${summary}\n`)
+            '
+            formatter_status=$?
+            set -e
+            if [[ "${formatter_status}" -ne 0 ]]; then rm -f release-summary.txt; fi
+          fi
+
+          if [[ ! -s release-summary.txt ]]; then
+            result=partial
+            next_action="Run reconcile mode for the same main version; do not republish npm."
+            if [[ "${PREFLIGHT_RESULT}" != "success" || "${PREFLIGHT_ACCEPTED}" != "true" || "${REMOTE_STATUS}" == "blocked" ]]; then
+              result=blocked
+              next_action="Fix the blocked candidate or remote identity, then dispatch again from main."
+            fi
+            {
+              echo "Release summary: spec-finder@${VERSION}"
+              echo "Result: ${result}"
+              echo "Mode: ${MODE}"
+              echo "Source: ${SOURCE_REF:-unavailable} (${SOURCE_SHA:-unavailable})"
+              echo "Package: ${PACKAGE_URL:-not available}"
+              echo "Tag: ${TAG_URL:-not available}"
+              echo "GitHub Release: ${RELEASE_URL:-not available}"
+              echo "Preflight: ${PREFLIGHT_RESULT:-not_run}"
+              echo "Smoke: Ubuntu not_run; Windows not_run"
+              echo "Next action: ${next_action}"
+            } > release-summary.txt
+          fi
+
+          cat release-summary.txt >> "${GITHUB_STEP_SUMMARY}"
+          cat release-summary.txt

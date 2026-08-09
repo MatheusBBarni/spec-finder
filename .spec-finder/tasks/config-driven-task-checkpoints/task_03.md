@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Build the safe Git checkpoint service
 type: backend
 complexity: high

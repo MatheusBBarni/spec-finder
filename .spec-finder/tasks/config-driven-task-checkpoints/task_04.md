@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Integrate checkpoint delivery into runtime execution
 type: backend
 complexity: high

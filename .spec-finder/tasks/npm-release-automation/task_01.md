@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Define deterministic release-contract helpers
 type: infra
 complexity: medium

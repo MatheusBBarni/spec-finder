@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Add the auto-commit configuration contract
 type: backend
 complexity: medium
