@@ -158,7 +158,7 @@ describe("task packets", () => {
     }
   })
 
-  test("retries completed blocked delivery in dependency order and skips delivered or absent completion", () => {
+  test("recovers completed active and blocked delivery while skipping delivered or absent completion", () => {
     const blocked = parseTask(
       "task_01.md",
       taskWithCheckpoint(1, "Blocked", "completed", checkpoint("blocked", "commit hook failed")),
@@ -170,7 +170,11 @@ describe("task packets", () => {
     )
     const absent = parseTask("task_04.md", task(4, "Absent").replace("status: pending", "status: completed"))
 
-    expect(executionOrder([blocked, pending, active, absent]).map((item) => item.id)).toEqual(["task_01", "task_02"])
+    expect(executionOrder([blocked, pending, active, absent]).map((item) => item.id)).toEqual([
+      "task_01",
+      "task_02",
+      "task_03",
+    ])
     expect(executionOrder([blocked, pending, active, absent], true).map((item) => item.id)).toEqual([
       "task_01",
       "task_02",

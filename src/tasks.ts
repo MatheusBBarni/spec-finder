@@ -176,7 +176,9 @@ export function executionOrder(tasks: TaskFile[], includeCompleted = false): Tas
       if (target) visit(target)
     }
     visited.add(task.id)
-    if (includeCompleted || !isCompletedStatus(task.frontmatter.status) || isCheckpointBlocked(task)) result.push(task)
+    if (includeCompleted || !isCompletedStatus(task.frontmatter.status) || hasPendingCheckpointDelivery(task)) {
+      result.push(task)
+    }
   }
   for (const task of tasks) visit(task)
   return result
@@ -188,6 +190,10 @@ export function isCompletedStatus(status: TaskStatus): boolean {
 
 export function isCheckpointBlocked(task: TaskFile): boolean {
   return isCompletedStatus(task.frontmatter.status) && task.frontmatter.checkpoint?.state === "blocked"
+}
+
+export function hasPendingCheckpointDelivery(task: TaskFile): boolean {
+  return isCompletedStatus(task.frontmatter.status) && task.frontmatter.checkpoint !== undefined
 }
 
 export async function updateTaskStatus(task: TaskFile, status: TaskStatus): Promise<TaskFile> {

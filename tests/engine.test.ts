@@ -488,6 +488,73 @@ dependencies: []
     expect(events).toContainEqual({ type: "checkpoint", taskId: "task_01", state: "created", commit: "test-commit" })
   })
 
+  test("delivers a completed active checkpoint without rerunning implementation", async () => {
+    const fixture = await createRetryFixture("Recover active checkpoint")
+    const taskPath = join(fixture.root, ".spec-finder", "tasks", "demo", "task_01.md")
+    await writeFile(taskPath, `---
+status: completed
+title: Recover active checkpoint
+type: test
+complexity: low
+dependencies: []
+checkpoint:
+  state: active
+  base_head: ${"a".repeat(40)}
+  baseline_digest: ${"b".repeat(64)}
+  paths:
+    - .spec-finder/tasks/demo/task_01.md
+---
+
+# Task 01: Recover active checkpoint
+`)
+    const calls: string[] = []
+    const service: CheckpointServiceContract = {
+      begin: async () => {
+        calls.push("begin")
+        return { state: "blocked", message: "begin not expected" }
+      },
+      complete: async () => {
+        calls.push("complete")
+        return { state: "created", commit: "recovered-commit" }
+      },
+      retry: async () => {
+        calls.push("retry")
+        return { state: "blocked", message: "retry not expected" }
+      },
+      preserve: async () => {
+        calls.push("preserve")
+        return { state: "blocked", message: "preserve not expected" }
+      },
+    }
+    const events: RunEvent[] = []
+
+    const result = await runTaskPacket({
+      root: fixture.root,
+      slug: "demo",
+      config: parseConfig({ ...fixture.config, auto_commit: true }),
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      checkpointService: service,
+      providerLaunch: {
+        command: "/checkpoint-recovery-must-not-launch-acp",
+        args: [],
+        env: {},
+        authMethod: null,
+      },
+    })
+
+    expect(result).toEqual({ ok: true, completed: 1, failed: 0, blocked: 0 })
+    expect(calls).toEqual(["complete"])
+    expect(events).toContainEqual({
+      type: "checkpoint",
+      taskId: "task_01",
+      state: "created",
+      commit: "recovered-commit",
+    })
+    expect(events.some((event) => event.type === "task_status" && event.status === "in_progress")).toBeFalse()
+  })
+
   test("does not call the checkpoint service when auto_commit is disabled", async () => {
     const fixture = await createRetryFixture("Checkpoint disabled")
     let calls = 0

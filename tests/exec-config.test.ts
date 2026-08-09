@@ -104,6 +104,33 @@ describe("exec runtime and permission resolution", () => {
     }
   })
 
+  test("rejects unknown repository and user keys before projecting exec fields", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-exec-unknown-repo-"))
+    const home = await mkdtemp(join(tmpdir(), "spec-finder-exec-home-"))
+    try {
+      await makeConfig(root, { ...DEFAULT_CONFIG, repository_typo: true })
+      await makeHomeConfig(home, { ...DEFAULT_CONFIG })
+      await expect(resolveExecConfig({ cwd: root, home })).rejects.toMatchObject({
+        name: "ExecConfigError",
+        code: "runtime-profile",
+        source: "repository",
+        issues: ["repository_typo: Unrecognized key"],
+      })
+
+      await makeConfig(root, { ...DEFAULT_CONFIG })
+      await makeHomeConfig(home, { ...DEFAULT_CONFIG, user_typo: true })
+      await expect(resolveExecConfig({ cwd: root, home })).rejects.toMatchObject({
+        name: "ExecConfigError",
+        code: "runtime-profile",
+        source: "user",
+        issues: ["user_typo: Unrecognized key"],
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
   test("retains user permission when unrelated user runtime fields are invalid", async () => {
     const root = await mkdtemp(join(tmpdir(), "spec-finder-exec-permission-"))
     const home = await mkdtemp(join(tmpdir(), "spec-finder-exec-home-"))

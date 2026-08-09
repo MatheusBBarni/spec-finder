@@ -19,6 +19,7 @@ import {
   clearTaskCheckpoint,
   clearTaskHandoff,
   executionOrder,
+  hasPendingCheckpointDelivery,
   isCheckpointBlocked,
   loadTaskPacket,
   parseTask,
@@ -117,24 +118,25 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
       continue
     }
 
-    if (isCheckpointBlocked(current)) {
+    if (hasPendingCheckpointDelivery(current)) {
       if (!checkpointEnabled || checkpointService === undefined) {
         emitCheckpointBlocked(
           options.emit,
           current.id,
-          "checkpoint delivery is blocked; enable auto_commit to retry without rerunning implementation",
+          "checkpoint delivery is pending; enable auto_commit to recover without rerunning implementation",
         )
         blocked += 1
         break
       }
-      const retry = await callCheckpoint(checkpointService, "retry", checkpointInput(options, current))
-      if (retry.state === "blocked") {
-        emitCheckpointOutcome(options.emit, current.id, retry)
+      const operation = isCheckpointBlocked(current) ? "retry" : "complete"
+      const recovery = await callCheckpoint(checkpointService, operation, checkpointInput(options, current))
+      if (recovery.state === "blocked") {
+        emitCheckpointOutcome(options.emit, current.id, recovery)
         blocked += 1
         break
       }
-      if (retry.state === "created") {
-        emitCheckpointOutcome(options.emit, current.id, retry)
+      if (recovery.state === "created") {
+        emitCheckpointOutcome(options.emit, current.id, recovery)
         completed += 1
       }
       continue

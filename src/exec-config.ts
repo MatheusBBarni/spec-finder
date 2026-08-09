@@ -3,6 +3,7 @@ import { homedir as homeDirectory } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
 import {
+  configSchema,
   ConfigError,
   PROVIDERS,
   type ProviderName,
@@ -22,6 +23,7 @@ import {
 
 const REASONING_VALUES = ["auto", "low", "medium", "high", "xhigh", "max", "ultra"] as const
 const SPEED_VALUES = ["auto", "normal", "fast"] as const
+const SHARED_CONFIG_KEYS = new Set(Object.keys(configSchema.shape))
 
 const runtimeSchema = z.object({
   version: z.literal(2),
@@ -112,6 +114,8 @@ export async function resolveExecConfig(
   const repository = await readJsonConfig(repositoryPath, readFile)
   const user = await readJsonConfig(userPath, readFile)
 
+  assertKnownSharedConfigKeys(repository.value, "repository")
+  assertKnownSharedConfigKeys(user.value, "user")
   const permission = projectUserPermission(user)
   const selected = selectRuntimeProfile(repository, user, repositoryPath, userPath)
   const runtime = applyRuntimeOverrides(selected.profile, overrides, selected.source)
@@ -161,6 +165,7 @@ export function assertExecProviderAvailable(runtime: ExecRuntimeProfile): void {
 }
 
 export function parseExecRuntimeProfile(value: unknown, source: "repository" | "user" = "user"): ExecRuntimeProfile {
+  assertKnownSharedConfigKeys(value, source)
   const projected = projectRuntimeFields(value)
   const result = runtimeSchema.safeParse(projected)
   if (!result.success) {
@@ -269,6 +274,18 @@ function projectRuntimeFields(value: unknown): unknown {
     reasoning: value.reasoning,
     speed: value.speed,
   }
+}
+
+function assertKnownSharedConfigKeys(value: unknown, source: "repository" | "user"): void {
+  if (!isRecord(value)) return
+  const unknown = Object.keys(value).filter((key) => !SHARED_CONFIG_KEYS.has(key)).sort()
+  if (unknown.length === 0) return
+  throw new ExecConfigError(
+    "runtime-profile",
+    source,
+    `${source} configuration contains unsupported keys`,
+    unknown.map((key) => `${key}: Unrecognized key`),
+  )
 }
 
 async function readJsonConfig(path: string, readFile: (path: string) => Promise<string>): Promise<JsonConfigRead> {
