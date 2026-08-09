@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp } from "node:fs/promises"
+import { mkdtemp, readFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { runAcpTurn } from "../src/acp-client.ts"
@@ -10,6 +10,7 @@ describe("ACP client", () => {
   test("completes a framed turn and selects an allow option for approve-all", async () => {
     const root = await mkdtemp(join(tmpdir(), "spec-finder-acp-"))
     const fixture = join(import.meta.dir, "fixtures", "mock-agent.ts")
+    const lifecycleLog = join(root, "lifecycle.log")
     const config = parseConfig({
       ...DEFAULT_CONFIG,
       provider: "cursor",
@@ -31,12 +32,39 @@ describe("ACP client", () => {
       providerLaunch: {
         command: process.execPath,
         args: [fixture],
-        env: { SPEC_FINDER_TEST_REQUEST_PERMISSION: "1" },
+        env: {
+          SPEC_FINDER_TEST_REQUEST_PERMISSION: "1",
+          SPEC_FINDER_TEST_LIFECYCLE_LOG: lifecycleLog,
+        },
         authMethod: null,
       },
     })
 
     expect(result.stopReason).toBe("end_turn")
+    expect((await readFile(lifecycleLog, "utf8")).trim().split("\n")).toEqual([
+      "initialize",
+      "session/new",
+      "session/prompt",
+    ])
+    expect(events).toContainEqual({
+      type: "runtime_option",
+      name: "model",
+      requested: "auto",
+      outcome: "default",
+      detail: "launch-time",
+    })
+    expect(events).toContainEqual({
+      type: "runtime_option",
+      name: "reasoning",
+      requested: "auto",
+      outcome: "default",
+    })
+    expect(events).toContainEqual({
+      type: "runtime_option",
+      name: "speed",
+      requested: "auto",
+      outcome: "default",
+    })
     expect(events).toContainEqual(expect.objectContaining({
       type: "activity",
       taskId: "task_01",
@@ -107,7 +135,83 @@ describe("ACP client", () => {
     )).toBe(false)
     expect(events.some((event) => event.type === "permission_requested")).toBe(false)
   })
+
+  test("fails promptly when the ACP process exits before completing the turn", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-acp-exit-"))
+    const fixture = join(import.meta.dir, "fixtures", "mock-agent.ts")
+    const config = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "cursor",
+      model: "auto",
+      reasoning: "auto",
+      speed: "auto",
+      permissions: "approve-all",
+    })
+
+    await expect(runAcpTurn({
+      root,
+      config,
+      prompt: "This prompt must not hang",
+      taskId: "task_01",
+      signal: new AbortController().signal,
+      emit: () => {},
+      interactivePermissions: false,
+      providerLaunch: {
+        command: process.execPath,
+        args: [fixture],
+        env: { SPEC_FINDER_TEST_EXIT_IMMEDIATELY: "1" },
+        authMethod: null,
+      },
+    })).rejects.toThrow("ACP process ended before the task handoff completed (exit 23)")
+  }, 2_000)
+
+  test("terminates ACP descendant processes after a completed handoff", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-acp-tree-"))
+    const descendantPath = join(root, "descendant.pid")
+    const fixture = join(import.meta.dir, "fixtures", "mock-agent.ts")
+    const config = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "cursor",
+      model: "auto",
+      reasoning: "auto",
+      speed: "auto",
+      permissions: "approve-all",
+    })
+
+    const result = await runAcpTurn({
+      root,
+      config,
+      prompt: "Complete and clean up the process tree",
+      taskId: "task_01",
+      signal: new AbortController().signal,
+      emit: () => {},
+      interactivePermissions: false,
+      providerLaunch: {
+        command: process.execPath,
+        args: [fixture],
+        env: { SPEC_FINDER_TEST_DESCENDANT_PID: descendantPath },
+        authMethod: null,
+      },
+    })
+
+    expect(result.stopReason).toBe("end_turn")
+    const descendantPid = Number((await readFile(descendantPath, "utf8")).trim())
+    expect(await processExited(descendantPid)).toBeTrue()
+  }, 2_000)
 })
+
+async function processExited(pid: number): Promise<boolean> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      process.kill(pid, 0)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") return true
+      throw error
+    }
+    await Bun.sleep(10)
+  }
+  return false
+}
 
 async function runPermissionTurn(options: {
   permissions: "prompt" | "approve-all" | "deny"

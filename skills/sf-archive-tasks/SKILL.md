@@ -1,6 +1,6 @@
 ---
 name: sf-archive-tasks
-description: Archives fully completed Spec Finder task packets from .spec-finder/tasks to .spec-finder/tasks_done and refreshes consolidated task reports. A packet moves only when it contains at least one task_NN.md and every task has frontmatter status completed; incomplete and early-stage packets stay. Use to sweep, archive, tidy, dry-run, or report on Spec Finder packets, not to execute tasks or force incomplete work into the archive.
+description: Archives fully completed Spec Finder task packets from .spec-finder/tasks to .spec-finder/tasks_done and refreshes consolidated task reports. A packet moves only when it contains at least one task_NN.md, every task has frontmatter status completed, and no completed task has blocked checkpoint delivery; incomplete and early-stage packets stay. Use to sweep, archive, tidy, dry-run, or report on Spec Finder packets, not to execute tasks or force incomplete work into the archive.
 ---
 
 # Archive Completed Spec Finder Packets
@@ -8,6 +8,7 @@ description: Archives fully completed Spec Finder task packets from .spec-finder
 <HARD-GATE>
 - Move a packet only when the bundled classifier reports `DONE`.
 - Never move a packet with no task files or any status other than `completed`.
+- Never move a packet when a `status: completed` task has `checkpoint.state: blocked`; delivery is incomplete and the blocker must remain recoverable in the active packet.
 - Never partially move a packet, edit its task content, overwrite an archive destination, commit, or push.
 - Treat each `task_NN.md` frontmatter status as authoritative. `_tasks.md` is advisory and may not contain status data.
 </HARD-GATE>
@@ -27,11 +28,11 @@ Sweep completed packets from `.spec-finder/tasks/` into `.spec-finder/tasks_done
 
 | Verdict | Condition | Action |
 |---|---|---|
-| `DONE` | At least one task and every status is `completed` | Move unless report-only |
-| `REMAINING` | Any task is pending, in progress, failed, blocked, missing status, or otherwise not completed | Keep |
+| `DONE` | At least one task, every status is `completed`, and no completed task has `checkpoint.state: blocked` | Move unless report-only |
+| `REMAINING` | Any task is pending, in progress, failed, blocked, missing status, otherwise not completed, or completed with blocked checkpoint delivery | Keep |
 | `EARLY-STAGE` | No `task_NN.md` exists | Keep |
 
-Unchecked Markdown boxes are verification checklists, not lifecycle state. Report their count but never use them to decide a move.
+Unchecked Markdown boxes are verification checklists, not lifecycle state. Report their count but never use them to decide a move. Optional checkpoint metadata is read only to keep completed-but-blocked delivery recoverable; absent metadata and successful delivery retain existing archive behavior.
 
 ## Workflow
 
@@ -59,6 +60,7 @@ Use the emitted tab-separated `VERDICT` records as the source of truth. Do not r
 ### 2. Print the plan
 
 - Report every `DONE`, `REMAINING`, and `EARLY-STAGE` packet and its reason.
+- For a completed task with `checkpoint.state: blocked`, include the emitted checkpoint blocker in the remaining-packet report so the operator knows what must be resolved before archiving.
 - `_tasks.md` may report `indexNoStatus`; that is normal for indexes without a status column.
 - If `indexDrift(...)` appears, trust per-task frontmatter, record the drift, and do not edit task files.
 - Treat unexpected statuses as `REMAINING` and surface them explicitly.

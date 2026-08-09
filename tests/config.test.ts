@@ -11,16 +11,51 @@ describe("config", () => {
       "reasoning",
       "speed",
       "permissions",
+      "auto_commit",
     ])
+  })
+
+  test("defaults omitted auto_commit to false", () => {
+    const config = parseConfig({
+      version: 2,
+      provider: "codex",
+      model: "auto",
+      reasoning: "high",
+      speed: "normal",
+      permissions: "prompt",
+    })
+
+    expect(config).toEqual(DEFAULT_CONFIG)
+    expect(config.auto_commit).toBe(false)
+  })
+
+  test("preserves an explicit auto_commit opt-in without changing runtime settings", () => {
+    const config = parseConfig({ ...DEFAULT_CONFIG, auto_commit: true })
+
+    expect(config).toEqual({ ...DEFAULT_CONFIG, auto_commit: true })
+    expect(config).toMatchObject({
+      provider: DEFAULT_CONFIG.provider,
+      model: DEFAULT_CONFIG.model,
+      reasoning: DEFAULT_CONFIG.reasoning,
+      speed: DEFAULT_CONFIG.speed,
+      permissions: DEFAULT_CONFIG.permissions,
+    })
   })
 
   test("rejects unknown keys and invalid runtime values", () => {
     expect(() => parseConfig({ ...DEFAULT_CONFIG, speed: "turbo", surprise: true })).toThrow(ConfigError)
+    expect(() => parseConfig({ ...DEFAULT_CONFIG, auto_commit: "true" })).toThrow(ConfigError)
     try {
       parseConfig({ ...DEFAULT_CONFIG, speed: "turbo" })
     } catch (error) {
       expect(error).toBeInstanceOf(ConfigError)
       expect((error as ConfigError).issues.join("\n")).toContain("speed")
+    }
+    try {
+      parseConfig({ ...DEFAULT_CONFIG, auto_commit: "true" })
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigError)
+      expect((error as ConfigError).issues.join("\n")).toContain("auto_commit")
     }
   })
 
@@ -42,6 +77,7 @@ describe("config", () => {
       report: { enabled: true, directory: "reports" },
       execution: { continueOnError: false, includeCompleted: false },
       providers: { codex: { command: "custom-command" } },
+      auto_commit: true,
     })).toEqual(DEFAULT_CONFIG)
   })
 })

@@ -5,7 +5,7 @@
     "": {
       "name": "spec-finder",
       "dependencies": {
-        "@agentclientprotocol/sdk": "^1.2.1",
+        "@agentclientprotocol/sdk": "1.2.1",
         "@opentui/core": "^0.4.5",
         "@opentui/react": "^0.4.5",
         "react": "^19.2.7",

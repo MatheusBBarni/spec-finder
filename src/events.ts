@@ -16,6 +16,8 @@ export type BatchStartedEvent = {
     index?: number
     outcome?: PacketOutcome
     detail?: NonNullable<PacketSummary["detail"]>
+    /** Read-only preflight snapshot used for browsing before execution starts. */
+    tasks?: readonly TaskFile[]
   }>
   summaries?: readonly PacketSummary[]
   total?: number
@@ -58,9 +60,14 @@ export type BatchFinishedEvent = {
   message?: string
 }
 
+export type CheckpointEvent =
+  | { type: "checkpoint"; taskId: string; state: "created"; commit?: string }
+  | { type: "checkpoint"; taskId: string; state: "blocked"; reason: string }
+
 export type RunEvent =
   | { type: "run_started"; slug: string; config: SpecFinderConfig; tasks: TaskFile[] }
   | { type: "task_status"; taskId: string; status: TaskStatus }
+  | CheckpointEvent
   | { type: "activity"; taskId?: string; message: string }
   | { type: "session_update"; taskId: string; sessionId: string; update: SessionUpdate }
   | { type: "runtime_option"; name: "model" | "reasoning" | "speed"; requested: string; outcome: "applied" | "default" | "unsupported"; detail?: string }

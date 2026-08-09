@@ -4,11 +4,14 @@ import { DEFAULT_CONFIG } from "../src/config.ts"
 import type { TaskFile, TaskStatus } from "../src/tasks.ts"
 import {
   CockpitStore,
+  selectPacketTaskView,
   selectSelectedTask,
   selectSelectedTranscript,
+  selectTaskCheckpoint,
   selectTaskReason,
   selectTaskTranscript,
   selectUnfinishedTasks,
+  selectVisibleTasks,
 } from "../src/ui/store.ts"
 
 describe("cockpit store", () => {
@@ -37,7 +40,7 @@ describe("cockpit store", () => {
     expect(selectSelectedTask(store.getSnapshot())?.id).toBe("task_01")
   })
 
-  test("reopens on the first unfinished task and navigates only unfinished work", () => {
+  test("hides tasks completed before opening and retains tasks completed during the session", () => {
     const store = startedStore([
       task(1, "Previously completed", [], "completed"),
       task(2, "Also complete", [], "done"),
@@ -47,7 +50,7 @@ describe("cockpit store", () => {
 
     expect(store.getSnapshot().tasks).toHaveLength(4)
     expect(store.getSnapshot().selectedTaskId).toBe("task_03")
-    expect(selectUnfinishedTasks(store.getSnapshot()).map((task) => task.id)).toEqual(["task_03", "task_04"])
+    expect(selectVisibleTasks(store.getSnapshot()).map((task) => task.id)).toEqual(["task_03", "task_04"])
 
     store.moveTask(1)
     expect(store.getSnapshot().selectedTaskId).toBe("task_04")
@@ -55,8 +58,23 @@ describe("cockpit store", () => {
     expect(store.getSnapshot().selectedTaskId).toBe("task_03")
 
     store.consume({ type: "task_status", taskId: "task_03", status: "completed" })
-    expect(store.getSnapshot()).toMatchObject({ selectedTaskId: "task_04", followingActiveTask: false })
+    expect(store.getSnapshot()).toMatchObject({ selectedTaskId: "task_03", followingActiveTask: false })
     expect(selectUnfinishedTasks(store.getSnapshot()).map((task) => task.id)).toEqual(["task_04"])
+    expect(selectVisibleTasks(store.getSnapshot()).map((task) => task.id)).toEqual(["task_03", "task_04"])
+
+    store.moveTask(1)
+    expect(store.getSnapshot().selectedTaskId).toBe("task_04")
+    store.moveTask(-1)
+    expect(store.getSnapshot().selectedTaskId).toBe("task_03")
+
+    const reopenedStore = startedStore([
+      task(1, "Previously completed", [], "completed"),
+      task(2, "Also complete", [], "done"),
+      task(3, "Completed this session", [], "completed"),
+      task(4, "Second remaining"),
+    ])
+    expect(reopenedStore.getSnapshot().selectedTaskId).toBe("task_04")
+    expect(selectVisibleTasks(reopenedStore.getSnapshot()).map((task) => task.id)).toEqual(["task_04"])
   })
 
   test("keeps manual inspection separate when execution advances", () => {
@@ -142,6 +160,92 @@ describe("cockpit store", () => {
       kind: "error",
       text: "Blocked because dependency task_01 failed",
     })
+  })
+
+  test("surfaces an explicit report-handoff reason for a blocked task", () => {
+    const store = startedStore([task(1, "Report handoff")])
+    store.consume({ type: "task_status", taskId: "task_01", status: "blocked" })
+    store.consume({
+      type: "activity",
+      taskId: "task_01",
+      message: "final report handoff blocked: ACP turn aborted; rerun retries the report without rerunning implementation",
+    })
+
+    expect(selectTaskReason(store.getSnapshot(), "task_01")).toBe(
+      "final report handoff blocked: ACP turn aborted; rerun retries the report without rerunning implementation",
+    )
+    expect(selectTaskTranscript(store.getSnapshot(), "task_01").at(-1)).toMatchObject({
+      kind: "error",
+      text: "final report handoff blocked: ACP turn aborted; rerun retries the report without rerunning implementation",
+    })
+  })
+
+  test("projects checkpoint delivery independently from lifecycle status", () => {
+    const store = startedStore([
+      task(1, "Created checkpoint", [], "completed"),
+      task(2, "Blocked delivery"),
+      task(3, "Still running"),
+    ])
+    const commit = "a".repeat(40)
+
+    store.consume({ type: "checkpoint", taskId: "task_01", state: "created", commit })
+    store.consume({ type: "task_status", taskId: "task_02", status: "completed" })
+    store.consume({
+      type: "checkpoint",
+      taskId: "task_02",
+      state: "blocked",
+      reason: "hook refused local commit",
+    })
+    store.consume({ type: "task_status", taskId: "task_03", status: "in_progress" })
+
+    const state = store.getSnapshot()
+    expect(state.tasks[0]).toMatchObject({
+      status: "completed",
+      checkpoint: { state: "created", commit },
+    })
+    expect(state.tasks[1]).toMatchObject({
+      status: "completed",
+      checkpoint: { state: "blocked", reason: "hook refused local commit" },
+    })
+    expect(selectTaskCheckpoint(state, "task_01")).toEqual({ state: "created", commit })
+    expect(selectTaskReason(state, "task_02")).toBe("hook refused local commit")
+    expect(selectTaskTranscript(state, "task_02").at(-1)).toMatchObject({
+      kind: "error",
+      text: "Checkpoint blocked: hook refused local commit",
+    })
+    expect(state.tasks.map((candidate) => candidate.status)).toEqual(["completed", "completed", "in_progress"])
+    expect(selectVisibleTasks(state).map((candidate) => candidate.id)).toEqual(["task_02", "task_03"])
+  })
+
+  test("bounds checkpoint-blocked reasons while keeping mixed navigation truthful", () => {
+    const store = startedStore([
+      task(1, "Completed"),
+      task(2, "Blocked delivery"),
+      task(3, "Pending"),
+    ])
+    store.consume({ type: "task_status", taskId: "task_01", status: "completed" })
+    store.consume({ type: "task_status", taskId: "task_02", status: "completed" })
+    store.consume({
+      type: "checkpoint",
+      taskId: "task_02",
+      state: "blocked",
+      reason: `${"unsafe ".repeat(300)}hook refused`,
+    })
+    store.consume({ type: "task_status", taskId: "task_03", status: "in_progress" })
+
+    const state = store.getSnapshot()
+    const reason = selectTaskReason(state, "task_02")
+    expect(reason).toBeDefined()
+    expect(selectTaskCheckpoint(state, "task_02")?.state).toBe("blocked")
+    const checkpointReason = selectTaskCheckpoint(state, "task_02")
+    expect(checkpointReason?.state === "blocked" ? checkpointReason.reason.length : 0).toBeLessThanOrEqual(1024)
+    expect(reason!.length).toBeLessThanOrEqual(1044)
+    expect(reason).toContain("unsafe")
+    expect(selectVisibleTasks(state).map((candidate) => candidate.id)).toEqual(["task_01", "task_02", "task_03"])
+    expect(state.tasks.map((candidate) => candidate.status)).toEqual(["completed", "completed", "in_progress"])
+    expect(state.selectedTaskId).toBe("task_03")
+    store.moveTask(-1)
+    expect(store.getSnapshot().selectedTaskId).toBe("task_02")
   })
 
   test("bounds view navigation and exposes focus, follow, help, and transcript selectors", () => {
@@ -298,7 +402,7 @@ describe("cockpit store", () => {
       { slug: "beta", outcome: "not_started" },
       { slug: "gamma", outcome: "not_started" },
     ])
-    expect(Object.keys(state.transcripts)).toEqual(["beta/task_01"])
+    expect(Object.keys(state.transcripts)).toEqual(["alpha/task_01", "beta/task_01"])
     expect(selectTaskTranscript(state, "task_01")).toEqual([])
   })
 
@@ -331,11 +435,46 @@ describe("cockpit store", () => {
 
     expect(Object.keys(alphaSnapshot.transcripts)).toEqual(["alpha/task_01"])
     expect(selectTaskReason(alphaSnapshot, "task_01")).toBe("Alpha failure")
-    expect(Object.keys(store.getSnapshot().transcripts)).toEqual(["beta/task_01"])
+    expect(Object.keys(store.getSnapshot().transcripts)).toEqual(["alpha/task_01", "beta/task_01"])
     expect(selectTaskReason(store.getSnapshot(), "task_01")).toBe("Beta failure")
     expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).toContain("Beta failure")
     expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).not.toContain("bare stale event")
     expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).not.toContain("stale alpha event")
+  })
+
+  test("projects preflighted tasks for a parent packet before that packet starts", () => {
+    const store = new CockpitStore()
+    store.consume({
+      type: "batch_started",
+      slugs: ["active", "later"],
+      packets: [
+        { slug: "active", index: 0, outcome: "not_started", tasks: [task(1, "Active child")] },
+        {
+          slug: "later",
+          index: 1,
+          outcome: "not_started",
+          tasks: [task(1, "Later child one"), task(2, "Later child two")],
+        },
+      ],
+    })
+    store.consume({
+      type: "batch_packet_started",
+      slug: "active",
+      index: 0,
+      total: 2,
+      tasks: [task(1, "Active child")],
+    })
+
+    const firstView = selectPacketTaskView(store.getSnapshot(), 1, 0)
+    const secondView = selectPacketTaskView(store.getSnapshot(), 1, 1)
+
+    expect(firstView.slug).toBe("later")
+    expect(firstView.tasks.map((entry) => entry.title)).toEqual(["Later child one", "Later child two"])
+    expect(firstView.selectedTaskId).toBe("task_01")
+    expect(firstView.activeTaskId).toBeNull()
+    expect(firstView.followingActiveTask).toBeFalse()
+    expect(secondView.selectedTaskId).toBe("task_02")
+    expect(store.getSnapshot().activePacket?.slug).toBe("active")
   })
 
   test("retains already-complete detail and terminal stopped-packet metadata", () => {

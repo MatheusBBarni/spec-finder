@@ -8,6 +8,42 @@
 - `complexity`: `low`, `medium`, `high`, or `critical`.
 - `dependencies`: YAML list of task IDs such as `task_01`; use `[]` when empty.
 
+## Optional checkpoint delivery metadata
+
+Task frontmatter may include delivery metadata owned by the task. It is independent from the lifecycle `status` field and may be omitted from older task files:
+
+```yaml
+checkpoint:
+  state: active
+  base_head: 0123456789abcdef0123456789abcdef01234567
+  baseline_digest: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  paths:
+    - src/example.ts
+```
+
+- `state` is `active` while delivery is being prepared or `blocked` when delivery failed.
+- `base_head` is a 40- or 64-character hexadecimal Git object ID, and `baseline_digest` is a 64-character hexadecimal SHA-256 digest.
+- `paths` is a non-empty list of unique repository-relative paths. Absolute paths, `.`/`..` segments, backslashes, and NUL characters are unsafe and invalid.
+- A `blocked` record must also contain a non-empty `error`; an `active` record does not contain one.
+- `status` remains the lifecycle field. A task with `status: completed` and `checkpoint.state: blocked` is eligible for delivery retry, while completed tasks with absent or non-blocked checkpoint metadata remain skipped.
+- Successful delivery clears this optional field. Existing task files without it remain valid and keep the current task ordering behavior.
+
+## Optional report handoff metadata
+
+The runtime may persist report-only recovery state after implementation has succeeded but the required final report could not be completed:
+
+```yaml
+handoff:
+  phase: report
+  error: provider process ended before the report completed
+```
+
+- `phase` is strictly `report`; no implementation handoff value is valid.
+- `error` is optional, non-empty when present, and limited to 4096 characters.
+- This field is runtime-owned. Its presence means the next run resumes only the report handoff and does not rerun implementation.
+- Cancellation may leave a report handoff without an error so the verified implementation remains resumable without being mislabeled as a failure.
+- A successful final report clears the handoff before the task becomes `completed`. Existing task files without it remain valid.
+
 ## Naming and ordering
 
 - Task filenames match `task_\d+.md`, normally zero-padded: `task_01.md`.

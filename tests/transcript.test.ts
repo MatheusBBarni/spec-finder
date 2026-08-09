@@ -3,6 +3,7 @@ import type { SessionUpdate } from "@agentclientprotocol/sdk"
 import {
   appendTranscriptLines,
   applySessionUpdate,
+  transcriptPresentation,
   type TranscriptEntry,
 } from "../src/ui/transcript.ts"
 
@@ -133,6 +134,33 @@ describe("task transcript normalization", () => {
     expect(entries[0]?.text).not.toContain("formatted_output")
     expect(entries[0]?.text).not.toContain("Terminal: exec-1")
     expect(entries[0]?.text).not.toContain("\\\\n")
+    expect(transcriptPresentation(entries[0]!)).toEqual({
+      label: "Action",
+      subtitle: "Reading project context",
+    })
+  })
+
+  test("classifies concise action subtitles without exposing raw operation details", () => {
+    const fixtures = [
+      ["bun test tests/cockpit.test.tsx", "Running verification"],
+      ["apply patch src/ui/App.tsx", "Applying changes"],
+      ["rg transcript src tests", "Searching project"],
+      ["cat src/ui/App.tsx", "Reading project context"],
+      ["fetch documentation", "Fetching information"],
+      ["execute shell command", "Running command"],
+      ["provider tool", "Processing request"],
+    ] as const
+
+    for (const [title, subtitle] of fixtures) {
+      const entry: TranscriptEntry = {
+        id: title,
+        sequence: 1,
+        kind: "tool",
+        label: `Tool · ${title}`,
+        text: `raw details for ${title}`,
+      }
+      expect(transcriptPresentation(entry)).toEqual({ label: "Action", subtitle })
+    }
   })
 
   test("retains labeled plan, thought, activity, outcome, and unknown updates in order", () => {

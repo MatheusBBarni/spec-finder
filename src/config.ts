@@ -13,6 +13,7 @@ export const configSchema = z.object({
   reasoning: z.enum(["auto", "low", "medium", "high", "xhigh", "max", "ultra"]),
   speed: z.enum(["auto", "normal", "fast"]),
   permissions: z.enum(["prompt", "approve-all", "deny"]),
+  auto_commit: z.boolean().default(false),
 }).strict()
 
 export type SpecFinderConfig = z.infer<typeof configSchema>
@@ -24,6 +25,7 @@ export const DEFAULT_CONFIG: SpecFinderConfig = {
   reasoning: "high",
   speed: "normal",
   permissions: "prompt",
+  auto_commit: false,
 }
 
 export class ConfigError extends Error {
@@ -56,6 +58,7 @@ function migrateLegacyConfig(value: unknown): unknown {
     reasoning: legacy.reasoning,
     speed: legacy.speed,
     permissions: legacy.permissions,
+    auto_commit: false,
   }
 }
 

@@ -87,16 +87,11 @@ describe("read-only progress cockpit", () => {
     const screen = await render(store, 120, 40)
     try {
       const frame = screen.captureCharFrame()
-      expect(frame).toContain("BATCH SEQUENCE")
-      expect(frame).toContain("POSITION 2/3")
-      expect(frame).toContain("ACTIVE PACKET: beta")
-      expect(frame).toContain("alpha")
-      expect(frame).toContain("succeeded")
-      expect(frame).toContain("already complete")
-      expect(frame).toContain("beta")
-      expect(frame).toContain("running")
-      expect(frame).toContain("gamma")
-      expect(frame).toContain("not_started")
+      expect(frame).toContain("✓ 1 alpha COMPLETED")
+      expect(frame).toContain("● 2 beta RUNNING")
+      expect(frame).toContain("○ 3 gamma PENDING")
+      expect(frame).not.toContain("BATCH SEQUENCE")
+      expect(frame).not.toContain("PACKET 1")
       expect(frame).toContain("TRANSCRIPT · task_01 · FOLLOWING ACTIVE")
       expect(frame).toContain("ACTIVE-BETA-TRANSCRIPT")
     } finally {
@@ -104,7 +99,66 @@ describe("read-only progress cockpit", () => {
     }
   })
 
-  test("makes a failed stopping packet and manual no-retry guidance explicit", async () => {
+  test("lays out only parent packets horizontally and keeps child tasks in the vertical sidebar", async () => {
+    const slugs = Array.from({ length: 8 }, (_, index) => `packet-${String(index + 1).padStart(2, "0")}`)
+    const tasks = Array.from({ length: 8 }, (_, index) => task(index + 1, `Batch task ${index + 1}`))
+    const packetTasks = slugs.map((_, index) => index === 0
+      ? tasks
+      : [task(1, `Packet ${index + 1} child one`), task(2, `Packet ${index + 1} child two`)])
+    const store = startedBatchStore(slugs, 0, tasks, DEFAULT_CONFIG, packetTasks)
+    for (let index = 1; index <= tasks.length; index += 1) {
+      store.consume({
+        type: "activity",
+        taskId: `packet-01/${taskId(index)}`,
+        message: `BATCH-TRANSCRIPT-${taskId(index)}`,
+      })
+    }
+
+    const screen = await render(store, 120, 40)
+    try {
+      let frame = screen.captureCharFrame()
+      const packetLines = frame.split("\n")
+      const packetLineIndex = packetLines.findIndex((line) => line.includes("packet-01") && line.includes("packet-02"))
+      const packetLine = packetLines[packetLineIndex]
+      expect(packetLine).toContain("packet-02")
+      expect(packetLine).not.toContain("┌")
+      expect(packetLine).not.toContain("PACKET")
+      const taskLine = frame.split("\n").find((line) => line.includes("task_01"))
+      expect(taskLine).not.toContain("task_02")
+      expect(frame).toContain("[←→/HL] PACKET  [↑↓/JK] TASK")
+
+      for (let index = 0; index < 6; index += 1) await press(screen, KeyCodes.ARROW_DOWN)
+      expect(store.getSnapshot().selectedTaskId).toBe("task_07")
+      expect(screen.captureCharFrame()).toContain("BATCH-TRANSCRIPT-task_07")
+
+      for (let index = 0; index < 6; index += 1) await press(screen, KeyCodes.ARROW_RIGHT)
+      const batchScroll = renderable<ScrollBoxRenderable>(screen, "batch-sequence-scroll")
+      frame = screen.captureCharFrame()
+      expect(store.getSnapshot().selectedTaskId).toBe("task_07")
+      expect(batchScroll.scrollLeft).toBeGreaterThan(0)
+      expect(frame).toContain("packet-07")
+      expect(frame).toContain("PACKET 7 CHILD ONE")
+      expect(frame).not.toContain("BATCH-TRANSCRIPT-task_07")
+
+      await press(screen, KeyCodes.ARROW_DOWN)
+      frame = screen.captureCharFrame()
+      expect(frame).toContain("PACKET 7 CHILD TWO")
+      expect(frame).toContain("TRANSCRIPT · task_02 · INSPECTING HISTORY")
+
+      await press(screen, KeyCodes.ARROW_LEFT)
+      expect(store.getSnapshot().selectedTaskId).toBe("task_07")
+      expect(screen.captureCharFrame()).toContain("packet-06")
+      expect(screen.captureCharFrame()).toContain("PACKET 6 CHILD ONE")
+
+      await press(screen, "?")
+      expect(screen.captureCharFrame()).toContain("Browse the parent packet strip")
+      expect(screen.captureCharFrame()).toContain("Select a child task while Tasks has focus")
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+  test("makes an exhausted task retry and manual packet recovery explicit", async () => {
     const store = startedBatchStore(["alpha", "beta", "gamma"], 0, [task(1, "Alpha task")])
     store.consume({ type: "batch_packet_finished", slug: "alpha", index: 0, outcome: "succeeded", detail: "completed" })
     store.consume({ type: "batch_packet_started", slug: "beta", index: 1, total: 3, tasks: [task(1, "Beta task")] })
@@ -131,12 +185,13 @@ describe("read-only progress cockpit", () => {
       expect(summary).toContain("failed")
       expect(summary).toContain("STOPPING PACKET: beta")
       expect(summary).toContain("gamma not_started")
-      expect(summary).toContain("no automatic retry")
+      expect(summary).toContain("task retry exhausted")
+      expect(summary).toContain("no automatic packet retry")
       expect(summary).toContain("rerun manually")
 
       await pressEscape(screen)
       const live = screen.captureCharFrame()
-      expect(live).toContain("ACTIVE PACKET: beta")
+      expect(live).toContain("✗ 2 beta FAILED")
       expect(live).toContain("TRANSCRIPT · task_01 · INSPECTING HISTORY")
       expect(live).toContain("Beta provider failed")
     } finally {
@@ -170,7 +225,7 @@ describe("read-only progress cockpit", () => {
       expect(frame).toContain("⊘")
       expect(frame).toContain("cancelled")
       expect(frame).toContain("not_started")
-      expect(frame).toContain("no automatic retry")
+      expect(frame).toContain("no automatic packet retry")
       expect(frame).toContain("rerun manually")
       expect(screen.captureSpans().cols).toBe(70)
       assertNoControls(frame)
@@ -191,8 +246,7 @@ describe("read-only progress cockpit", () => {
     const screen = await render(store, 80, 24)
     try {
       let frame = screen.captureCharFrame()
-      expect(frame).toContain("BATCH 30 PACKETS")
-      expect(frame).toContain(activeSlug)
+      expect(frame).not.toContain("BATCH 30 PACKETS")
       expect(frame).toContain("TRANSCRIPT · task_01 · INSPECTING HISTORY")
       expect(frame).toContain("Task completed")
       expect(frame).toContain("FOCUS TASKS")
@@ -237,7 +291,7 @@ describe("read-only progress cockpit", () => {
     }
   })
 
-  test("hides completed rows and selects the first unfinished task when reopening", async () => {
+  test("hides tasks already completed when opening the cockpit", async () => {
     const store = startedStore([
       task(1, "Completed first", [], "completed"),
       task(2, "Completed second", [], "finished"),
@@ -259,7 +313,52 @@ describe("read-only progress cockpit", () => {
     }
   })
 
-  test("keeps transcript entries compact without blank rows between messages", async () => {
+  test("keeps a task visible and navigable after it completes until the cockpit reopens", async () => {
+    const store = startedStore([
+      task(1, "Completes during this session"),
+      task(2, "Still pending"),
+    ])
+    store.consume({ type: "activity", taskId: "task_01", message: "RETAINED-COMPLETED-TRANSCRIPT" })
+    const screen = await render(store, 120, 40)
+
+    try {
+      await mutate(screen, () => {
+        store.consume({ type: "task_status", taskId: "task_01", status: "completed" })
+      })
+
+      let frame = screen.captureCharFrame()
+      expect(store.getSnapshot().selectedTaskId).toBe("task_01")
+      expect(frame).toContain("✓ task_01")
+      expect(frame).toContain("task_02")
+      expect(frame).toContain("RETAINED-COMPLETED-TRANSCRIPT")
+
+      await press(screen, KeyCodes.ARROW_DOWN)
+      expect(store.getSnapshot().selectedTaskId).toBe("task_02")
+      await press(screen, KeyCodes.ARROW_UP)
+      expect(store.getSnapshot().selectedTaskId).toBe("task_01")
+      frame = screen.captureCharFrame()
+      expect(frame).toContain("RETAINED-COMPLETED-TRANSCRIPT")
+      expect(frame).toContain("Task completed")
+    } finally {
+      await destroy(screen)
+    }
+
+    const reopenedStore = startedStore([
+      task(1, "Completes during this session", [], "completed"),
+      task(2, "Still pending"),
+    ])
+    const reopenedScreen = await render(reopenedStore, 120, 40)
+    try {
+      const frame = reopenedScreen.captureCharFrame()
+      expect(reopenedStore.getSnapshot().selectedTaskId).toBe("task_02")
+      expect(frame).not.toContain("task_01")
+      expect(frame).toContain("task_02")
+    } finally {
+      await destroy(reopenedScreen)
+    }
+  })
+
+  test("keeps one blank row between transcript messages", async () => {
     const store = startedStore([task(1, "Compact transcript")])
     store.consume({ type: "activity", taskId: "task_01", message: "FIRST-MESSAGE" })
     store.consume({ type: "activity", taskId: "task_01", message: "SECOND-MESSAGE" })
@@ -270,27 +369,27 @@ describe("read-only progress cockpit", () => {
       const firstIndex = lines.findIndex((line) => line.includes("FIRST-MESSAGE"))
       const secondIndex = lines.findIndex((line) => line.includes("SECOND-MESSAGE"))
       expect(firstIndex).toBeGreaterThanOrEqual(0)
-      expect(secondIndex).toBe(firstIndex + 2)
+      expect(secondIndex).toBe(firstIndex + 3)
     } finally {
       await destroy(screen)
     }
   })
 
-  test("collapses repeated blank lines from streamed ACP text", async () => {
+  test("reduces streamed ACP prose to one concise update", async () => {
     const store = startedStore([task(1, "Whitespace fixture")])
     store.consume({ type: "session_update", taskId: "task_01", sessionId: "test-session", update: {
       sessionUpdate: "agent_message_chunk",
       messageId: "whitespace",
-      content: { type: "text", text: `before${"\n".repeat(8)}after` },
+      content: { type: "text", text: `Implementation is complete.${"\n".repeat(8)}Changed files:\n- src/ui/App.tsx\n- tests/cockpit.test.tsx` },
     } })
     const screen = await render(store, 120, 40)
 
     try {
-      const lines = screen.captureCharFrame().split("\n")
-      const beforeIndex = lines.findIndex((line) => line.includes("before"))
-      const afterIndex = lines.findIndex((line) => line.includes("after"))
-      expect(beforeIndex).toBeGreaterThanOrEqual(0)
-      expect(afterIndex).toBe(beforeIndex + 2)
+      const frame = screen.captureCharFrame()
+      expect(frame).toContain("Implementation is complete.")
+      expect(frame).not.toContain("Changed files")
+      expect(frame).not.toContain("src/ui/App.tsx")
+      expect(frame).not.toContain("tests/cockpit.test.tsx")
     } finally {
       await destroy(screen)
     }
@@ -314,6 +413,27 @@ describe("read-only progress cockpit", () => {
       const footer = lines.findIndex((line) => line.includes("FOCUS TASKS"))
       expect(panelBottom).toBeGreaterThan(separator)
       expect(footer).toBe(panelBottom + 1)
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+  test("keeps the completion meter in the fixed header above the task scroller", async () => {
+    const store = startedStore([
+      task(1, "First task"),
+      task(2, "Second task"),
+      task(3, "Third task"),
+    ])
+    const screen = await render(store, 120, 40)
+
+    try {
+      const lines = screen.captureCharFrame().split("\n")
+      const headerLine = lines.findIndex((line) => line.includes("TASKS 0/3"))
+      const progressLine = lines.findIndex((line) => line.includes("░".repeat(10)))
+      const firstTaskLine = lines.findIndex((line) => line.includes("> · task_01"))
+      expect(headerLine).toBeGreaterThanOrEqual(0)
+      expect(progressLine).toBe(headerLine + 1)
+      expect(firstTaskLine).toBeGreaterThan(progressLine)
     } finally {
       await destroy(screen)
     }
@@ -446,6 +566,73 @@ describe("read-only progress cockpit", () => {
     }
   })
 
+  test("renders report-handoff recovery without describing verified implementation as failed", async () => {
+    const store = startedStore([task(1, "Report handoff")])
+    store.consume({ type: "task_status", taskId: "task_01", status: "blocked" })
+    store.consume({
+      type: "activity",
+      taskId: "task_01",
+      message: "final report handoff blocked: ACP turn aborted; rerun retries the report without rerunning implementation",
+    })
+    const screen = await render(store, 120, 40)
+
+    try {
+      const frame = screen.captureCharFrame()
+      expect(frame).toContain("! task_01")
+      expect(frame).toContain("final report handoff blocked")
+      expect(frame).toContain("rerun retries the report")
+      expect(frame).not.toContain("Task failed; see latest activity")
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+  test("renders a local checkpoint reference without implying review or remote delivery", async () => {
+    const store = startedStore([task(1, "Created checkpoint")])
+    const commit = "a".repeat(40)
+    store.consume({ type: "task_status", taskId: "task_01", status: "completed" })
+    store.consume({ type: "checkpoint", taskId: "task_01", state: "created", commit })
+    store.consume({ type: "run_finished", ok: true, message: "1 task completed" })
+    const screen = await render(store, 120, 40)
+
+    try {
+      const frame = screen.captureCharFrame()
+      expect(frame).toContain("RUN.DELIVERY")
+      expect(frame).toContain(`Local checkpoint created: ${commit}`)
+      expect(frame).toContain("CHECKPOINT DELIVERY: 1 created · 0 blocked")
+      expect(frame.toLowerCase()).not.toContain("reviewed")
+      expect(frame.toLowerCase()).not.toContain("merged")
+      expect(frame.toLowerCase()).not.toContain("push")
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+  test("renders checkpoint-blocked delivery as an unsuccessful plain-text outcome", async () => {
+    const store = startedStore([task(1, "Blocked checkpoint")])
+    store.consume({ type: "task_status", taskId: "task_01", status: "completed" })
+    store.consume({
+      type: "checkpoint",
+      taskId: "task_01",
+      state: "blocked",
+      reason: "hook refused local commit; resolve Git state and rerun",
+    })
+    store.consume({ type: "run_finished", ok: false, message: "0 failed · 1 blocked" })
+    const screen = await render(store, 120, 40)
+
+    try {
+      const frame = screen.captureCharFrame()
+      expect(frame).toContain("Execution Complete: 0/1 delivered")
+      expect(frame).toContain("checkpoint blocked")
+      expect(frame).toContain("DELIVERY BLOCKED task_01")
+      expect(frame).toContain("hook refused local commit; resolve Git state and rerun")
+      expect(frame).toContain("CHECKPOINT DELIVERY: 0 created · 1 blocked")
+      expect(frame).not.toContain("SUCCEEDED 1")
+    } finally {
+      await destroy(screen)
+    }
+  })
+
   test("shows a Compozy-style run status and failure summary after completion", async () => {
     const store = startedStore([
       task(1, "Provider task"),
@@ -518,16 +705,20 @@ describe("read-only progress cockpit", () => {
       expect(frame).toContain("● Agent")
       expect(frame).toContain("◇ Thought")
       expect(frame).toContain("≡ Plan")
-      expect(frame).toContain("◆ Tool · Read configuration · completed")
-      expect(frame).toContain("↻ Tool update · tool-early · in progress")
+      expect(frame).toContain("◆ Action · completed")
+      expect(frame).toContain("↻ Action · in progress")
+      expect(frame).toContain("Reading project context")
       expect(frame).toContain("· Activity")
       expect(frame).toContain("? Provider status update")
+      expect(frame).toContain("Waiting for capacity")
+      expect(frame).not.toContain("Read configuration")
+      expect(frame).not.toContain("tool-early")
     } finally {
       await destroy(screen)
     }
   })
 
-  test("renders executed command results without escaped ACP payload fields", async () => {
+  test("renders only concise action status without command or file details", async () => {
     const store = startedStore([task(1, "Terminal output")])
     store.consume({ type: "session_update", taskId: "task_01", sessionId: "test-session", update: {
       sessionUpdate: "tool_call",
@@ -549,10 +740,12 @@ describe("read-only progress cockpit", () => {
 
     try {
       const frame = screen.captureCharFrame()
-      expect(frame).toContain("◆ Tool · rtk cat package.json · completed")
-      expect(frame).toContain("Working directory: /workspace/spec-finder")
-      expect(frame).toContain("Exit code: 0")
-      expect(frame).toContain('"name": "spec-finder"')
+      expect(frame).toContain("◆ Action · completed")
+      expect(frame).toContain("Reading project context")
+      expect(frame).not.toContain("rtk cat package.json")
+      expect(frame).not.toContain("Working directory")
+      expect(frame).not.toContain("Exit code")
+      expect(frame).not.toContain('"name": "spec-finder"')
       expect(frame).not.toContain("formatted_output")
       expect(frame).not.toContain("\\n")
     } finally {
@@ -648,9 +841,21 @@ function startedBatchStore(
   activeIndex: number,
   tasks: TaskFile[],
   config: SpecFinderConfig = DEFAULT_CONFIG,
+  packetTasks: readonly (readonly TaskFile[])[] = [],
 ): CockpitStore {
   const store = new CockpitStore()
-  store.consume({ type: "batch_started", slugs, total: slugs.length, config })
+  store.consume({
+    type: "batch_started",
+    slugs,
+    total: slugs.length,
+    config,
+    packets: slugs.map((slug, index) => ({
+      slug,
+      index,
+      outcome: "not_started",
+      tasks: packetTasks[index] ?? (index === activeIndex ? tasks : []),
+    })),
+  })
   const slug = slugs[activeIndex]
   if (slug === undefined) throw new Error(`missing batch slug at index ${activeIndex}`)
   store.consume({ type: "batch_packet_started", slug, index: activeIndex, total: slugs.length, config, tasks })

@@ -104,6 +104,7 @@ describe("batch preflight and serial coordination", () => {
     await createPacket(root, "gamma")
     const controller = new AbortController()
     const calls: Array<{ slug: string; signal: AbortSignal; config: typeof DEFAULT_CONFIG }> = []
+    const events: RunEvent[] = []
     const runner: PacketRunner = async (options) => {
       calls.push({ slug: options.slug, signal: options.signal, config: options.config })
       return { ok: true, completed: 1, failed: 0, blocked: 0 }
@@ -115,11 +116,21 @@ describe("batch preflight and serial coordination", () => {
       config: DEFAULT_CONFIG,
       signal: controller.signal,
       packetRunner: runner,
+      onEvent: (event) => events.push(event),
     })
 
     expect(calls.map((call) => call.slug)).toEqual(["alpha", "beta", "gamma"])
     expect(calls.every((call) => call.signal === controller.signal)).toBe(true)
     expect(calls.every((call) => call.config === DEFAULT_CONFIG)).toBe(true)
+    const started = events.find((event) => event.type === "batch_started")
+    expect(started?.type === "batch_started" ? started.packets?.map((packet) => ({
+      slug: packet.slug,
+      tasks: packet.tasks?.map((task) => task.id),
+    })) : undefined).toEqual([
+      { slug: "alpha", tasks: ["task_01"] },
+      { slug: "beta", tasks: ["task_01"] },
+      { slug: "gamma", tasks: ["task_01"] },
+    ])
     expect(result).toEqual({
       ok: true,
       status: "completed",
