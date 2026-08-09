@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Define Batch Contracts and Strict Input Parsing
 type: backend
 complexity: medium

@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Render the Batch Cockpit Experience
 type: frontend
 complexity: high

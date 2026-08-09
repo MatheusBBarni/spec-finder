@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Publish the CLI Contract and Release Evidence
 type: docs
 complexity: medium

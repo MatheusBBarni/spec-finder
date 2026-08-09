@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Implement Read-Only Preflight and Serial Coordination
 type: backend
 complexity: high

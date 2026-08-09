@@ -107,6 +107,34 @@ describe("task transcript normalization", () => {
     expect(fallback[0]).toMatchObject({ kind: "tool_update", sequence: 3 })
   })
 
+  test("formats executed command output as readable terminal text", () => {
+    const update = {
+      sessionUpdate: "tool_call",
+      toolCallId: "exec-1",
+      title: "rtk cat package.json",
+      kind: "execute",
+      status: "completed",
+      content: [{ type: "terminal", terminalId: "exec-1" }],
+      rawInput: {
+        command: "rtk cat package.json",
+        cwd: "/workspace/spec-finder",
+      },
+      rawOutput: {
+        exit_code: 0,
+        formatted_output: '{\n  "name": "spec-finder"\n}',
+      },
+    } satisfies SessionUpdate
+
+    const entries = applySessionUpdate([], update, 1)
+
+    expect(entries[0]?.text).toContain("Working directory: /workspace/spec-finder")
+    expect(entries[0]?.text).toContain("Exit code: 0")
+    expect(entries[0]?.text).toContain('{\n  "name": "spec-finder"\n}')
+    expect(entries[0]?.text).not.toContain("formatted_output")
+    expect(entries[0]?.text).not.toContain("Terminal: exec-1")
+    expect(entries[0]?.text).not.toContain("\\\\n")
+  })
+
   test("retains labeled plan, thought, activity, outcome, and unknown updates in order", () => {
     const plan = {
       sessionUpdate: "plan",
@@ -147,20 +175,35 @@ describe("task transcript normalization", () => {
     expect(entries.at(-1)?.text).toContain("Waiting for capacity")
   })
 
-  test("keeps known but unsupported ACP updates visible through fallback labels", () => {
-    const update = {
+  test("keeps ACP startup capabilities and configuration out of the task transcript", () => {
+    const availableCommands = {
+      sessionUpdate: "available_commands_update",
+      availableCommands: [{
+        name: "plan",
+        description: "Turn plan mode on.",
+        input: { hint: "optional context" },
+      }],
+    } satisfies SessionUpdate
+    const currentMode = {
       sessionUpdate: "current_mode_update",
-      currentModeId: "architect",
+      currentModeId: "plan",
+    } satisfies SessionUpdate
+    const configOptions = {
+      sessionUpdate: "config_option_update",
+      configOptions: [],
     } satisfies SessionUpdate
 
-    const entries = applySessionUpdate([], update, 1)
+    let entries = appendTranscriptLines([], "activity", "ACP Codex initialized", 1)
+    entries = applySessionUpdate(entries, availableCommands, 2)
+    entries = applySessionUpdate(entries, currentMode, 3)
+    entries = applySessionUpdate(entries, configOptions, 4)
 
     expect(entries).toEqual([{
-      id: "unknown:current_mode_update:1",
+      id: "activity:1:0",
       sequence: 1,
-      kind: "unknown",
-      label: "Current mode update",
-      text: '{\n  "currentModeId": "architect"\n}',
+      kind: "activity",
+      label: "Activity",
+      text: "ACP Codex initialized",
     }])
   })
 

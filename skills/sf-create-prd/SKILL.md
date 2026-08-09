@@ -1,11 +1,12 @@
 ---
 name: sf-create-prd
-description: Creates or updates an approved business-focused Product Requirements Document through codebase and market research, one-at-a-time clarification, explicit product approach selection, ADR capture, and whole-draft approval. Use for defining product outcomes and requirements, not architecture, task breakdown, or implementation.
+description: Creates or updates an approved business-focused Product Requirements Document through codebase and market research, one-at-a-time clarification, explicit product approach selection, ADR capture, and whole-draft approval. Start directly from a clear feature request, idea, or packet slug; `_idea.md` is optional. Use `sf-idea-factory` first only when the problem, opportunity, or V1 boundary still needs discovery. Use for defining product outcomes and requirements, not architecture, task breakdown, or implementation.
 ---
 
 # Create a Spec Finder PRD
 
 <HARD-GATE>
+- NEVER require `_idea.md` or prior `sf-idea-factory` completion. Begin directly when the user provides a sufficiently clear feature request, idea, or packet slug.
 - NEVER write or replace `_prd.md` before both research tracks, clarification, explicit approach selection, a complete draft review, and explicit user approval are complete.
 - NEVER skip research or interaction because a feature appears simple or technical.
 - NEVER infer a material product decision when multiple credible choices remain.
@@ -28,7 +29,7 @@ Read `references/question-protocol.md` before asking questions.
 ## Required inputs
 
 - A feature name, idea, or packet slug.
-- Optional `_idea.md` as primary discovery context.
+- Optional `_idea.md` as primary discovery context when it already exists.
 - Optional `_prd.md` for update mode.
 
 ## Mandatory phase checklist
@@ -47,8 +48,8 @@ Read `references/question-protocol.md` before asking questions.
 ### 1. Resolve context
 
 - Derive or confirm the slug and target `.spec-finder/tasks/<slug>/`.
-- Read `_idea.md`, existing `_prd.md`, downstream artifacts, every ADR, repository instructions, and `.spec-finder/config.json` when present.
-- Treat `_idea.md` as approved input, not immutable truth; surface conflicts with current evidence.
+- Read repository instructions and all existing packet artifacts, including `_idea.md` when present, an existing `_prd.md`, downstream artifacts, and every ADR. Read `.spec-finder/config.json` when present.
+- When `_idea.md` exists, treat it as approved input, not immutable truth; surface conflicts with current evidence.
 - In update mode, identify the requested delta and preserve untouched sections.
 
 ### 2. Research before questions
@@ -64,7 +65,7 @@ Complete both tracks before asking the user questions. Run them in parallel only
 
 - Perform 3-5 current searches across user expectations, comparable products, workflow conventions, adoption evidence, accessibility or compliance expectations, and pricing when relevant.
 - Prefer primary and first-party sources. Capture URLs, dates, supported claims, and relevance.
-- Reuse current sourced research from `_idea.md`, but refresh claims likely to have changed.
+- When `_idea.md` exists, reuse its current sourced research, but refresh claims likely to have changed.
 
 Present:
 
@@ -124,6 +125,6 @@ If external research is unavailable, disclose the missing evidence and ask with 
 ## Failure rules
 
 - Stop if both the requested outcome and target user remain unclear after clarification.
-- If research contradicts `_idea.md`, present the conflict and ask with lettered choices whether current evidence, the approved idea, or another direction governs before drafting.
+- If research contradicts an existing `_idea.md`, present the conflict and ask with lettered choices whether current evidence, the approved idea, or another direction governs before drafting.
 - If a material decision remains open, do not move it silently into Open Questions and save anyway.
 - Preserve unrelated approved content in update mode.

@@ -1,7 +1,15 @@
 import { spawn } from "node:child_process"
 import type { Writable } from "node:stream"
+import {
+  parseMultipleArgs,
+  runBatch,
+  type BatchArguments,
+  type BatchResult,
+  type BatchRunOptions,
+  type PacketSummary,
+} from "./batch.ts"
 import { loadConfig, parseConfig, type SpecFinderConfig } from "./config.ts"
-import { runTaskPacket } from "./engine.ts"
+import { runTaskPacket, type RunOptions, type RunResult } from "./engine.ts"
 import { type RunEventListener } from "./events.ts"
 import { findWorkspaceRoot } from "./paths.ts"
 import {
@@ -32,6 +40,23 @@ export interface SetupResolutionOptions {
   interactive?: boolean
   input?: SetupPickerInput
   output?: Writable
+}
+
+export interface RunCommandOptions {
+  /** Test and embedding seam; the normal CLI resolves the workspace from cwd. */
+  root?: string
+  /** Test and embedding seam; defaults to process.stdout. */
+  output?: Writable & { isTTY?: boolean }
+  /** Override the normal config loader for deterministic command tests. */
+  loadConfig?: (root: string) => Promise<SpecFinderConfig>
+  /** Override the coordinator while preserving the command lifecycle contract. */
+  runBatch?: (options: BatchRunOptions) => Promise<BatchResult>
+  /** Override the packet engine while preserving the single-run branch. */
+  runTaskPacket?: (options: RunOptions) => Promise<RunResult>
+  /** Override cockpit startup for renderer lifecycle tests. */
+  startCockpit?: typeof startCockpit
+  /** Force terminal mode in tests; otherwise --no-ui or a non-TTY selects it. */
+  noUi?: boolean
 }
 
 export async function setupCommand(args: string[]): Promise<number> {
@@ -183,24 +208,32 @@ export async function configCommand(): Promise<number> {
   return 0
 }
 
-export async function runCommand(args: string[]): Promise<number> {
+export async function runCommand(args: string[], options: RunCommandOptions = {}): Promise<number> {
+  const parsed = parseMultipleArgs(args)
+  if (parsed.mode === "error") throw new Error(parsed.error.message)
+  if (parsed.mode === "batch") return runBatchCommand(parsed, options)
+  return runSingleCommand(parsed.args, options)
+}
+
+async function runSingleCommand(args: readonly string[], options: RunCommandOptions): Promise<number> {
   const slug = args.find((arg) => !arg.startsWith("-"))
   if (!slug) throw new Error("usage: spec-finder run <task_slug> [--no-ui]")
-  const root = await findWorkspaceRoot()
-  let config = await loadConfig(root)
+  const output = options.output ?? process.stdout
+  const root = options.root ?? await findWorkspaceRoot()
+  const load = options.loadConfig ?? loadConfig
+  let config = await load(root)
   config = applyRunOverrides(config, args)
-  const noUi = args.includes("--no-ui") || !process.stdout.isTTY
+  const noUi = options.noUi ?? (args.includes("--no-ui") || output.isTTY !== true)
   const controller = new AbortController()
   const store = new CockpitStore()
-  const consoleListener: RunEventListener = (event) => {
-    if (event.type === "activity") process.stdout.write(`${event.taskId ? `${event.taskId}: ` : ""}${event.message.trim()}\n`)
-    if (event.type === "task_status") process.stdout.write(`${event.taskId}: ${event.status}\n`)
-    if (event.type === "run_finished") process.stdout.write(`${event.ok ? "ok" : "failed"}: ${event.message}\n`)
-  }
+  const consoleListener = createSingleConsoleListener(output)
   const emit: RunEventListener = noUi ? consoleListener : store.listener
-  const cockpit = noUi ? null : await startCockpit(store, () => controller.abort())
+  const start = options.startCockpit ?? startCockpit
+  let cockpit: { close: () => void } | null = null
   try {
-    const result = await runTaskPacket({
+    if (!noUi) cockpit = await start(store, () => controller.abort())
+    const run = options.runTaskPacket ?? runTaskPacket
+    const result = await run({
       root,
       slug,
       config,
@@ -212,6 +245,117 @@ export async function runCommand(args: string[]): Promise<number> {
   } finally {
     cockpit?.close()
   }
+}
+
+async function runBatchCommand(args: BatchArguments, options: RunCommandOptions): Promise<number> {
+  const output = options.output ?? process.stdout
+  const root = options.root ?? await findWorkspaceRoot()
+  const load = options.loadConfig ?? loadConfig
+  let config = await load(root)
+  config = applyRunOverrides(config, args.runtimeArgs)
+  const noUi = options.noUi ?? (args.runtimeArgs.includes("--no-ui") || output.isTTY !== true)
+  const controller = new AbortController()
+  const store = new CockpitStore()
+  const consoleListener = createBatchConsoleListener(output)
+  const emit: RunEventListener = noUi ? consoleListener : store.listener
+  const start = options.startCockpit ?? startCockpit
+  let cockpit: { close: () => void } | null = null
+
+  try {
+    if (!noUi) cockpit = await start(store, () => controller.abort())
+    const coordinate = options.runBatch ?? runBatch
+    const result = await coordinate({
+      root,
+      slugs: args.slugs,
+      config,
+      signal: controller.signal,
+      onEvent: emit,
+      interactivePermissions: !noUi,
+    })
+    return batchExitCode(result)
+  } finally {
+    cockpit?.close()
+  }
+}
+
+function createSingleConsoleListener(output: Writable): RunEventListener {
+  return (event) => {
+    if (event.type === "activity") output.write(`${event.taskId ? `${event.taskId}: ` : ""}${event.message.trim()}\n`)
+    if (event.type === "task_status") output.write(`${event.taskId}: ${event.status}\n`)
+    if (event.type === "run_finished") output.write(`${event.ok ? "ok" : "failed"}: ${event.message}\n`)
+  }
+}
+
+function createBatchConsoleListener(output: Writable): RunEventListener {
+  const reportedPackets = new Set<string>()
+
+  return (event) => {
+    switch (event.type) {
+      case "batch_started": {
+        const total = event.total ?? event.slugs?.length ?? event.packetSlugs?.length ?? event.packets?.length ?? 0
+        output.write(`batch: starting ${total} packet${total === 1 ? "" : "s"}\n`)
+        break
+      }
+      case "batch_packet_started": {
+        const total = event.total ?? event.packet?.total ?? 0
+        const position = event.index + 1
+        const progress = total > 0 ? ` ${position}/${total}` : ""
+        output.write(`batch: packet${progress} started: ${event.slug}\n`)
+        break
+      }
+      case "batch_packet_finished": {
+        reportedPackets.add(packetEventKey(event.index, event.slug))
+        const summary = event.summary ?? event.result
+        const outcome = event.outcome ?? summary?.outcome ?? "not_started"
+        const detail = event.detail ?? summary?.detail
+        output.write(`batch: packet outcome: ${event.slug} ${formatPacketOutcome(outcome, detail)}\n`)
+        break
+      }
+      case "batch_finished": {
+        const summaries = event.packets ?? event.summaries ?? event.result?.packets ?? []
+        for (const [index, summary] of summaries.entries()) {
+          const key = packetEventKey(index, summary.slug)
+          if (reportedPackets.has(key)) continue
+          reportedPackets.add(key)
+          output.write(`batch: packet outcome: ${summary.slug} ${formatPacketOutcome(summary.outcome, summary.detail)}\n`)
+        }
+
+        const status = event.status ?? event.outcome ?? event.result?.status ?? (event.ok ? "completed" : "failed")
+        const stoppingSlug = event.stoppingSlug ?? event.stoppingPacket?.slug ?? event.result?.stoppingSlug
+        if (status === "preflight_failed") {
+          output.write("batch: preflight failed; no packets started\n")
+          if (event.message) output.write(`${event.message.trim()}\n`)
+        } else if (status === "failed" || status === "cancelled") {
+          if (stoppingSlug) output.write(`batch: stopping packet: ${stoppingSlug} (${status})\n`)
+          output.write("batch: no automatic retry; resolve the issue and rerun manually\n")
+        }
+        output.write(`batch: aggregate ${status === "completed" ? "succeeded" : status} (exit ${event.ok && status === "completed" ? "0" : "1"})\n`)
+        break
+      }
+      // Nested packet lifecycle events are intentionally not forwarded as
+      // singular batch output. The additive batch envelope above is the
+      // stable terminal presentation for this mode.
+      default:
+        break
+    }
+  }
+}
+
+function packetEventKey(index: number, slug: string): string {
+  return `${index}:${slug}`
+}
+
+function formatPacketOutcome(
+  outcome: PacketSummary["outcome"],
+  detail: PacketSummary["detail"] | undefined,
+): string {
+  if (detail === "already_complete") return `${outcome} (already complete)`
+  return outcome
+}
+
+function batchExitCode(result: BatchResult): number {
+  const allSucceeded = result.packets.length > 0 && result.packets.every((packet) => packet.outcome === "succeeded")
+  return result.ok && result.status === "completed" && allSucceeded ? 0 : 1
 }
 
 export async function upgradeCommand(): Promise<number> {
@@ -229,7 +373,7 @@ export function versionCommand(): number {
   return 0
 }
 
-function valuesFor(args: string[], flag: string): string[] {
+function valuesFor(args: readonly string[], flag: string): string[] {
   const values: string[] = []
   for (let index = 0; index < args.length; index += 1) {
     if (args[index] === flag && args[index + 1]) values.push(args[index + 1]!)
@@ -237,11 +381,11 @@ function valuesFor(args: string[], flag: string): string[] {
   return values
 }
 
-function valueFor(args: string[], flag: string): string | undefined {
+function valueFor(args: readonly string[], flag: string): string | undefined {
   return valuesFor(args, flag).at(-1)
 }
 
-function applyRunOverrides(config: SpecFinderConfig, args: string[]): SpecFinderConfig {
+function applyRunOverrides(config: SpecFinderConfig, args: readonly string[]): SpecFinderConfig {
   const provider = valueFor(args, "--provider")
   const model = valueFor(args, "--model")
   const reasoning = valueFor(args, "--reasoning")
