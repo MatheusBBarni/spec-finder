@@ -247,6 +247,53 @@ describe("read-only progress cockpit", () => {
     }
   })
 
+  test("keeps the active packet timer live while browsing an inactive packet", async () => {
+    let now = 1_000
+    const store = new CockpitStore(() => now)
+    const alphaTasks = [task(1, "Alpha history", [], "completed")]
+    const betaTasks = [task(1, "Beta task")]
+    store.consume({
+      type: "batch_started",
+      slugs: ["alpha", "beta"],
+      total: 2,
+      config: DEFAULT_CONFIG,
+      packets: [
+        { slug: "alpha", index: 0, outcome: "succeeded", tasks: alphaTasks },
+        { slug: "beta", index: 1, outcome: "not_started", tasks: betaTasks },
+      ],
+    })
+    store.consume({
+      type: "batch_packet_started",
+      slug: "beta",
+      index: 1,
+      total: 2,
+      config: DEFAULT_CONFIG,
+      tasks: betaTasks,
+    })
+    store.consume({ type: "task_status", taskId: "beta/task_01", status: "in_progress" })
+
+    const screen = await render(store, 120, 40)
+    try {
+      expect(screen.captureCharFrame()).toContain("● 2 beta RUNNING")
+      expect(screen.renderer.liveRequestCount).toBe(1)
+
+      await press(screen, KeyCodes.ARROW_LEFT)
+      expect(screen.captureCharFrame()).toContain("SPEC FINDER · alpha · ACP COCKPIT")
+      expect(screen.renderer.liveRequestCount).toBe(1)
+
+      now = 2_500
+      await act(async () => {
+        await Bun.sleep(180)
+      })
+      expect(store.getSnapshot().taskTimers.task_01).toMatchObject({ elapsedSeconds: 1 })
+
+      await press(screen, KeyCodes.ARROW_RIGHT)
+      expect(screen.captureCharFrame()).toContain("frontend · 00:01")
+    } finally {
+      await destroy(screen)
+    }
+  })
+
   test("lays out only parent packets horizontally and keeps child tasks in the vertical sidebar", async () => {
     const slugs = Array.from({ length: 8 }, (_, index) => `packet-${String(index + 1).padStart(2, "0")}`)
     const tasks = Array.from({ length: 8 }, (_, index) => task(index + 1, `Batch task ${index + 1}`))

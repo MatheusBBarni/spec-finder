@@ -74,7 +74,7 @@ export function App({ store, onCancel, onDismiss, onExit = () => {} }: AppProps)
   const taskState = selectPacketTaskView(state, batchCursorIndex, batchTaskCursorIndex)
   const selectedTask = selectSelectedTask(taskState)
   const selectedTranscript = selectSelectedTranscript(taskState)
-  const hasRunningTasks = state.finished === null && taskState.tasks.some((task) => task.status === "in_progress")
+  const hasRunningTasks = state.finished === null && state.tasks.some((task) => task.status === "in_progress")
   // Inactive batch packets share the task-row renderer but not the active
   // packet's local timer projection. Their observed values are therefore
   // intentionally unavailable rather than borrowed by colliding task IDs.
