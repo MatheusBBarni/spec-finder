@@ -1,5 +1,5 @@
 import type { ScrollBoxRenderable } from "@opentui/core"
-import { useKeyboard, useTerminalDimensions } from "@opentui/react"
+import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react"
 import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react"
 import type { PacketOutcome, PacketSummary } from "../batch.ts"
 import type { TaskStatus } from "../tasks.ts"
@@ -18,6 +18,7 @@ import {
   type RuntimeOptionName,
 } from "./store.ts"
 import { transcriptPresentation, type TranscriptEntry, type TranscriptKind } from "./transcript.ts"
+import { formatTaskTimer } from "./timer.ts"
 
 const colors = {
   // DESIGN.md surface-soft: deliberate near-black canvas for terminal gutters.
@@ -44,11 +45,6 @@ const colors = {
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const
 const SPINNER_INTERVAL_MS = 120
 
-export interface TaskTiming {
-  startedAt: number
-  elapsedMs?: number
-}
-
 interface AppProps {
   store: CockpitStore
   onCancel: () => void
@@ -58,15 +54,14 @@ interface AppProps {
 
 export function App({ store, onCancel, onDismiss, onExit = () => {} }: AppProps) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
+  const renderer = useRenderer()
   const { width, height } = useTerminalDimensions()
   const taskListRef = useRef<ScrollBoxRenderable>(null)
   const transcriptRef = useRef<ScrollBoxRenderable>(null)
   const batchSummaryRef = useRef<ScrollBoxRenderable>(null)
-  const taskTimings = useRef(new Map<string, TaskTiming>())
   const summaryDismissed = useRef(false)
   const exitRequested = useRef(false)
   const [spinnerIndex, setSpinnerIndex] = useState(0)
-  const [clock, setClock] = useState(() => performance.now())
   const [summaryOpen, setSummaryOpen] = useState(false)
   const [batchCursorIndex, setBatchCursorIndex] = useState(0)
   const [batchTaskCursorIndex, setBatchTaskCursorIndex] = useState(0)
@@ -79,7 +74,11 @@ export function App({ store, onCancel, onDismiss, onExit = () => {} }: AppProps)
   const taskState = selectPacketTaskView(state, batchCursorIndex, batchTaskCursorIndex)
   const selectedTask = selectSelectedTask(taskState)
   const selectedTranscript = selectSelectedTranscript(taskState)
-  const hasRunningTasks = taskState.tasks.some((task) => task.status === "in_progress")
+  const hasRunningTasks = state.finished === null && taskState.tasks.some((task) => task.status === "in_progress")
+  // Inactive batch packets share the task-row renderer but not the active
+  // packet's local timer projection. Their observed values are therefore
+  // intentionally unavailable rather than borrowed by colliding task IDs.
+  const taskTimers = taskState === state ? state.taskTimers : {}
   const spinner = SPINNER_FRAMES[spinnerIndex] ?? "⠋"
 
   const requestExit = (action: () => void): void => {
@@ -183,33 +182,26 @@ export function App({ store, onCancel, onDismiss, onExit = () => {} }: AppProps)
     exitRequested.current = false
     if (state.slug) {
       summaryDismissed.current = false
-      taskTimings.current.clear()
       setSummaryOpen(false)
     }
   }, [state.finished, state.slug])
 
   useEffect(() => {
-    const now = performance.now()
-    for (const task of taskState.tasks) {
-      const timing = taskTimings.current.get(task.id)
-      if (task.status === "in_progress" && !timing) {
-        taskTimings.current.set(task.id, { startedAt: now })
-      } else if (timing && isTerminal(task.status) && timing.elapsedMs === undefined) {
-        timing.elapsedMs = Math.max(0, now - timing.startedAt)
-      }
-    }
-    setClock(now)
     if (!hasRunningTasks) {
       setSpinnerIndex(0)
       return
     }
 
+    renderer.requestLive()
     const timer = setInterval(() => {
       setSpinnerIndex((index) => (index + 1) % SPINNER_FRAMES.length)
-      setClock(performance.now())
+      store.tick()
     }, SPINNER_INTERVAL_MS)
-    return () => clearInterval(timer)
-  }, [hasRunningTasks, taskState.tasks])
+    return () => {
+      clearInterval(timer)
+      renderer.dropLive()
+    }
+  }, [hasRunningTasks, renderer, store])
 
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={colors.background}>
@@ -231,8 +223,7 @@ export function App({ store, onCancel, onDismiss, onExit = () => {} }: AppProps)
           batchSummaryRef={batchSummaryRef}
           batchCursorIndex={batchCursorIndex}
           spinner={spinner}
-          clock={clock}
-          taskTimings={taskTimings.current}
+          taskTimers={taskTimers}
         />
       )}
     </box>
@@ -324,8 +315,7 @@ function LiveCockpit({
   batchSummaryRef,
   batchCursorIndex,
   spinner,
-  clock,
-  taskTimings,
+  taskTimers,
 }: {
   state: CockpitState
   batchState: CockpitState
@@ -339,8 +329,7 @@ function LiveCockpit({
   batchSummaryRef: RefObject<ScrollBoxRenderable | null>
   batchCursorIndex: number
   spinner: string
-  clock: number
-  taskTimings: Map<string, TaskTiming>
+  taskTimers: CockpitState["taskTimers"]
 }) {
   const batchMode = isBatchCockpit(state)
   const taskPanelWidth = compact ? "100%" : Math.max(30, Math.min(50, Math.floor(width * 0.28)))
@@ -350,6 +339,7 @@ function LiveCockpit({
   const taskProgress = taskProgressLabel(state)
   const progressWidth = Math.max(6, taskWidth - 4)
   const visibleTasks = selectVisibleTasks(state)
+  const metadataLimit = Math.max(1, taskWidth - 4)
   const titleLimit = Math.max(10, taskWidth - 12)
 
   return (
@@ -402,7 +392,8 @@ function LiveCockpit({
                 selected={task.id === state.selectedTaskId}
                 spinner={spinner}
                 titleLimit={titleLimit}
-                elapsed={taskElapsedText(task, taskTimings, clock)}
+                metadataLimit={metadataLimit}
+                elapsed={formatTaskTimer(task.status, taskTimers[task.id])}
                 width="100%"
               />
             ))}
@@ -452,6 +443,7 @@ function TaskRow({
   selected,
   spinner,
   titleLimit,
+  metadataLimit,
   elapsed,
   width,
 }: {
@@ -459,6 +451,7 @@ function TaskRow({
   selected: boolean
   spinner: string
   titleLimit: number
+  metadataLimit: number
   elapsed: string
   width: number | "100%"
 }) {
@@ -482,7 +475,7 @@ function TaskRow({
         <strong>{selected ? "> " : "  "}{marker} {task.id} </strong>{fit(task.title, titleLimit)}
       </text>
       <text fg={selected ? colors.muted : colors.dim} wrapMode="none">
-        {task.type} · {elapsed}
+        {taskMetadataText(task.type, elapsed, metadataLimit)}
       </text>
       {checkpointText ? (
         <text fg={checkpointColor(task.checkpoint)} wrapMode="none">
@@ -933,7 +926,8 @@ function HelpOverlay({ width, height, batchMode }: { width: number; height: numb
       <text fg={colors.text}>Home / End         Jump to transcript start / live tail</text>
       <text fg={colors.text}>? / Esc            Close this help</text>
       <text fg={colors.text}>q / Ctrl+C         Cancel the run and leave the terminal UI</text>
-      <text fg={colors.muted} marginTop={1}>View only: navigation, scrolling, help, and terminal cancellation.</text>
+      <text fg={colors.muted} marginTop={1}>Timer: elapsed time is an observation, not an automatic stall verdict.</text>
+      <text fg={colors.muted}>View only: navigation, scrolling, help, and terminal cancellation.</text>
     </box>
   )
 }
@@ -1206,30 +1200,12 @@ function progressBar(state: CockpitState, width: number): string {
   return "█".repeat(filled) + "░".repeat(width - filled)
 }
 
-export function taskElapsedText(task: CockpitTask, timings: Map<string, TaskTiming>, now: number): string {
-  if (task.status === "pending" || task.status === "blocked") return "—"
-  const timing = timings.get(task.id)
-  if (!timing) return "unavailable"
-  const elapsed = timing.elapsedMs ?? Math.max(0, now - timing.startedAt)
-  return formatElapsed(elapsed)
-}
-
-function formatElapsed(milliseconds: number): string {
-  const seconds = Math.max(0, Math.floor(milliseconds / 1000))
-  const minutes = Math.floor(seconds / 60)
-  return `${String(minutes).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`
-}
-
 function taskStatusText(status: TaskStatus): string {
   if (isCompleted(status)) return "Task completed"
   if (status === "in_progress") return "Task running"
   if (status === "failed") return "Task failed"
   if (status === "blocked") return "Task blocked"
   return "Task pending"
-}
-
-function isTerminal(status: TaskStatus): boolean {
-  return isCompleted(status) || status === "failed"
 }
 
 function footerText(state: CockpitState, compact: boolean): string {
@@ -1349,6 +1325,11 @@ function humanize(value: string): string {
 function fit(value: string, limit: number): string {
   if (limit <= 1) return value.slice(0, Math.max(0, limit))
   return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`
+}
+
+function taskMetadataText(type: string, elapsed: string, limit: number): string {
+  const typeLimit = limit - elapsed.length - 3
+  return typeLimit > 0 ? `${fit(type, typeLimit)} · ${elapsed}` : elapsed
 }
 
 function clip(value: string, limit: number): string {

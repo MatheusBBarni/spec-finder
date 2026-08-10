@@ -22,6 +22,7 @@
 - `CockpitStore` retains uncapped per-task transcripts plus separate active/selected, focus, follow, help, run-activity, runtime-option, and task-reason state; task 04 removed the legacy permission and flat-activity view surfaces.
 - OpenTUI 0.4.5 provides the focused `ScrollBox`, keyboard routing, resize handling, viewport culling, and test renderer needed by the approved design.
 - OpenTUI 0.4.5 frame/input evidence passes at 80×24, 120×40, 200×60, reduced color, and a 70×20 stacked fallback; the renderer also navigates a 300-entry synthetic transcript.
+- App timer integration uses `@opentui/react` `useRenderer()` to pair one `requestLive()` call with `dropLive()` cleanup while the store-owned timer ticks from the existing spinner cadence; inactive batch tabs must not reuse active-packet timer IDs.
 - The repository has no Spec Finder-local `AGENTS.md` or `CLAUDE.md`; existing dirty files are user-owned and must be preserved.
 
 ## Open Risks
