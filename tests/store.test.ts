@@ -14,6 +14,7 @@ import {
   selectUnfinishedTasks,
   selectVisibleTasks,
 } from "../src/ui/store.ts"
+import { formatTaskTimer } from "../src/ui/timer.ts"
 
 describe("cockpit store", () => {
   test("initializes task-scoped state and follows the first active task", () => {
@@ -39,6 +40,162 @@ describe("cockpit store", () => {
       followingActiveTask: true,
     })
     expect(selectSelectedTask(store.getSnapshot())?.id).toBe("task_01")
+  })
+
+  test("resets the ephemeral timer projection for each run", () => {
+    let nowMs = 1_000
+    const store = new CockpitStore(() => nowMs)
+    store.consume({
+      type: "run_started",
+      slug: "first",
+      config: DEFAULT_CONFIG,
+      tasks: [task(1, "First"), task(2, "Second")],
+    })
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    expect(store.getSnapshot().taskTimers.task_01).toEqual({
+      kind: "running",
+      startedAtMs: 1_000,
+      elapsedSeconds: 0,
+    })
+
+    nowMs = 9_000
+    store.consume({
+      type: "run_started",
+      slug: "second",
+      config: DEFAULT_CONFIG,
+      tasks: [task(1, "Fresh one"), task(2, "Fresh two")],
+    })
+
+    expect(store.getSnapshot().taskTimers).toEqual({})
+    expect(formatTaskTimer("pending", store.getSnapshot().taskTimers.task_01)).toBe("—")
+    expect(formatTaskTimer("pending", store.getSnapshot().taskTimers.task_02)).toBe("—")
+  })
+
+  test("starts once, ticks only running tasks, and keeps view state separate", () => {
+    let nowMs = 1_000
+    const store = new CockpitStore(() => nowMs)
+    store.consume({
+      type: "run_started",
+      slug: "demo",
+      config: DEFAULT_CONFIG,
+      tasks: [task(1, "First"), task(2, "Second")],
+    })
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    const firstTimer = store.getSnapshot().taskTimers.task_01
+
+    nowMs = 2_500
+    store.tick()
+    expect(store.getSnapshot().taskTimers.task_01).toEqual({
+      kind: "running",
+      startedAtMs: 1_000,
+      elapsedSeconds: 1,
+    })
+
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    expect(store.getSnapshot().taskTimers.task_01).toMatchObject({ startedAtMs: 1_000 })
+    expect(store.getSnapshot().taskTimers.task_01).not.toBe(firstTimer)
+
+    nowMs = 3_500
+    store.consume({ type: "task_status", taskId: "task_02", status: "in_progress" })
+    nowMs = 4_500
+    store.tick()
+
+    expect(store.getSnapshot().taskTimers.task_01).toMatchObject({ elapsedSeconds: 3 })
+    expect(store.getSnapshot().taskTimers.task_02).toMatchObject({
+      kind: "running",
+      startedAtMs: 3_500,
+      elapsedSeconds: 1,
+    })
+
+    store.consume({ type: "activity", taskId: "task_01", message: "task output" })
+    store.consume({ type: "activity", message: "run output" })
+    expect(store.getSnapshot().taskTimers.task_01).toMatchObject({ elapsedSeconds: 3 })
+    expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).toEqual(["task output"])
+    expect(store.getSnapshot().runActivity.map((entry) => entry.text)).toEqual(["Starting demo", "run output"])
+  })
+
+  test("freezes the first terminal value and handles missing baselines", () => {
+    let nowMs = 2_000
+    const store = new CockpitStore(() => nowMs)
+    store.consume({
+      type: "run_started",
+      slug: "demo",
+      config: DEFAULT_CONFIG,
+      tasks: [task(1, "Observed"), task(2, "Never started"), task(3, "Blocked")],
+    })
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    nowMs = 5_250
+    store.consume({ type: "task_status", taskId: "task_01", status: "completed" })
+    const finishedTimer = store.getSnapshot().taskTimers.task_01
+
+    nowMs = 20_000
+    store.consume({ type: "task_status", taskId: "task_01", status: "failed" })
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    store.tick()
+
+    expect(store.getSnapshot().taskTimers.task_01).toBe(finishedTimer)
+    expect(formatTaskTimer("completed", finishedTimer)).toBe("00:03")
+
+    store.consume({ type: "task_status", taskId: "task_02", status: "completed" })
+    expect(store.getSnapshot().taskTimers.task_02).toEqual({ kind: "unavailable" })
+    expect(formatTaskTimer("completed", store.getSnapshot().taskTimers.task_02)).toBe("unavailable")
+
+    store.consume({ type: "task_status", taskId: "task_03", status: "blocked" })
+    expect(store.getSnapshot().taskTimers.task_03).toBeUndefined()
+    expect(formatTaskTimer("blocked", store.getSnapshot().taskTimers.task_03)).toBe("—")
+  })
+
+  test("suppresses timer-only notifications when the displayed second is unchanged", () => {
+    let nowMs = 10_000
+    const store = new CockpitStore(() => nowMs)
+    store.consume({
+      type: "run_started",
+      slug: "demo",
+      config: DEFAULT_CONFIG,
+      tasks: [task(1, "First")],
+    })
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+
+    let notifications = 0
+    store.subscribe(() => {
+      notifications += 1
+    })
+    nowMs = 10_999
+    const sameSecondSnapshot = store.getSnapshot()
+    store.tick()
+    expect(notifications).toBe(0)
+    expect(store.getSnapshot()).toBe(sameSecondSnapshot)
+
+    store.tick(Number.NaN)
+    store.tick(-1)
+    store.tick(Number.POSITIVE_INFINITY)
+    expect(notifications).toBe(0)
+    expect(store.getSnapshot()).toBe(sameSecondSnapshot)
+
+    nowMs = 11_000
+    store.tick()
+    expect(notifications).toBe(1)
+    expect(store.getSnapshot().taskTimers.task_01).toMatchObject({ elapsedSeconds: 1 })
+  })
+
+  test("does not invent a task duration when run-level completion has no task terminal", () => {
+    let nowMs = 3_000
+    const store = new CockpitStore(() => nowMs)
+    store.consume({
+      type: "run_started",
+      slug: "demo",
+      config: DEFAULT_CONFIG,
+      tasks: [task(1, "Still running")],
+    })
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    const runningTimer = store.getSnapshot().taskTimers.task_01
+
+    nowMs = 9_000
+    store.consume({ type: "run_finished", ok: true, message: "finished without task status" })
+
+    expect(store.getSnapshot().taskTimers.task_01).toBe(runningTimer)
+    expect(store.getSnapshot().taskTimers.task_01?.kind).toBe("running")
+    expect(store.getSnapshot().finished?.message).toBe("finished without task status")
   })
 
   test("hides tasks completed before opening and retains tasks completed during the session", () => {
@@ -474,10 +631,63 @@ describe("cockpit store", () => {
       slug: "",
       tasks: [],
       transcripts: {},
+      taskTimers: {},
       runActivity: [],
       runtimeOptions: {},
       finished: null,
     })
+  })
+
+  test("retains typed no-work metadata while keeping legacy terminal summaries generic", () => {
+    const noWorkStore = startedStore([
+      task(1, "Completed one", [], "completed"),
+      task(2, "Completed two", [], "done"),
+      task(3, "Completed three", [], "finished"),
+    ])
+    noWorkStore.consume({
+      type: "run_finished",
+      ok: true,
+      message: "No executable tasks: all tasks are already complete",
+      outcome: "no_work",
+      reason: "all_tasks_complete",
+    })
+
+    expect(noWorkStore.getSnapshot().finished).toEqual({
+      ok: true,
+      message: "No executable tasks: all tasks are already complete",
+      outcome: "no_work",
+      reason: "all_tasks_complete",
+    })
+
+    const legacyStore = startedStore([task(1, "Completed one", [], "completed")])
+    legacyStore.consume({ type: "run_finished", ok: true, message: "1 task completed" })
+    expect(legacyStore.getSnapshot().finished).toEqual({ ok: true, message: "1 task completed" })
+  })
+
+  test("leaves batch projection intact for nested singular terminal metadata", () => {
+    const store = new CockpitStore()
+    store.consume({ type: "batch_started", slugs: ["alpha", "beta"] })
+    store.consume({
+      type: "batch_packet_started",
+      slug: "alpha",
+      index: 0,
+      total: 2,
+      tasks: [task(1, "Alpha task")],
+    })
+
+    store.consume({
+      type: "run_finished",
+      ok: true,
+      message: "No executable tasks: all tasks are already complete",
+      outcome: "no_work",
+      reason: "all_tasks_complete",
+    })
+
+    expect(store.getSnapshot()).toMatchObject({ batchStatus: "running", finished: null, slug: "alpha" })
+    expect(store.getSnapshot().packetSummaries).toEqual([
+      { slug: "alpha", outcome: "not_started" },
+      { slug: "beta", outcome: "not_started" },
+    ])
   })
 
   test("keeps permission events outside the final read-only view state", () => {
@@ -501,6 +711,7 @@ describe("cockpit store", () => {
     expect(responded).toBeFalse()
     expect("permission" in store.getSnapshot()).toBeFalse()
     expect("activity" in store.getSnapshot()).toBeFalse()
+    expect(store.getSnapshot().taskTimers).toEqual({})
     expect("movePermission" in store).toBeFalse()
     expect("selectPermission" in store).toBeFalse()
     expect("cancelPermission" in store).toBeFalse()

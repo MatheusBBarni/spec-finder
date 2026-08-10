@@ -340,12 +340,116 @@ describe("run command batch integration", () => {
     }
   })
 
+  test("explains a typed no-work result in singular no-ui output and succeeds", async () => {
+    const output = commandOutput()
+    const result = await runCommand(["complete", "--no-ui"], {
+      root: "/tmp/spec-finder-command-no-work-output",
+      output: output.output,
+      loadConfig: async () => DEFAULT_CONFIG,
+      runTaskPacket: async (options) => {
+        options.emit({
+          type: "run_finished",
+          ok: true,
+          message: "0 tasks completed",
+          outcome: "no_work",
+          reason: "all_tasks_complete",
+        })
+        return {
+          ok: true,
+          completed: 0,
+          failed: 0,
+          blocked: 0,
+          outcome: "no_work",
+          reason: "all_tasks_complete",
+        }
+      },
+    })
+
+    expect(result).toBe(0)
+    expect(output.text()).toBe("ok: no executable tasks; all tasks are already complete\n")
+  })
+
+  test("waits for an interactive typed no-work exit before closing the cockpit", async () => {
+    const output = commandOutput(true)
+    let releaseExit: (() => void) | undefined
+    let waitForExitCalls = 0
+    let waitForDismissalCalls = 0
+    let closeCalls = 0
+    let settled = false
+    const exit = new Promise<void>((resolve) => { releaseExit = resolve })
+    const command = runCommand(["complete"], {
+      root: "/tmp/spec-finder-command-no-work-interactive",
+      input: { isTTY: true },
+      output: output.output,
+      loadConfig: async () => DEFAULT_CONFIG,
+      startCockpit: async () => ({
+        waitForExit: () => {
+          waitForExitCalls += 1
+          return exit
+        },
+        waitForDismissal: async () => { waitForDismissalCalls += 1 },
+        close: () => { closeCalls += 1 },
+      }),
+      runTaskPacket: async (options) => {
+        options.emit({
+          type: "run_finished",
+          ok: true,
+          message: "No executable tasks: all tasks are already complete",
+          outcome: "no_work",
+          reason: "all_tasks_complete",
+        })
+        return {
+          ok: true,
+          completed: 0,
+          failed: 0,
+          blocked: 0,
+          outcome: "no_work",
+          reason: "all_tasks_complete",
+        }
+      },
+    })
+    void command.then(() => { settled = true })
+
+    for (let attempt = 0; attempt < 100 && waitForExitCalls === 0; attempt += 1) await Bun.sleep(1)
+    expect(waitForExitCalls).toBe(1)
+    expect(settled).toBeFalse()
+    expect(closeCalls).toBe(0)
+    expect(waitForDismissalCalls).toBe(0)
+
+    releaseExit?.()
+    expect(await command).toBe(0)
+    expect(closeCalls).toBe(1)
+  })
+
+  test("automatically closes normal interactive success without waiting for no-work exit", async () => {
+    const output = commandOutput(true)
+    let waitForExitCalls = 0
+    let closeCalls = 0
+    const result = await runCommand(["alpha"], {
+      root: "/tmp/spec-finder-command-normal-interactive",
+      input: { isTTY: true },
+      output: output.output,
+      loadConfig: async () => DEFAULT_CONFIG,
+      startCockpit: async () => ({
+        waitForExit: async () => { waitForExitCalls += 1 },
+        waitForDismissal: async () => undefined,
+        close: () => { closeCalls += 1 },
+      }),
+      runTaskPacket: async () => ({ ok: true, completed: 1, failed: 0, blocked: 0 }),
+    })
+
+    expect(result).toBe(0)
+    expect(waitForExitCalls).toBe(0)
+    expect(closeCalls).toBe(1)
+  })
+
   test("retains interactive single and batch failures until dismissal", async () => {
     for (const mode of ["single", "batch"] as const) {
       const root = await mkdtemp(join(tmpdir(), `spec-finder-${mode}-failure-review-`))
       const terminal = commandOutput(true)
       let dismiss: (() => void) | undefined
       let waitCalls = 0
+      let waitForExitCalls = 0
       let closeCalls = 0
       const dismissal = new Promise<void>((resolve) => { dismiss = resolve })
       const session = {
@@ -353,6 +457,7 @@ describe("run command batch integration", () => {
           waitCalls += 1
           return dismissal
         },
+        waitForExit: async () => { waitForExitCalls += 1 },
         close: () => { closeCalls += 1 },
       }
 
@@ -391,6 +496,7 @@ describe("run command batch integration", () => {
         dismiss?.()
         expect(await result).toBe(1)
         expect(closeCalls).toBe(1)
+        expect(waitForExitCalls).toBe(0)
       } finally {
         await rm(root, { recursive: true, force: true })
       }
@@ -744,6 +850,7 @@ describe("run command batch integration", () => {
       loadConfig: async () => DEFAULT_CONFIG,
       startCockpit: async () => ({
         close: () => { closeCalls += 1 },
+        waitForExit: async () => { throw new Error("no-work exit should not be awaited") },
         waitForDismissal: async () => undefined,
       }),
       runTaskPacket: async () => { throw new Error("runner exploded") },

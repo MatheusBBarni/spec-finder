@@ -6,32 +6,70 @@ import { testRender } from "@opentui/react/test-utils"
 import { act } from "react"
 import { DEFAULT_CONFIG, type SpecFinderConfig } from "../src/config.ts"
 import type { TaskFile, TaskStatus } from "../src/tasks.ts"
-import { App, taskElapsedText, type TaskTiming } from "../src/ui/App.tsx"
+import { App } from "../src/ui/App.tsx"
 import { createCockpitSessionController } from "../src/ui/cockpit.tsx"
 import { CockpitStore } from "../src/ui/store.ts"
+import { formatTaskTimer } from "../src/ui/timer.ts"
 
 type TestScreen = Awaited<ReturnType<typeof testRender>>
 
 describe("read-only progress cockpit", () => {
   test("renders honest timer placeholders and observed durations", () => {
+    let now = 1_000
     const store = startedStore([
       task(1, "Pending"),
-      task(2, "Blocked", [], "blocked"),
-      task(3, "Running", [], "in_progress"),
-      task(4, "Completed", [], "completed"),
-      task(5, "Observed complete", [], "completed"),
-    ])
-    const tasks = store.getSnapshot().tasks
-    const timings = new Map<string, TaskTiming>([
-      ["task_03", { startedAt: 1_000 }],
-      ["task_05", { startedAt: 1_000, elapsedMs: 2_500 }],
-    ])
+      task(2, "Blocked"),
+      task(3, "Running"),
+      task(4, "Completed without observation"),
+      task(5, "Observed complete"),
+    ], DEFAULT_CONFIG, () => now)
+    store.consume({ type: "task_status", taskId: "task_02", status: "blocked" })
+    store.consume({ type: "task_status", taskId: "task_03", status: "in_progress" })
+    store.consume({ type: "task_status", taskId: "task_04", status: "completed" })
+    store.consume({ type: "task_status", taskId: "task_05", status: "in_progress" })
+    now = 3_500
+    store.tick()
+    store.consume({ type: "task_status", taskId: "task_05", status: "completed" })
 
-    expect(taskElapsedText(tasks[0]!, timings, 5_000)).toBe("—")
-    expect(taskElapsedText(tasks[1]!, timings, 5_000)).toBe("—")
-    expect(taskElapsedText(tasks[2]!, timings, 3_500)).toBe("00:02")
-    expect(taskElapsedText(tasks[3]!, timings, 5_000)).toBe("unavailable")
-    expect(taskElapsedText(tasks[4]!, timings, 5_000)).toBe("00:02")
+    const snapshot = store.getSnapshot()
+    const timer = (taskId: string) => {
+      const task = snapshot.tasks.find((candidate) => candidate.id === taskId)
+      if (!task) throw new Error(`missing task ${taskId}`)
+      return formatTaskTimer(task.status, snapshot.taskTimers[taskId])
+    }
+    expect(timer("task_01")).toBe("—")
+    expect(timer("task_02")).toBe("—")
+    expect(timer("task_03")).toBe("00:02")
+    expect(timer("task_04")).toBe("unavailable")
+    expect(timer("task_05")).toBe("00:02")
+  })
+
+  test("renders frozen final values beside pending and blocked placeholders", async () => {
+    let now = 1_000
+    const store = startedStore([
+      task(1, "Observed complete"),
+      task(2, "Observed failure"),
+      task(3, "Still pending"),
+      task(4, "Dependency blocked"),
+    ], DEFAULT_CONFIG, () => now)
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    store.consume({ type: "task_status", taskId: "task_02", status: "in_progress" })
+    store.consume({ type: "task_status", taskId: "task_04", status: "blocked" })
+    now = 3_500
+    store.tick()
+    store.consume({ type: "task_status", taskId: "task_01", status: "completed" })
+    store.consume({ type: "task_status", taskId: "task_02", status: "failed" })
+
+    const screen = await render(store, 120, 40)
+    try {
+      const frame = screen.captureCharFrame()
+      expect(frame).toContain("✓ task_01")
+      expect(frame).toContain("✗ task_02")
+      expect(frame).toContain("frontend · 00:02")
+      expect(frame).toContain("frontend · —")
+    } finally {
+      await destroy(screen)
+    }
   })
 
   test("advances the active timer without changing another live renderer request", async () => {
@@ -48,7 +86,7 @@ describe("read-only progress cockpit", () => {
       await mutate(screen, () => {
         store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
       })
-      expect(screen.renderer.liveRequestCount).toBe(1)
+      expect(screen.renderer.liveRequestCount).toBe(2)
       expect(screen.captureCharFrame()).toContain("frontend · 00:00")
 
       await act(async () => {
@@ -63,6 +101,81 @@ describe("read-only progress cockpit", () => {
       expect(screen.renderer.liveRequestCount).toBe(1)
     } finally {
       screen.renderer.dropLive()
+      await destroy(screen)
+    }
+  })
+
+  test("drops its live request and stops timer updates when the renderer unmounts", async () => {
+    let now = 1_000
+    const store = startedStore([task(1, "Timed task")], DEFAULT_CONFIG, () => now)
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    const screen = await render(store, 80, 24)
+
+    try {
+      expect(screen.renderer.liveRequestCount).toBe(1)
+      now = 2_500
+      await act(async () => {
+        await Bun.sleep(180)
+      })
+      await screen.renderOnce()
+      const running = store.getSnapshot().taskTimers.task_01
+      expect(running?.kind).toBe("running")
+      if (running?.kind !== "running") throw new Error("expected a running timer")
+      expect(running.elapsedSeconds).toBe(1)
+    } finally {
+      await destroy(screen)
+    }
+
+    expect(screen.renderer.liveRequestCount).toBe(0)
+    const afterUnmount = store.getSnapshot().taskTimers.task_01
+    now = 5_500
+    await act(async () => {
+      await Bun.sleep(180)
+    })
+    expect(store.getSnapshot().taskTimers.task_01).toBe(afterUnmount)
+  })
+
+  test("keeps selection, focus, follow mode, and transcript scroll stable during timer ticks", async () => {
+    let now = 1_000
+    const store = startedStore([
+      task(1, "Active task"),
+      task(2, "Inspected task"),
+    ], DEFAULT_CONFIG, () => now)
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    for (let index = 0; index < 120; index += 1) {
+      store.consume({ type: "activity", taskId: "task_02", message: `INSPECTED-LINE-${index}` })
+    }
+    const screen = await render(store, 120, 40)
+
+    try {
+      await press(screen, KeyCodes.ARROW_DOWN)
+      await pressTab(screen)
+      const transcript = renderable<ScrollBoxRenderable>(screen, "transcript-scroll")
+      await press(screen, KeyCodes.HOME)
+      expect(transcript.scrollTop).toBe(0)
+      expect(store.getSnapshot()).toMatchObject({
+        selectedTaskId: "task_02",
+        focusedPane: "transcript",
+        followingActiveTask: false,
+      })
+
+      now = 3_500
+      await act(async () => {
+        store.tick()
+        await Promise.resolve()
+      })
+      await screen.renderOnce()
+
+      expect(transcript.scrollTop).toBe(0)
+      expect(store.getSnapshot()).toMatchObject({
+        selectedTaskId: "task_02",
+        focusedPane: "transcript",
+        followingActiveTask: false,
+      })
+      const frame = screen.captureCharFrame()
+      expect(frame).toContain("frontend · 00:02")
+      expect(frame).toContain("TRANSCRIPT · task_02 · INSPECTING HISTORY")
+    } finally {
       await destroy(screen)
     }
   })
@@ -95,6 +208,7 @@ describe("read-only progress cockpit", () => {
         expect(frame).toContain("TASKS 1/3")
         expect(frame).toContain("codex")
         expect(frame).toContain("gpt-5")
+        expect(frame).toContain("frontend · 00:00")
         expect(frame).toMatch(/frontend · \d{2}:\d{2}/)
         expect(frame).not.toContain("task_01")
         expect(frame).toMatch(/> [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s+task_02/)
@@ -820,6 +934,93 @@ describe("read-only progress cockpit", () => {
     }
   })
 
+  test("renders a persistent typed no-work summary with plain-text reason, counts, and exit guidance", async () => {
+    const store = startedStore([
+      task(1, "Completed one", [], "completed"),
+      task(2, "Completed two", [], "done"),
+      task(3, "Completed three", [], "finished"),
+    ])
+    store.consume({
+      type: "run_finished",
+      ok: true,
+      message: "No executable tasks: all tasks are already complete",
+      outcome: "no_work",
+      reason: "all_tasks_complete",
+    })
+    const screen = await testRender(<App store={store} onCancel={() => {}} onDismiss={() => {}} />, {
+      width: 80,
+      height: 24,
+      exitOnCtrlC: false,
+    })
+
+    try {
+      await screen.renderOnce()
+      await act(async () => { await Promise.resolve() })
+      await screen.renderOnce()
+      let frame = screen.captureCharFrame()
+      expect(frame).toContain("NO EXECUTABLE TASKS")
+      expect(frame).toContain("All tasks are already complete")
+      expect(frame).toContain("Tasks 3/3 complete")
+      expect(frame).toContain("Q")
+      expect(frame).toContain("CTRL+C")
+      assertNoControls(frame)
+
+      await pressEscape(screen)
+      expect(screen.captureCharFrame()).toContain("NO EXECUTABLE TASKS")
+
+      setRendererCapabilities(screen.renderer, { rgb: false, ansi256: false })
+      await screen.renderOnce()
+      frame = screen.captureCharFrame()
+      expect(frame).toContain("NO EXECUTABLE TASKS")
+      expect(frame).toContain("All tasks are already complete")
+      expect(frame).toContain("Tasks 3/3 complete")
+      expect(frame).toContain("CTRL+C")
+      assertNoControls(frame)
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+  test("signals and cancels exactly once from both no-work exit keys", async () => {
+    for (const key of ["q", "ctrl-c"] as const) {
+      const store = startedStore([task(1, "Completed", [], "completed")])
+      store.consume({
+        type: "run_finished",
+        ok: true,
+        message: "No executable tasks: all tasks are already complete",
+        outcome: "no_work",
+        reason: "all_tasks_complete",
+      })
+      let cancelled = 0
+      let exited = 0
+      const screen = await testRender(
+        <App
+          store={store}
+          onCancel={() => { cancelled += 1 }}
+          onDismiss={() => {}}
+          onExit={() => { exited += 1 }}
+        />,
+        { width: 80, height: 24, exitOnCtrlC: false },
+      )
+
+      try {
+        await screen.renderOnce()
+        await act(async () => { await Promise.resolve() })
+        await screen.renderOnce()
+        expect(screen.captureCharFrame()).toContain("NO EXECUTABLE TASKS")
+        await act(async () => {
+          if (key === "q") screen.mockInput.pressKey("q")
+          else screen.mockInput.pressCtrlC()
+          await Promise.resolve()
+        })
+        expect({ key, cancelled, exited }).toEqual({ key, cancelled: 1, exited: 1 })
+        expect(screen.renderer.isDestroyed).toBeFalse()
+      } finally {
+        await destroy(screen)
+      }
+    }
+  })
+
   test("dismisses a settled failure with Esc, q, or Ctrl+C without cancelling or destroying the renderer", async () => {
     for (const key of ["escape", "q", "ctrl-c"] as const) {
       const store = startedStore([task(1, "Failed task")])
@@ -1002,6 +1203,7 @@ describe("read-only progress cockpit", () => {
       expect(frame).toContain("SPEC FINDER · demo")
       expect(frame).toContain("task_01")
       expect(frame).toContain("✗ task_01")
+      expect(frame).toContain("frontend · unavailable")
       assertNoControls(frame)
       expect(responded).toBeFalse()
     } finally {
@@ -1014,6 +1216,7 @@ describe("read-only progress cockpit", () => {
       await reducedScreen.renderOnce()
       const frame = reducedScreen.captureCharFrame()
       expect(frame).toContain("✗ task_01")
+      expect(frame).toContain("frontend · unavailable")
       expect(frame).toContain("Visible failure reason")
       expect(reducedScreen.captureSpans().cols).toBe(80)
       assertNoControls(frame)
@@ -1033,6 +1236,7 @@ describe("read-only progress cockpit", () => {
       expect(help).toContain("Shift+Tab")
       expect(help).toContain("PageUp / PageDown")
       expect(help).toContain("View only")
+      expect(help).toContain("observation, not an automatic stall verdict")
       assertNoControls(help)
 
       await press(screen, "?")
@@ -1077,16 +1281,35 @@ describe("cockpit session lifecycle", () => {
     expect(closeCalls).toBe(1)
   })
 
+  test("resolves the one-shot exit wait idempotently", async () => {
+    const session = createCockpitSessionController(() => undefined)
+    let exited = false
+    const waiting = session.waitForExit().then(() => { exited = true })
+
+    await Promise.resolve()
+    expect(exited).toBeFalse()
+    session.signalExit()
+    session.signalExit()
+    await waiting
+    expect(exited).toBeTrue()
+  })
+
   test("close releases a pending dismissal wait", async () => {
     const session = createCockpitSessionController(() => undefined)
     const waiting = session.waitForDismissal()
+    const exit = session.waitForExit()
     session.close()
     await expect(waiting).resolves.toBeUndefined()
+    await expect(exit).resolves.toBeUndefined()
   })
 })
 
-function startedStore(tasks: TaskFile[], config: SpecFinderConfig = DEFAULT_CONFIG): CockpitStore {
-  const store = new CockpitStore()
+function startedStore(
+  tasks: TaskFile[],
+  config: SpecFinderConfig = DEFAULT_CONFIG,
+  now?: () => number,
+): CockpitStore {
+  const store = new CockpitStore(now)
   store.consume({ type: "run_started", slug: "demo", config, tasks })
   return store
 }

@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Add Typed No-Work Engine Outcome
 type: backend
 complexity: medium

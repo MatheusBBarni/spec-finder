@@ -1,7 +1,8 @@
 import { access, mkdir, readFile } from "node:fs/promises"
 import { join, relative, sep } from "node:path"
 import type { SpecFinderConfig } from "./config.ts"
-import type { RunEventListener } from "./events.ts"
+import type { NoWorkReason, RunEventListener } from "./events.ts"
+export type { NoWorkReason } from "./events.ts"
 import { resolveWorkspaceRelativeReference } from "./paths.ts"
 import type { ProviderLaunch } from "./providers.ts"
 import { AcpProcessExitError, withAcpSession } from "./acp-client.ts"
@@ -53,6 +54,8 @@ export interface RunResult {
   completed: number
   failed: number
   blocked: number
+  outcome?: "no_work"
+  reason?: NoWorkReason
 }
 
 export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
@@ -96,6 +99,25 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
   }
   const ordered = executionOrder(packet.tasks)
   options.emit({ type: "run_started", slug: options.slug, config: options.config, tasks: packet.tasks })
+
+  if (ordered.length === 0 && !options.signal.aborted) {
+    const result = {
+      ok: true,
+      completed: 0,
+      failed: 0,
+      blocked: 0,
+      outcome: "no_work" as const,
+      reason: "all_tasks_complete" as const,
+    }
+    options.emit({
+      type: "run_finished",
+      ok: true,
+      message: "No executable tasks: all tasks are already complete",
+      outcome: result.outcome,
+      reason: result.reason,
+    })
+    return result
+  }
 
   const failedIds = new Set<string>()
   let completed = 0
