@@ -3,7 +3,7 @@
 ## Current State
 
 - Approved task plan written on 2026-08-08; all five tasks are pending.
-- External integration prerequisite: ordered-multiple tasks 03–05 must be integrated before implementation begins. Current dirty changes are not completion evidence.
+- External integration prerequisite is satisfied in the current ancestry: ordered-multiple tasks 03–05 are archived with their source changes integrated.
 
 ## Shared Decisions
 
@@ -13,10 +13,12 @@
 ## Shared Learnings
 
 - The repository gate is `rtk bun run verify`; the macOS release gate to create is `rtk bun run test:pty` using `/usr/bin/script` and `/usr/bin/expect`.
+- Ordered-multiple task 03–05 source integration is present in the current ancestry; the cockpit/session boundary is available for downstream command and review work without changing `src/events.ts`.
+- `CockpitSession` is the renderer-owned seam exposed by `src/ui/cockpit.tsx`: `close()` is idempotent, `waitForDismissal()` resolves on dismissal or close, and `App` receives cancellation and dismissal callbacks separately.
 
 ## Open Risks
 
-- The batch integration prerequisite is concurrently owned elsewhere; preserve its work and block rather than overwrite if it is not integrated.
+- Downstream tasks must continue to preserve the integrated batch/event surfaces; this task did not edit them.
 
 ## Handoffs
 
