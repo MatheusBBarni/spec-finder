@@ -20,32 +20,42 @@ export class SetupCancelledError extends Error {
   }
 }
 
-interface PickerOptions<T> {
+export interface SetupPickerOptions<T> {
   message: string
   items: SetupPickerItem<T>[]
   input: SetupPickerInput
   output: Writable
-  multiple: boolean
   initialSelected?: T[]
+  initialValue?: T
   required?: boolean
+  requiredMessage?: string
 }
 
-export async function setupMultiSelect<T>(options: Omit<PickerOptions<T>, "multiple">): Promise<T[]> {
+export async function setupMultiSelect<T>(options: SetupPickerOptions<T>): Promise<T[]> {
   return runSetupPicker({ ...options, multiple: true })
 }
 
-export async function setupSelect<T>(options: Omit<PickerOptions<T>, "multiple" | "initialSelected" | "required">): Promise<T> {
+export async function setupSelect<T>(options: SetupPickerOptions<T>): Promise<T> {
   const selected = await runSetupPicker({ ...options, multiple: false })
   return selected[0]!
 }
 
-async function runSetupPicker<T>(options: PickerOptions<T>): Promise<T[]> {
+interface InternalPickerOptions<T> extends SetupPickerOptions<T> {
+  multiple: boolean
+}
+
+async function runSetupPicker<T>(options: InternalPickerOptions<T>): Promise<T[]> {
   if (options.items.length === 0) throw new Error("setup picker requires at least one option")
 
   return new Promise<T[]>((resolve, reject) => {
-    let cursor = 0
+    const initialIndex = options.initialValue === undefined
+      ? 0
+      : Math.max(0, options.items.findIndex((item) => Object.is(item.value, options.initialValue)))
+    let cursor = initialIndex
     let validationError = false
     let renderedLines = 0
+    let singleSelected = options.initialValue !== undefined
+      && options.items.some((item) => Object.is(item.value, options.initialValue))
     const selected = new Set(options.initialSelected ?? [])
     const wasRaw = options.input.isRaw === true
     const wasFlowing = options.input.readableFlowing === true
@@ -66,13 +76,13 @@ async function runSetupPicker<T>(options: PickerOptions<T>): Promise<T[]> {
         lines.push("│")
         options.items.forEach((item, index) => {
           const focused = index === cursor
-          const checked = options.multiple ? selected.has(item.value) : focused
+          const checked = options.multiple ? selected.has(item.value) : singleSelected && focused
           const marker = checked ? "●" : "○"
           const prefix = focused ? "❯" : " "
           const hint = item.hint ? `  ${item.hint}` : ""
           lines.push(`│ ${prefix} ${marker} ${item.label}${hint}`)
         })
-        if (validationError) lines.push("│  Select at least one provider before continuing")
+        if (validationError) lines.push(`│  ${options.requiredMessage ?? "Select an option before continuing"}`)
         lines.push("└")
       } else if (state === "submitted") {
         const values = options.multiple
@@ -96,6 +106,11 @@ async function runSetupPicker<T>(options: PickerOptions<T>): Promise<T[]> {
     }
 
     const submit = (): void => {
+      if ((options.required ?? true) && !options.multiple && !singleSelected) {
+        validationError = true
+        render()
+        return
+      }
       if (options.multiple && options.required && selected.size === 0) {
         validationError = true
         render()
@@ -122,12 +137,14 @@ async function runSetupPicker<T>(options: PickerOptions<T>): Promise<T[]> {
     const onKeypress = (_input: string, key: Key): void => {
       if (key.name === "up" || key.name === "k") {
         cursor = (cursor - 1 + options.items.length) % options.items.length
+        if (!options.multiple) singleSelected = true
         validationError = false
         render()
         return
       }
       if (key.name === "down" || key.name === "j") {
         cursor = (cursor + 1) % options.items.length
+        if (!options.multiple) singleSelected = true
         validationError = false
         render()
         return
@@ -137,9 +154,9 @@ async function runSetupPicker<T>(options: PickerOptions<T>): Promise<T[]> {
           const value = options.items[cursor]!.value
           if (selected.has(value)) selected.delete(value)
           else selected.add(value)
+          validationError = false
+          render()
         }
-        validationError = false
-        render()
         return
       }
       if (key.name === "return" || key.name === "enter") {

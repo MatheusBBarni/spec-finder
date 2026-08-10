@@ -16,6 +16,7 @@
     "build": "bun build src/cli.tsx --target=bun --packages=external --outfile=dist/cli.js",
     "check": "tsc --noEmit",
     "test": "bun test",
+    "test:pty": "sh -c 'if [ \"$(uname -s)\" != \"Darwin\" ]; then echo \"test:pty requires macOS (Darwin)\" >&2; exit 1; fi; if [ ! -x /usr/bin/script ]; then echo \"test:pty requires executable /usr/bin/script\" >&2; exit 1; fi; if [ ! -x /usr/bin/expect ]; then echo \"test:pty requires executable /usr/bin/expect\" >&2; exit 1; fi; exec /usr/bin/expect tests/failure-review.pty.expect'",
     "verify": "bun run check && bun test && bun run build",
     "prepack": "bun run verify",
     "release:check": "bun run scripts/release/check.ts"

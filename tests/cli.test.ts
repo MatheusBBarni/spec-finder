@@ -22,6 +22,48 @@ async function captureHelp(): Promise<string> {
 }
 
 describe("CLI help", () => {
+  test("publishes the singular setup contract in help and README", async () => {
+    const help = await captureHelp()
+    const setupUsage = "spec-finder setup [--agent claude|codex|cursor|grok] [--model auto|CURATED] [--speed auto|normal|fast] [--local|--global] [--copy]"
+
+    for (const text of [help, README]) {
+      expect(text).toContain(setupUsage)
+      for (const phrase of [
+        "exactly one provider",
+        "--model",
+        "auto, normal, or fast",
+        "--local",
+        "--global",
+        "--copy",
+        "--symlink",
+        "gpt-5.6-luna",
+        "v3",
+        "requested model",
+        "requested speed",
+        ".agents/skills",
+        ".claude/skills",
+        "Grok Build",
+        "not migrated",
+      ]) {
+        expect(text).toContain(phrase)
+      }
+    }
+
+    expect(help).toContain("--symlink are rejected before any writes")
+    expect(README).toContain("--symlink` are rejected before any writes")
+    expect(README).toContain("historic installation scope is unknown")
+    expect(README).toContain("Runtime ACP feedback is authoritative")
+    expect(README).not.toContain("Space` to toggle providers")
+    expect(README).not.toContain("repeat `--agent`")
+    expect(README).not.toContain("--agent codex --agent cursor")
+    expect(README).not.toContain("canonical provider")
+    expect(README).not.toContain("seven bundled")
+    expect(README).not.toContain("those seven")
+    expect(README).not.toContain("[--copy|--symlink]")
+    expect(README).not.toContain("| Cursor | `.cursor/skills` | `~/.cursor/skills` |")
+    expect(help).not.toContain("[--agent claude|codex|cursor|grok]...")
+  })
+
   test("keeps the single-slug usage and exposes the opt-in batch grammar", async () => {
     const help = await captureHelp()
 
@@ -53,7 +95,7 @@ describe("CLI help", () => {
 
     expect(help).toContain('spec-finder exec "<prompt>"')
     expect(help).toContain("exactly one non-empty positional prompt")
-    expect(help).toContain("--provider is one of claude, codex, or cursor")
+    expect(help).toContain("--provider is one of claude, codex, cursor, or grok")
     expect(help).toContain("--model is non-empty")
     expect(help).toContain("--reasoning is auto|low|medium|high|xhigh|max|ultra")
     expect(help).toContain("--speed is auto|normal|fast")

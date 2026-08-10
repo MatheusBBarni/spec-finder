@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, realpath, rm, symlink } from "node:fs/promises"
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, relative } from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
-import { assertInsideWorkspace, findExecWorkspace } from "../src/paths.ts"
+import { assertInsideWorkspace, findExecWorkspace, resolveWorkspaceRelativeReference } from "../src/paths.ts"
 
 const roots: string[] = []
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))))
@@ -51,5 +51,36 @@ describe("workspace paths", () => {
     await mkdir(nested, { recursive: true })
 
     expect(await findExecWorkspace(nested)).toBe(await realpath(nested))
+  })
+
+  test("returns a slash-normalized relative reference for an internal artifact", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-paths-"))
+    roots.push(root)
+    const report = join(root, ".spec-finder", "tasks", "demo", "reports", "task_01.md")
+    await mkdir(join(root, ".spec-finder", "tasks", "demo", "reports"), { recursive: true })
+    await writeFile(report, "report\n")
+
+    expect(await resolveWorkspaceRelativeReference(root, report))
+      .toBe(".spec-finder/tasks/demo/reports/task_01.md")
+  })
+
+  test("omits empty, traversal, absolute, control-containing, and external-symlink references", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-paths-"))
+    const external = await mkdtemp(join(tmpdir(), "spec-finder-paths-external-"))
+    roots.push(root, external)
+    const outside = join(external, "report.md")
+    await writeFile(outside, "report\n")
+    const insideLink = join(root, "report-link.md")
+    await symlink(outside, insideLink)
+    const control = join(root, "report\n.md")
+    await writeFile(control, "report\n")
+
+    expect(await resolveWorkspaceRelativeReference(root, "")).toBeUndefined()
+    expect(await resolveWorkspaceRelativeReference(root, relative(root, outside))).toBeUndefined()
+    expect(await resolveWorkspaceRelativeReference(root, outside)).toBeUndefined()
+    expect(await resolveWorkspaceRelativeReference(root, "C:\\outside\\report.md")).toBeUndefined()
+    expect(await resolveWorkspaceRelativeReference(root, "\\\\server\\share\\report.md")).toBeUndefined()
+    expect(await resolveWorkspaceRelativeReference(root, control)).toBeUndefined()
+    expect(await resolveWorkspaceRelativeReference(root, insideLink)).toBeUndefined()
   })
 })

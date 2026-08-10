@@ -52,6 +52,103 @@ describe("neutral ACP v1 turn core", () => {
     ])
   })
 
+  test("prefers an advertised API-key method over the cached Grok login", async () => {
+    const { root, lifecycleLog } = await fixtureContext()
+    const request = makeRequest(root, lifecycleLog, {
+      SPEC_FINDER_TEST_AUTH_METHODS: "cached_token,xai.api_key",
+      SPEC_FINDER_TEST_EXPECT_AUTH_METHOD: "xai.api_key",
+    }, {
+      authPreference: grokAuthPreference(["xai.api_key", "cached_token"]),
+    })
+
+    const result = await runAcpTurn(request)
+
+    expect(result.stopReason).toBe("end_turn")
+    expect(await lifecycleSteps(lifecycleLog)).toEqual([
+      "initialize",
+      "authenticate:xai.api_key",
+      "session/new",
+      "session/prompt",
+    ])
+  })
+
+  test("uses an advertised cached Grok login when API-key authentication is unavailable", async () => {
+    const { root, lifecycleLog } = await fixtureContext()
+    const request = makeRequest(root, lifecycleLog, {
+      SPEC_FINDER_TEST_AUTH_METHODS: "cached_token",
+      SPEC_FINDER_TEST_EXPECT_AUTH_METHOD: "cached_token",
+    }, {
+      authPreference: grokAuthPreference(["xai.api_key", "cached_token"]),
+    })
+
+    const result = await runAcpTurn(request)
+
+    expect(result.stopReason).toBe("end_turn")
+    expect(await lifecycleSteps(lifecycleLog)).toEqual([
+      "initialize",
+      "authenticate:cached_token",
+      "session/new",
+      "session/prompt",
+    ])
+  })
+
+  test("fails before session creation when no preferred Grok authentication method is advertised", async () => {
+    const { root, lifecycleLog } = await fixtureContext()
+    const request = makeRequest(root, lifecycleLog, {
+      SPEC_FINDER_TEST_AUTH_METHODS: "oauth",
+    }, {
+      authPreference: grokAuthPreference(["xai.api_key", "cached_token"]),
+    })
+
+    await expect(runAcpTurn(request)).rejects.toThrow("Run `grok login` or set XAI_API_KEY")
+    expect(await lifecycleSteps(lifecycleLog)).toEqual(["initialize"])
+  })
+
+  test("does not fall back after a selected Grok authentication attempt fails", async () => {
+    const { root, lifecycleLog } = await fixtureContext()
+    const events: import("../src/acp-turn.ts").AcpTurnEvent[] = []
+    const request = makeRequest(root, lifecycleLog, {
+      SPEC_FINDER_TEST_AUTH_METHODS: "xai.api_key,cached_token",
+      SPEC_FINDER_TEST_EXPECT_AUTH_METHOD: "xai.api_key",
+      SPEC_FINDER_TEST_FAIL_AUTHENTICATE: "1",
+    }, {
+      authPreference: grokAuthPreference(["xai.api_key", "cached_token"]),
+    }, { emit: (event) => events.push(event) })
+
+    const error = await runAcpTurn(request).catch((failure: unknown) => failure)
+
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toBe("ACP authentication failed for xai.api_key")
+    expect((error as import("../src/acp-turn.ts").AcpTurnError).cause).toBeUndefined()
+    expect(JSON.stringify(events)).not.toContain("untrusted authentication detail")
+    expect(await lifecycleSteps(lifecycleLog)).toEqual(["initialize", "authenticate:xai.api_key"])
+  })
+
+  test("emits one redacted activity while draining repeated provider diagnostics", async () => {
+    const { root, lifecycleLog } = await fixtureContext()
+    const events: import("../src/acp-turn.ts").AcpTurnEvent[] = []
+    const request = makeRequest(root, lifecycleLog, {}, {
+      stderrPolicy: "redact",
+    }, {
+      supervisor: chunkedStderrSupervisor([
+        "XAI_API_KEY=FIRST_SENTINEL",
+        "cached_token=SECOND_SENTINEL",
+        "third diagnostic",
+      ]),
+      emit: (event) => events.push(event),
+    })
+
+    const result = await runAcpTurn(request)
+    const diagnostics = events.filter((event) => event.type === "provider_stderr")
+
+    expect(result.stopReason).toBe("end_turn")
+    expect(diagnostics).toEqual([{
+      type: "provider_stderr",
+      text: "Provider emitted diagnostic output; details redacted.",
+    }])
+    expect(JSON.stringify(events)).not.toContain("SENTINEL")
+  })
+
   test("replaces complete config-option state after every response and update", async () => {
     const { root, lifecycleLog } = await fixtureContext()
     const initialOptions = [
@@ -275,6 +372,24 @@ function countingCleanupSupervisor(): ProcessSupervisor & { cancelCalls(): numbe
   }
 }
 
+function chunkedStderrSupervisor(chunks: readonly string[]): ProcessSupervisor {
+  const supervisor = createProcessSupervisor()
+  return {
+    async spawn(spec) {
+      const process = await supervisor.spawn(spec)
+      return {
+        ...process,
+        stderr: new ReadableStream<Uint8Array>({
+          start(controller) {
+            for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk))
+            controller.close()
+          },
+        }),
+      }
+    },
+  }
+}
+
 function fakeWorkspaceAccess(): WorkspaceAccess {
   return {
     readTextFile: async () => "fixture content",
@@ -288,6 +403,13 @@ function allowPermission(): PermissionBroker {
   return {
     request: async () => ({ decision: "allowed", optionId: "allow_once" }),
     cancelPending: async () => {},
+  }
+}
+
+function grokAuthPreference(methodIds: readonly string[]): import("../src/acp-turn.ts").AuthMethodPreference {
+  return {
+    methodIds,
+    unavailableMessage: "Grok authentication unavailable. Run `grok login` or set XAI_API_KEY, then rerun.",
   }
 }
 

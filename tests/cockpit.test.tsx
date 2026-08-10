@@ -6,31 +6,178 @@ import { testRender } from "@opentui/react/test-utils"
 import { act } from "react"
 import { DEFAULT_CONFIG, type SpecFinderConfig } from "../src/config.ts"
 import type { TaskFile, TaskStatus } from "../src/tasks.ts"
-import { App, taskElapsedText, type TaskTiming } from "../src/ui/App.tsx"
+import { App } from "../src/ui/App.tsx"
+import { createCockpitSessionController } from "../src/ui/cockpit.tsx"
 import { CockpitStore } from "../src/ui/store.ts"
+import { formatTaskTimer } from "../src/ui/timer.ts"
 
 type TestScreen = Awaited<ReturnType<typeof testRender>>
 
 describe("read-only progress cockpit", () => {
   test("renders honest timer placeholders and observed durations", () => {
+    let now = 1_000
     const store = startedStore([
       task(1, "Pending"),
-      task(2, "Blocked", [], "blocked"),
-      task(3, "Running", [], "in_progress"),
-      task(4, "Completed", [], "completed"),
-      task(5, "Observed complete", [], "completed"),
-    ])
-    const tasks = store.getSnapshot().tasks
-    const timings = new Map<string, TaskTiming>([
-      ["task_03", { startedAt: 1_000 }],
-      ["task_05", { startedAt: 1_000, elapsedMs: 2_500 }],
-    ])
+      task(2, "Blocked"),
+      task(3, "Running"),
+      task(4, "Completed without observation"),
+      task(5, "Observed complete"),
+    ], DEFAULT_CONFIG, () => now)
+    store.consume({ type: "task_status", taskId: "task_02", status: "blocked" })
+    store.consume({ type: "task_status", taskId: "task_03", status: "in_progress" })
+    store.consume({ type: "task_status", taskId: "task_04", status: "completed" })
+    store.consume({ type: "task_status", taskId: "task_05", status: "in_progress" })
+    now = 3_500
+    store.tick()
+    store.consume({ type: "task_status", taskId: "task_05", status: "completed" })
 
-    expect(taskElapsedText(tasks[0]!, timings, 5_000)).toBe("—")
-    expect(taskElapsedText(tasks[1]!, timings, 5_000)).toBe("—")
-    expect(taskElapsedText(tasks[2]!, timings, 3_500)).toBe("00:02")
-    expect(taskElapsedText(tasks[3]!, timings, 5_000)).toBe("unavailable")
-    expect(taskElapsedText(tasks[4]!, timings, 5_000)).toBe("00:02")
+    const snapshot = store.getSnapshot()
+    const timer = (taskId: string) => {
+      const task = snapshot.tasks.find((candidate) => candidate.id === taskId)
+      if (!task) throw new Error(`missing task ${taskId}`)
+      return formatTaskTimer(task.status, snapshot.taskTimers[taskId])
+    }
+    expect(timer("task_01")).toBe("—")
+    expect(timer("task_02")).toBe("—")
+    expect(timer("task_03")).toBe("00:02")
+    expect(timer("task_04")).toBe("unavailable")
+    expect(timer("task_05")).toBe("00:02")
+  })
+
+  test("renders frozen final values beside pending and blocked placeholders", async () => {
+    let now = 1_000
+    const store = startedStore([
+      task(1, "Observed complete"),
+      task(2, "Observed failure"),
+      task(3, "Still pending"),
+      task(4, "Dependency blocked"),
+    ], DEFAULT_CONFIG, () => now)
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    store.consume({ type: "task_status", taskId: "task_02", status: "in_progress" })
+    store.consume({ type: "task_status", taskId: "task_04", status: "blocked" })
+    now = 3_500
+    store.tick()
+    store.consume({ type: "task_status", taskId: "task_01", status: "completed" })
+    store.consume({ type: "task_status", taskId: "task_02", status: "failed" })
+
+    const screen = await render(store, 120, 40)
+    try {
+      const frame = screen.captureCharFrame()
+      expect(frame).toContain("✓ task_01")
+      expect(frame).toContain("✗ task_02")
+      expect(frame).toContain("frontend · 00:02")
+      expect(frame).toContain("frontend · —")
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+  test("advances the active timer without changing another live renderer request", async () => {
+    const store = startedStore([task(1, "Timed task")])
+    const screen = await render(store, 80, 24)
+    screen.renderer.requestLive()
+
+    try {
+      await mutate(screen, () => {
+        store.consume({ type: "task_status", taskId: "task_01", status: "pending" })
+      })
+      expect(screen.renderer.liveRequestCount).toBe(1)
+
+      await mutate(screen, () => {
+        store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+      })
+      expect(screen.renderer.liveRequestCount).toBe(2)
+      expect(screen.captureCharFrame()).toContain("frontend · 00:00")
+
+      await act(async () => {
+        await Bun.sleep(1_100)
+      })
+      const frame = await screen.waitForFrame((value) => value.includes("frontend · 00:01"))
+      expect(frame).toContain("frontend · 00:01")
+
+      await mutate(screen, () => {
+        store.consume({ type: "task_status", taskId: "task_01", status: "completed" })
+      })
+      expect(screen.renderer.liveRequestCount).toBe(1)
+    } finally {
+      screen.renderer.dropLive()
+      await destroy(screen)
+    }
+  })
+
+  test("drops its live request and stops timer updates when the renderer unmounts", async () => {
+    let now = 1_000
+    const store = startedStore([task(1, "Timed task")], DEFAULT_CONFIG, () => now)
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    const screen = await render(store, 80, 24)
+
+    try {
+      expect(screen.renderer.liveRequestCount).toBe(1)
+      now = 2_500
+      await act(async () => {
+        await Bun.sleep(180)
+      })
+      await screen.renderOnce()
+      const running = store.getSnapshot().taskTimers.task_01
+      expect(running?.kind).toBe("running")
+      if (running?.kind !== "running") throw new Error("expected a running timer")
+      expect(running.elapsedSeconds).toBe(1)
+    } finally {
+      await destroy(screen)
+    }
+
+    expect(screen.renderer.liveRequestCount).toBe(0)
+    const afterUnmount = store.getSnapshot().taskTimers.task_01
+    now = 5_500
+    await act(async () => {
+      await Bun.sleep(180)
+    })
+    expect(store.getSnapshot().taskTimers.task_01).toBe(afterUnmount)
+  })
+
+  test("keeps selection, focus, follow mode, and transcript scroll stable during timer ticks", async () => {
+    let now = 1_000
+    const store = startedStore([
+      task(1, "Active task"),
+      task(2, "Inspected task"),
+    ], DEFAULT_CONFIG, () => now)
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    for (let index = 0; index < 120; index += 1) {
+      store.consume({ type: "activity", taskId: "task_02", message: `INSPECTED-LINE-${index}` })
+    }
+    const screen = await render(store, 120, 40)
+
+    try {
+      await press(screen, KeyCodes.ARROW_DOWN)
+      await pressTab(screen)
+      const transcript = renderable<ScrollBoxRenderable>(screen, "transcript-scroll")
+      await press(screen, KeyCodes.HOME)
+      expect(transcript.scrollTop).toBe(0)
+      expect(store.getSnapshot()).toMatchObject({
+        selectedTaskId: "task_02",
+        focusedPane: "transcript",
+        followingActiveTask: false,
+      })
+
+      now = 3_500
+      await act(async () => {
+        store.tick()
+        await Promise.resolve()
+      })
+      await screen.renderOnce()
+
+      expect(transcript.scrollTop).toBe(0)
+      expect(store.getSnapshot()).toMatchObject({
+        selectedTaskId: "task_02",
+        focusedPane: "transcript",
+        followingActiveTask: false,
+      })
+      const frame = screen.captureCharFrame()
+      expect(frame).toContain("frontend · 00:02")
+      expect(frame).toContain("TRANSCRIPT · task_02 · INSPECTING HISTORY")
+    } finally {
+      await destroy(screen)
+    }
   })
 
   test("renders orientation, truthful option outcomes, task semantics, and selected history at required sizes", async () => {
@@ -61,6 +208,7 @@ describe("read-only progress cockpit", () => {
         expect(frame).toContain("TASKS 1/3")
         expect(frame).toContain("codex")
         expect(frame).toContain("gpt-5")
+        expect(frame).toContain("frontend · 00:00")
         expect(frame).toMatch(/frontend · \d{2}:\d{2}/)
         expect(frame).not.toContain("task_01")
         expect(frame).toMatch(/> [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s+task_02/)
@@ -94,6 +242,53 @@ describe("read-only progress cockpit", () => {
       expect(frame).not.toContain("PACKET 1")
       expect(frame).toContain("TRANSCRIPT · task_01 · FOLLOWING ACTIVE")
       expect(frame).toContain("ACTIVE-BETA-TRANSCRIPT")
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+  test("keeps the active packet timer live while browsing an inactive packet", async () => {
+    let now = 1_000
+    const store = new CockpitStore(() => now)
+    const alphaTasks = [task(1, "Alpha history", [], "completed")]
+    const betaTasks = [task(1, "Beta task")]
+    store.consume({
+      type: "batch_started",
+      slugs: ["alpha", "beta"],
+      total: 2,
+      config: DEFAULT_CONFIG,
+      packets: [
+        { slug: "alpha", index: 0, outcome: "succeeded", tasks: alphaTasks },
+        { slug: "beta", index: 1, outcome: "not_started", tasks: betaTasks },
+      ],
+    })
+    store.consume({
+      type: "batch_packet_started",
+      slug: "beta",
+      index: 1,
+      total: 2,
+      config: DEFAULT_CONFIG,
+      tasks: betaTasks,
+    })
+    store.consume({ type: "task_status", taskId: "beta/task_01", status: "in_progress" })
+
+    const screen = await render(store, 120, 40)
+    try {
+      expect(screen.captureCharFrame()).toContain("● 2 beta RUNNING")
+      expect(screen.renderer.liveRequestCount).toBe(1)
+
+      await press(screen, KeyCodes.ARROW_LEFT)
+      expect(screen.captureCharFrame()).toContain("SPEC FINDER · alpha · ACP COCKPIT")
+      expect(screen.renderer.liveRequestCount).toBe(1)
+
+      now = 2_500
+      await act(async () => {
+        await Bun.sleep(180)
+      })
+      expect(store.getSnapshot().taskTimers.task_01).toMatchObject({ elapsedSeconds: 1 })
+
+      await press(screen, KeyCodes.ARROW_RIGHT)
+      expect(screen.captureCharFrame()).toContain("frontend · 00:01")
     } finally {
       await destroy(screen)
     }
@@ -158,7 +353,7 @@ describe("read-only progress cockpit", () => {
     }
   })
 
-  test("makes an exhausted task retry and manual packet recovery explicit", async () => {
+  test("shows the failed packet diagnostic and approved recovery guidance", async () => {
     const store = startedBatchStore(["alpha", "beta", "gamma"], 0, [task(1, "Alpha task")])
     store.consume({ type: "batch_packet_finished", slug: "alpha", index: 0, outcome: "succeeded", detail: "completed" })
     store.consume({ type: "batch_packet_started", slug: "beta", index: 1, total: 3, tasks: [task(1, "Beta task")] })
@@ -185,15 +380,9 @@ describe("read-only progress cockpit", () => {
       expect(summary).toContain("failed")
       expect(summary).toContain("STOPPING PACKET: beta")
       expect(summary).toContain("gamma not_started")
-      expect(summary).toContain("task retry exhausted")
-      expect(summary).toContain("no automatic packet retry")
-      expect(summary).toContain("rerun manually")
-
-      await pressEscape(screen)
-      const live = screen.captureCharFrame()
-      expect(live).toContain("✗ 2 beta FAILED")
-      expect(live).toContain("TRANSCRIPT · task_01 · INSPECTING HISTORY")
-      expect(live).toContain("Beta provider failed")
+      expect(summary).toContain("TASK: beta/task_01")
+      expect(summary).toContain("Beta provider failed")
+      expect(summary).toContain("Resolve the listed error, then rerun the task packet.")
     } finally {
       await destroy(screen)
     }
@@ -216,7 +405,7 @@ describe("read-only progress cockpit", () => {
       ],
     })
 
-    const screen = await testRender(<App store={store} onCancel={() => {}} />, { width: 70, height: 20 })
+    const screen = await testRender(<App store={store} onCancel={() => {}} onDismiss={() => {}} />, { width: 70, height: 20, exitOnCtrlC: false })
     try {
       setRendererCapabilities(screen.renderer, { rgb: false, ansi256: false })
       await screen.renderOnce()
@@ -238,10 +427,11 @@ describe("read-only progress cockpit", () => {
     const slugs = Array.from({ length: 30 }, (_, index) => `packet-${String(index + 1).padStart(2, "0")}`)
     const activeIndex = 15
     const activeSlug = slugs[activeIndex]!
+    const reportReference = ".spec-finder/tasks/demo/reports/task_01.md"
     const store = startedBatchStore(slugs, activeIndex, [task(1, "Inspectable final task")])
     store.consume({ type: "task_status", taskId: `${activeSlug}/task_01`, status: "in_progress" })
     store.consume({ type: "activity", taskId: `${activeSlug}/task_01`, message: "RETAINED-FINAL-TRANSCRIPT" })
-    store.consume({ type: "task_status", taskId: `${activeSlug}/task_01`, status: "completed" })
+    store.consume({ type: "task_status", taskId: `${activeSlug}/task_01`, status: "completed", reportReference })
 
     const screen = await render(store, 80, 24)
     try {
@@ -274,6 +464,8 @@ describe("read-only progress cockpit", () => {
       frame = screen.captureCharFrame()
       expect(frame).toContain("RUN.STATUS · BATCH SEQUENCE")
       expect(frame).toContain("[ESC] BACK")
+      expect(frame).not.toContain("Report:")
+      expect(frame).not.toContain(reportReference)
       const batchScroll = renderable<ScrollBoxRenderable>(screen, "batch-run-scroll")
       expect(batchScroll.scrollHeight).toBeGreaterThan(8)
 
@@ -355,6 +547,136 @@ describe("read-only progress cockpit", () => {
       expect(frame).toContain("task_02")
     } finally {
       await destroy(reopenedScreen)
+    }
+  })
+
+  test("renders a text-labelled report outcome and safe reference in live and terminal frames", async () => {
+    const reference = ".spec-finder/tasks/demo/reports/task_01.md"
+    const maliciousPrompt = "Final report prompt: /Users/alice/spec-finder/report.md\u001b[31m"
+    const store = startedStore([task(1, "Report outcome")])
+    store.consume({
+      type: "activity",
+      taskId: "task_01",
+      message: "final report handoff starting in active ACP session",
+    })
+    store.consume({
+      type: "session_update",
+      taskId: "task_01",
+      sessionId: "test-session",
+      phase: "report",
+      update: {
+        sessionUpdate: "session_info_update",
+        title: maliciousPrompt,
+        _meta: { prompt: maliciousPrompt, reportPath: "/Users/alice/spec-finder/report.md", verdict: "blocked" },
+      } as unknown as SessionUpdate,
+    })
+    store.consume({ type: "task_status", taskId: "task_01", status: "completed", reportReference: reference })
+
+    const screen = await render(store, 120, 40)
+    try {
+      let frame = screen.captureCharFrame()
+      expect(frame).toContain("final report handoff starting")
+      expect(frame).toContain("Task completed")
+      expect(frame).toContain(`Report: ${reference}`)
+      expect(frame).not.toContain(maliciousPrompt)
+      expect(frame).not.toContain("/Users/alice/spec-finder")
+      expect(frame).not.toContain("blocked")
+      expect(frame).not.toContain("reference unavailable")
+
+      await mutate(screen, () => {
+        store.consume({ type: "run_finished", ok: true, message: "1 task completed" })
+      })
+      frame = screen.captureCharFrame()
+      expect(frame).toContain("RUN.REPORTS")
+      expect(frame).toContain(`Report: ${reference}`)
+      expect(frame).toContain("All Tasks Complete: 1/1 succeeded")
+      expect(frame).not.toContain(maliciousPrompt)
+      expect(frame).not.toContain("/Users/alice/spec-finder")
+      expect(frame).not.toContain("reference unavailable")
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+  test("renders completion without an unavailable-report placeholder", async () => {
+    const store = startedStore([task(1, "Completion without shortcut")])
+    store.consume({ type: "activity", taskId: "task_01", message: "final report handoff starting" })
+    store.consume({ type: "task_status", taskId: "task_01", status: "completed" })
+
+    const screen = await render(store, 120, 40)
+    try {
+      let frame = screen.captureCharFrame()
+      expect(frame).toContain("Task completed")
+      expect(frame).not.toContain("Report:")
+      expect(frame).not.toContain("reference unavailable")
+
+      await mutate(screen, () => {
+        store.consume({ type: "run_finished", ok: true, message: "1 task completed" })
+      })
+      frame = screen.captureCharFrame()
+      expect(frame).toContain("All Tasks Complete: 1/1 succeeded")
+      expect(frame).not.toContain("RUN.REPORTS")
+      expect(frame).not.toContain("Report:")
+      expect(frame).not.toContain("reference unavailable")
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+  test("renders report failure as a labelled recovery outcome without provider blocked metadata", async () => {
+    const store = startedStore([task(1, "Report failure")])
+    store.consume({
+      type: "session_update",
+      taskId: "task_01",
+      sessionId: "test-session",
+      phase: "report",
+      update: {
+        sessionUpdate: "session_info_update",
+        title: "provider says blocked /Users/alice/spec-finder/report.md",
+        _meta: { verdict: "blocked", path: "/Users/alice/spec-finder/report.md" },
+      } as unknown as SessionUpdate,
+    })
+    store.consume({ type: "task_status", taskId: "task_01", status: "failed" })
+    store.consume({
+      type: "activity",
+      taskId: "task_01",
+      message: "final report failed: report provider stopped; rerun the report phase",
+    })
+
+    const screen = await render(store, 120, 40)
+    try {
+      const frame = screen.captureCharFrame()
+      expect(frame).toContain("Task failed")
+      expect(frame).toContain("final report failed")
+      expect(frame).toContain("rerun the report phase")
+      expect(frame).not.toContain("Task completed")
+      expect(frame).not.toContain("Report:")
+      expect(frame).not.toContain("blocked")
+      expect(frame).not.toContain("/Users/alice/spec-finder")
+      expect(frame).not.toContain("reference unavailable")
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+  test("keeps report labels readable in reduced-color frames", async () => {
+    const reference = ".spec-finder/tasks/demo/reports/task_01.md"
+    const store = startedStore([task(1, "Reduced-color report")])
+    store.consume({ type: "activity", taskId: "task_01", message: "final report handoff starting" })
+    store.consume({ type: "task_status", taskId: "task_01", status: "completed", reportReference: reference })
+    const screen = await testRender(<App store={store} onCancel={() => {}} onDismiss={() => {}} />, { width: 80, height: 24, exitOnCtrlC: false })
+
+    try {
+      setRendererCapabilities(screen.renderer, { rgb: false, ansi256: false })
+      await screen.renderOnce()
+      const frame = screen.captureCharFrame()
+      expect(frame).toContain("Task completed")
+      expect(frame).toContain("Report: .spec-finder/tasks/demo/reports/")
+      expect(frame).toContain("task_01.md")
+      expect(screen.captureSpans().cols).toBe(80)
+      assertNoControls(frame)
+    } finally {
+      await destroy(screen)
     }
   })
 
@@ -574,13 +896,16 @@ describe("read-only progress cockpit", () => {
       taskId: "task_01",
       message: "final report handoff blocked: ACP turn aborted; rerun retries the report without rerunning implementation",
     })
+    store.consume({ type: "run_finished", ok: false, message: "0 failed · 1 blocked" })
     const screen = await render(store, 120, 40)
 
     try {
       const frame = screen.captureCharFrame()
-      expect(frame).toContain("! task_01")
+      expect(frame).toContain("RUN.FAILURES")
+      expect(frame).toContain("BLOCKED task_01")
       expect(frame).toContain("final report handoff blocked")
       expect(frame).toContain("rerun retries the report")
+      expect(frame).not.toContain("No surfaced task error was provided.")
       expect(frame).not.toContain("Task failed; see latest activity")
     } finally {
       await destroy(screen)
@@ -652,12 +977,165 @@ describe("read-only progress cockpit", () => {
       expect(summary).toContain("RUN.FAILURES")
       expect(summary).toContain("FAIL task_01")
       expect(summary).toContain("Provider connection failed")
-      expect(summary).toContain("[ESC] BACK")
-
-      await pressEscape(screen)
-      expect(screen.captureCharFrame()).toContain("TRANSCRIPT · task_01")
+      expect(summary).toContain("DISMISS")
+      expect(summary).toContain("Resolve the listed error, then rerun the task packet.")
     } finally {
       await destroy(screen)
+    }
+  })
+
+  test("renders a persistent typed no-work summary with plain-text reason, counts, and exit guidance", async () => {
+    const store = startedStore([
+      task(1, "Completed one", [], "completed"),
+      task(2, "Completed two", [], "done"),
+      task(3, "Completed three", [], "finished"),
+    ])
+    store.consume({
+      type: "run_finished",
+      ok: true,
+      message: "No executable tasks: all tasks are already complete",
+      outcome: "no_work",
+      reason: "all_tasks_complete",
+    })
+    const screen = await testRender(<App store={store} onCancel={() => {}} onDismiss={() => {}} />, {
+      width: 80,
+      height: 24,
+      exitOnCtrlC: false,
+    })
+
+    try {
+      await screen.renderOnce()
+      await act(async () => { await Promise.resolve() })
+      await screen.renderOnce()
+      let frame = screen.captureCharFrame()
+      expect(frame).toContain("NO EXECUTABLE TASKS")
+      expect(frame).toContain("All tasks are already complete")
+      expect(frame).toContain("Tasks 3/3 complete")
+      expect(frame).toContain("Q")
+      expect(frame).toContain("CTRL+C")
+      assertNoControls(frame)
+
+      await pressEscape(screen)
+      expect(screen.captureCharFrame()).toContain("NO EXECUTABLE TASKS")
+
+      setRendererCapabilities(screen.renderer, { rgb: false, ansi256: false })
+      await screen.renderOnce()
+      frame = screen.captureCharFrame()
+      expect(frame).toContain("NO EXECUTABLE TASKS")
+      expect(frame).toContain("All tasks are already complete")
+      expect(frame).toContain("Tasks 3/3 complete")
+      expect(frame).toContain("CTRL+C")
+      assertNoControls(frame)
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+  test("signals and cancels exactly once from both no-work exit keys", async () => {
+    for (const key of ["q", "ctrl-c"] as const) {
+      const store = startedStore([task(1, "Completed", [], "completed")])
+      store.consume({
+        type: "run_finished",
+        ok: true,
+        message: "No executable tasks: all tasks are already complete",
+        outcome: "no_work",
+        reason: "all_tasks_complete",
+      })
+      let cancelled = 0
+      let exited = 0
+      const screen = await testRender(
+        <App
+          store={store}
+          onCancel={() => { cancelled += 1 }}
+          onDismiss={() => {}}
+          onExit={() => { exited += 1 }}
+        />,
+        { width: 80, height: 24, exitOnCtrlC: false },
+      )
+
+      try {
+        await screen.renderOnce()
+        await act(async () => { await Promise.resolve() })
+        await screen.renderOnce()
+        expect(screen.captureCharFrame()).toContain("NO EXECUTABLE TASKS")
+        await act(async () => {
+          if (key === "q") screen.mockInput.pressKey("q")
+          else screen.mockInput.pressCtrlC()
+          await Promise.resolve()
+        })
+        expect({ key, cancelled, exited }).toEqual({ key, cancelled: 1, exited: 1 })
+        expect(screen.renderer.isDestroyed).toBeFalse()
+      } finally {
+        await destroy(screen)
+      }
+    }
+  })
+
+  test("dismisses a settled failure with Esc, q, or Ctrl+C without cancelling or destroying the renderer", async () => {
+    for (const key of ["escape", "q", "ctrl-c"] as const) {
+      const store = startedStore([task(1, "Failed task")])
+      store.consume({ type: "task_status", taskId: "task_01", status: "failed" })
+      store.consume({ type: "activity", taskId: "task_01", message: "Failure detail" })
+      store.consume({ type: "run_finished", ok: false, message: "1 failed" })
+      let cancelled = 0
+      let dismissed = 0
+      const screen = await testRender(
+        <App
+          store={store}
+          onCancel={() => { cancelled += 1 }}
+          onDismiss={() => { dismissed += 1 }}
+        />,
+        { width: 80, height: 24, exitOnCtrlC: false },
+      )
+      await screen.renderOnce()
+      await act(async () => { await Promise.resolve() })
+      await screen.renderOnce()
+      expect(screen.captureCharFrame()).toContain("RUN.FAILURES")
+
+      await act(async () => {
+        if (key === "escape") screen.mockInput.pressEscape()
+        else if (key === "q") screen.mockInput.pressKey("q")
+        else screen.mockInput.pressCtrlC()
+        if (key === "escape") await Bun.sleep(100)
+        else await Promise.resolve()
+      })
+
+      expect({ key, dismissed }).toEqual({ key, dismissed: 1 })
+      expect(cancelled).toBe(0)
+      expect(screen.renderer.isDestroyed).toBeFalse()
+      await destroy(screen)
+    }
+  })
+
+  test("keeps complete multiline failure details scrollable and makes missing details explicit", async () => {
+    const store = startedStore([task(1, "Long failure")])
+    store.consume({ type: "task_status", taskId: "task_01", status: "failed" })
+    store.consume({
+      type: "activity",
+      taskId: "task_01",
+      message: Array.from({ length: 30 }, (_, index) => `DIAGNOSTIC-${String(index).padStart(2, "0")} complete detail`).join("\n"),
+    })
+    store.consume({ type: "run_finished", ok: false, message: "1 failed" })
+    const screen = await render(store, 80, 24)
+    try {
+      const detailScroll = renderable<ScrollBoxRenderable>(screen, "failure-detail-scroll")
+      expect(detailScroll.scrollHeight).toBeGreaterThan(detailScroll.height)
+      expect(screen.captureCharFrame()).toContain("DIAGNOSTIC-00 complete detail")
+      await press(screen, KeyCodes.END)
+      expect(screen.captureCharFrame()).toContain("DIAGNOSTIC-29 complete detail")
+      expect(screen.captureCharFrame()).toContain("Resolve the listed error, then rerun the task packet.")
+    } finally {
+      await destroy(screen)
+    }
+
+    const missingStore = startedStore([task(1, "Missing detail")])
+    missingStore.consume({ type: "task_status", taskId: "task_01", status: "failed" })
+    missingStore.consume({ type: "run_finished", ok: false, message: "1 failed" })
+    const missingScreen = await render(missingStore, 80, 24)
+    try {
+      expect(missingScreen.captureCharFrame()).toContain("No surfaced task error was provided.")
+    } finally {
+      await destroy(missingScreen)
     }
   })
 
@@ -775,18 +1253,20 @@ describe("read-only progress cockpit", () => {
       expect(frame).toContain("SPEC FINDER · demo")
       expect(frame).toContain("task_01")
       expect(frame).toContain("✗ task_01")
+      expect(frame).toContain("frontend · unavailable")
       assertNoControls(frame)
       expect(responded).toBeFalse()
     } finally {
       await destroy(compactScreen)
     }
 
-    const reducedScreen = await testRender(<App store={store} onCancel={() => {}} />, { width: 80, height: 24 })
+    const reducedScreen = await testRender(<App store={store} onCancel={() => {}} onDismiss={() => {}} />, { width: 80, height: 24, exitOnCtrlC: false })
     try {
       setRendererCapabilities(reducedScreen.renderer, { rgb: false, ansi256: false })
       await reducedScreen.renderOnce()
       const frame = reducedScreen.captureCharFrame()
       expect(frame).toContain("✗ task_01")
+      expect(frame).toContain("frontend · unavailable")
       expect(frame).toContain("Visible failure reason")
       expect(reducedScreen.captureSpans().cols).toBe(80)
       assertNoControls(frame)
@@ -806,6 +1286,7 @@ describe("read-only progress cockpit", () => {
       expect(help).toContain("Shift+Tab")
       expect(help).toContain("PageUp / PageDown")
       expect(help).toContain("View only")
+      expect(help).toContain("observation, not an automatic stall verdict")
       assertNoControls(help)
 
       await press(screen, "?")
@@ -817,7 +1298,7 @@ describe("read-only progress cockpit", () => {
 
     for (const key of ["q", "ctrl-c"] as const) {
       let cancelled = 0
-      const exitScreen = await testRender(<App store={store} onCancel={() => { cancelled += 1 }} />, { width: 80, height: 24 })
+      const exitScreen = await testRender(<App store={store} onCancel={() => { cancelled += 1 }} onDismiss={() => {}} />, { width: 80, height: 24, exitOnCtrlC: false })
       await exitScreen.renderOnce()
       await act(async () => {
         if (key === "q") exitScreen.mockInput.pressKey("q")
@@ -825,13 +1306,60 @@ describe("read-only progress cockpit", () => {
         await Promise.resolve()
       })
       expect(cancelled).toBe(1)
-      expect(exitScreen.renderer.isDestroyed).toBeTrue()
+      expect(exitScreen.renderer.isDestroyed).toBeFalse()
+      await destroy(exitScreen)
     }
   })
 })
 
-function startedStore(tasks: TaskFile[], config: SpecFinderConfig = DEFAULT_CONFIG): CockpitStore {
-  const store = new CockpitStore()
+describe("cockpit session lifecycle", () => {
+  test("resolves dismissal and closes the renderer idempotently", async () => {
+    let closeCalls = 0
+    const session = createCockpitSessionController(() => { closeCalls += 1 })
+    let dismissed = false
+    const waiting = session.waitForDismissal().then(() => { dismissed = true })
+
+    await Promise.resolve()
+    expect(dismissed).toBeFalse()
+    session.dismiss()
+    session.dismiss()
+    await waiting
+    expect(dismissed).toBeTrue()
+
+    session.close()
+    session.close()
+    expect(closeCalls).toBe(1)
+  })
+
+  test("resolves the one-shot exit wait idempotently", async () => {
+    const session = createCockpitSessionController(() => undefined)
+    let exited = false
+    const waiting = session.waitForExit().then(() => { exited = true })
+
+    await Promise.resolve()
+    expect(exited).toBeFalse()
+    session.signalExit()
+    session.signalExit()
+    await waiting
+    expect(exited).toBeTrue()
+  })
+
+  test("close releases a pending dismissal wait", async () => {
+    const session = createCockpitSessionController(() => undefined)
+    const waiting = session.waitForDismissal()
+    const exit = session.waitForExit()
+    session.close()
+    await expect(waiting).resolves.toBeUndefined()
+    await expect(exit).resolves.toBeUndefined()
+  })
+})
+
+function startedStore(
+  tasks: TaskFile[],
+  config: SpecFinderConfig = DEFAULT_CONFIG,
+  now?: () => number,
+): CockpitStore {
+  const store = new CockpitStore(now)
   store.consume({ type: "run_started", slug: "demo", config, tasks })
   return store
 }
@@ -884,7 +1412,7 @@ function taskId(number: number): string {
 }
 
 async function render(store: CockpitStore, width: number, height: number): Promise<TestScreen> {
-  const screen = await testRender(<App store={store} onCancel={() => {}} />, { width, height })
+  const screen = await testRender(<App store={store} onCancel={() => {}} onDismiss={() => {}} />, { width, height, exitOnCtrlC: false })
   await screen.renderOnce()
   return screen
 }

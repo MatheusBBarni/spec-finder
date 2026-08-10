@@ -215,4 +215,19 @@ describe("exec runtime and permission resolution", () => {
       await rm(home, { recursive: true, force: true })
     }
   })
+
+  test("accepts Grok as a runtime profile but keeps its real exec launch uncertified", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-grok-exec-certification-"))
+    const home = await mkdtemp(join(tmpdir(), "spec-finder-exec-home-"))
+    try {
+      await makeConfig(root, { ...DEFAULT_CONFIG, provider: "grok", model: "auto" })
+      const context = await resolveExecConfig({ cwd: root, home })
+
+      expect(context.runtime.provider).toBe("grok")
+      expect(() => resolveExecLaunch(context)).toThrow(/grok is not certified for exec/)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+      await rm(home, { recursive: true, force: true })
+    }
+  })
 })

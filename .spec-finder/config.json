@@ -4,5 +4,6 @@
   "model": "gpt-5.6-luna",
   "reasoning": "max",
   "speed": "normal",
-  "permissions": "prompt"
+  "permissions": "prompt",
+  "auto_commit": true
 }

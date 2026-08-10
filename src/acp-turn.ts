@@ -99,6 +99,24 @@ export interface PermissionOutcome {
   optionId?: string
 }
 
+/** Source-owned order for choosing an advertised ACP authentication method. */
+export interface AuthMethodPreference {
+  readonly methodIds: readonly string[]
+  readonly unavailableMessage: string
+}
+
+/** Provider-owned adapter input for nonstandard ACP configuration metadata. */
+export interface SessionConfigAdvertisement {
+  readonly configOptions: readonly SessionConfigOption[] | null | undefined
+  readonly metadata: Readonly<Record<string, unknown>> | null | undefined
+}
+
+/** Convert provider extension metadata into neutral ACP session options. */
+export type SessionConfigNormalizer = (advertisement: SessionConfigAdvertisement) => readonly SessionConfigOption[]
+
+/** Controls whether provider diagnostic text may cross the ACP event boundary. */
+export type ProviderStderrPolicy = "forward" | "redact"
+
 /** A per-turn broker keeps permission policy and pending-request state injectable. */
 export interface PermissionBroker {
   request(request: RequestPermissionRequest): Promise<PermissionOutcome>
@@ -125,6 +143,9 @@ export interface ProviderLaunch {
   cwd: string
   env: Readonly<Record<string, string>>
   authMethod?: string | null
+  authPreference?: AuthMethodPreference
+  sessionConfigNormalizer?: SessionConfigNormalizer
+  stderrPolicy?: ProviderStderrPolicy
 }
 
 export interface ProcessExit {
@@ -396,7 +417,16 @@ export async function withAcpTurnSession<T>(
       process = await request.supervisor.spawn(request.launch)
       if (cancellation.forceRequested) onForceAbort()
       if (process.stderr !== undefined) {
-        void consumeProviderStderr(process.stderr, (text) => emit({ type: "provider_stderr", text }))
+        let redactedDiagnosticEmitted = false
+        void consumeProviderStderr(process.stderr, (text) => {
+          if (request.launch.stderrPolicy !== "redact") {
+            emit({ type: "provider_stderr", text })
+            return
+          }
+          if (redactedDiagnosticEmitted) return
+          redactedDiagnosticEmitted = true
+          emit({ type: "provider_stderr", text: "Provider emitted diagnostic output; details redacted." })
+        })
       }
       if (process.stdin === undefined || process.stdout === undefined) {
         throw new AcpTurnError("transport", "ACP provider did not expose stdio streams")
@@ -465,18 +495,12 @@ export async function withAcpTurnSession<T>(
             : { agentInfo: toAgentInfo(initialized.agentInfo) }),
         })
 
-        if (request.launch.authMethod !== undefined && request.launch.authMethod !== null) {
-          const advertised = initialized.authMethods?.find((method) => method.id === request.launch.authMethod)
-          if (advertised === undefined) {
-            throw new AcpTurnError(
-              "protocol",
-              `ACP auth method ${request.launch.authMethod} was not advertised`,
-            )
-          }
+        const authMethod = selectAuthMethod(request.launch, initialized.authMethods)
+        if (authMethod !== undefined) {
           try {
-            await context.request(acp.methods.agent.authenticate, { methodId: advertised.id })
-          } catch (error) {
-            throw new AcpTurnError("provider", `ACP authentication failed for ${advertised.id}`, error)
+            await context.request(acp.methods.agent.authenticate, { methodId: authMethod })
+          } catch {
+            throw new AcpTurnError("provider", `ACP authentication failed for ${authMethod}`)
           }
         }
 
@@ -486,7 +510,11 @@ export async function withAcpTurnSession<T>(
             sessionId: session.sessionId,
             closeAdvertised: initialized.agentCapabilities?.sessionCapabilities?.close !== undefined
               && initialized.agentCapabilities?.sessionCapabilities?.close !== null,
-            currentOptions: [...(session.newSessionResponse.configOptions ?? [])],
+            currentOptions: normalizeSessionConfigOptions(
+              request.launch,
+              session.newSessionResponse.configOptions,
+              session.newSessionResponse._meta,
+            ),
           }
           emit({ type: "session_started", sessionId: session.sessionId })
           emit({ type: "session_configured", options: activeRuntime.currentOptions })
@@ -616,14 +644,28 @@ async function configureSession(
     reasoning: request.runtimeOptionPolicy?.reasoning ?? "optional",
     speed: request.runtimeOptionPolicy?.speed ?? "optional",
   }
-  await applyRuntimeOption(context, runtime, request.runtime.model, "model", policies.model, emit)
-  await applyRuntimeOption(context, runtime, request.runtime.reasoning, "reasoning", policies.reasoning, emit)
-  await applyRuntimeOption(context, runtime, request.runtime.speed, "speed", policies.speed, emit)
+  await applyRuntimeOption(context, runtime, request.launch, request.runtime.model, "model", policies.model, emit)
+  await applyRuntimeOption(context, runtime, request.launch, request.runtime.reasoning, "reasoning", policies.reasoning, emit)
+  await applyRuntimeOption(context, runtime, request.launch, request.runtime.speed, "speed", policies.speed, emit)
+}
+
+function normalizeSessionConfigOptions(
+  launch: ProviderLaunch,
+  configOptions: readonly SessionConfigOption[] | null | undefined,
+  metadata: Readonly<Record<string, unknown>> | null | undefined,
+): SessionConfigOption[] {
+  if (launch.sessionConfigNormalizer === undefined) return [...(configOptions ?? [])]
+  try {
+    return [...launch.sessionConfigNormalizer({ configOptions, metadata })]
+  } catch {
+    throw new AcpTurnError("protocol", "agent configuration metadata could not be normalized")
+  }
 }
 
 async function applyRuntimeOption(
   context: acp.ClientContext,
   runtime: SessionRuntime,
+  launch: ProviderLaunch,
   requested: string,
   name: RuntimeOptionName,
   policy: RuntimeOptionPolicy,
@@ -672,7 +714,11 @@ async function applyRuntimeOption(
       ? { sessionId: runtime.sessionId, configId: option.id, type, value: value as boolean }
       : { sessionId: runtime.sessionId, configId: option.id, value: value as string }
     const response = await context.request(acp.methods.agent.session.setConfigOption, params) as acp.SetSessionConfigOptionResponse
-    runtime.currentOptions = [...response.configOptions]
+    runtime.currentOptions = normalizeSessionConfigOptions(
+      launch,
+      response.configOptions,
+      response._meta,
+    )
     emit({ type: "session_configured", options: runtime.currentOptions })
     emit({ type: "runtime_option", name, requested, outcome: "applied" })
   } catch (error) {
@@ -696,6 +742,30 @@ function findConfigOption(
     speed: ["_speed"],
   }
   return options.find((option) => ids[name].includes(option.id) || categories[name].includes(option.category ?? ""))
+}
+
+function selectAuthMethod(
+  launch: ProviderLaunch,
+  advertisedMethods: readonly { id: string }[] | null | undefined,
+): string | undefined {
+  if (launch.authMethod !== undefined && launch.authMethod !== null && launch.authPreference !== undefined) {
+    throw new AcpTurnError("protocol", "ACP launch cannot combine exact and preferred authentication")
+  }
+
+  const advertised = advertisedMethods ?? []
+  if (launch.authMethod !== undefined && launch.authMethod !== null) {
+    if (!advertised.some((method) => method.id === launch.authMethod)) {
+      throw new AcpTurnError("protocol", `ACP auth method ${launch.authMethod} was not advertised`)
+    }
+    return launch.authMethod
+  }
+
+  if (launch.authPreference === undefined) return undefined
+  const selected = launch.authPreference.methodIds.find((methodId) =>
+    advertised.some((method) => method.id === methodId),
+  )
+  if (selected !== undefined) return selected
+  throw new AcpTurnError("provider", launch.authPreference.unavailableMessage)
 }
 
 function flattenSelectOptions(options: SessionConfigSelectOptions): SessionConfigSelectOption[] {
@@ -739,7 +809,11 @@ async function runSessionTurn(
       }
       const update = message.update
       if (update.sessionUpdate === "config_option_update") {
-        runtime.currentOptions = [...update.configOptions]
+        runtime.currentOptions = normalizeSessionConfigOptions(
+          request.launch,
+          update.configOptions,
+          update._meta,
+        )
         emit({ type: "session_configured", options: runtime.currentOptions })
       }
       if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") {

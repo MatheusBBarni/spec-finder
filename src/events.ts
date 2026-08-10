@@ -5,6 +5,10 @@ import type { TaskFile, TaskStatus } from "./tasks.ts"
 
 export type BatchEventStatus = "running" | BatchResult["status"]
 
+export type AcpTurnPhase = "implementation" | "report"
+
+export type NoWorkReason = "all_tasks_complete"
+
 export type BatchStartedEvent = {
   type: "batch_started"
   /** Declared packet order. */
@@ -66,13 +70,19 @@ export type CheckpointEvent =
 
 export type RunEvent =
   | { type: "run_started"; slug: string; config: SpecFinderConfig; tasks: TaskFile[] }
-  | { type: "task_status"; taskId: string; status: TaskStatus }
+  | { type: "task_status"; taskId: string; status: TaskStatus; reportReference?: string }
   | CheckpointEvent
   | { type: "activity"; taskId?: string; message: string }
-  | { type: "session_update"; taskId: string; sessionId: string; update: SessionUpdate }
+  | { type: "session_update"; taskId: string; sessionId: string; phase?: AcpTurnPhase; update: SessionUpdate }
   | { type: "runtime_option"; name: "model" | "reasoning" | "speed"; requested: string; outcome: "applied" | "default" | "unsupported"; detail?: string }
   | { type: "permission_requested"; request: RequestPermissionRequest; respond: (response: RequestPermissionResponse) => void }
-  | { type: "run_finished"; ok: boolean; message: string }
+  | {
+      type: "run_finished"
+      ok: boolean
+      message: string
+      outcome?: "no_work"
+      reason?: NoWorkReason
+    }
   | BatchStartedEvent
   | BatchPacketStartedEvent
   | BatchPacketFinishedEvent

@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Define and test pure task timer semantics
 type: frontend
 complexity: medium

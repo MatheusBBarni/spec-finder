@@ -14,6 +14,12 @@ let cancelRequested = false
 let cancelWaiter: (() => void) | undefined
 let configOptions = readConfigOptions(process.env.SPEC_FINDER_TEST_CONFIG_OPTIONS)
 const configReplacements = readConfigOptionReplacements(process.env.SPEC_FINDER_TEST_CONFIG_REPLACEMENTS)
+const configMetadata = readConfigMetadata(process.env.SPEC_FINDER_TEST_CONFIG_METADATA)
+const sessionId = process.env.SPEC_FINDER_TEST_SESSION_ID ?? "test-session"
+
+if (process.env.SPEC_FINDER_TEST_PROVIDER_STDERR !== undefined) {
+  process.stderr.write(`${process.env.SPEC_FINDER_TEST_PROVIDER_STDERR}\n`)
+}
 
 const stream = acp.ndJsonStream(
   Writable.toWeb(process.stdout) as WritableStream<Uint8Array>,
@@ -55,19 +61,29 @@ acp
       && process.env.SPEC_FINDER_TEST_EXPECT_AUTH_METHOD !== context.params.methodId) {
       throw new Error("unexpected authentication method")
     }
+    if (process.env.SPEC_FINDER_TEST_FAIL_AUTHENTICATE === "1") {
+      throw new Error("untrusted authentication detail")
+    }
     return {}
   })
   .onRequest(acp.methods.agent.session.new, async () => {
     await recordLifecycle("session/new")
     return {
-      sessionId: "test-session",
+      sessionId,
       ...(configOptions === undefined ? {} : { configOptions }),
+      ...(configMetadata === undefined ? {} : { _meta: configMetadata }),
     }
   })
   .onRequest(acp.methods.agent.session.setConfigOption, async (context) => {
     await recordLifecycle(`session/set_config_option:${context.params.configId}:${String(context.params.value)}`)
+    if (process.env.SPEC_FINDER_TEST_REJECT_CONFIG_OPTION === "1") {
+      throw new Error("method not found")
+    }
     configOptions = configReplacements.shift() ?? configOptions ?? []
-    return { configOptions }
+    return {
+      configOptions,
+      ...(configMetadata === undefined ? {} : { _meta: configMetadata }),
+    }
   })
   .onRequest(acp.methods.agent.session.close, async (context) => {
     await recordLifecycle("session/close")
@@ -125,6 +141,21 @@ acp
       await context.client.notify(acp.methods.client.session.update, update)
     })
     const reportPath = prompt.match(/Write the final report to (.+)\. The report MUST/)?.[1]
+    if (reportPath && process.env.SPEC_FINDER_TEST_EMIT_REPORT_SESSION_INFO === "1") {
+      await context.client.notify(acp.methods.client.session.update, {
+        sessionId: context.params.sessionId,
+        update: {
+          sessionUpdate: "session_info_update",
+          title: `Final report prompt: ${prompt}`,
+          updatedAt: "2026-08-09T00:00:00.000Z",
+          _meta: {
+            reportPath,
+            prompt,
+            control: "unsafe\u001b[31m",
+          },
+        },
+      })
+    }
     const exitFirstImplementation = process.env.SPEC_FINDER_TEST_EXIT_FIRST_IMPLEMENTATION
     if (!reportPath && exitFirstImplementation && await claimFirstAttempt(exitFirstImplementation)) process.exit(25)
     const failFirstImplementation = process.env.SPEC_FINDER_TEST_FAIL_FIRST_IMPLEMENTATION
@@ -255,6 +286,15 @@ async function emitConfiguredUpdates(
 function readConfigOptions(raw: string | undefined): acp.SessionConfigOption[] | undefined {
   if (raw === undefined) return undefined
   return JSON.parse(raw) as acp.SessionConfigOption[]
+}
+
+function readConfigMetadata(raw: string | undefined): Record<string, unknown> | undefined {
+  if (raw === undefined) return undefined
+  const parsed = JSON.parse(raw)
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("test config metadata must be an object")
+  }
+  return parsed as Record<string, unknown>
 }
 
 function readConfigOptionReplacements(raw: string | undefined): acp.SessionConfigOption[][] {

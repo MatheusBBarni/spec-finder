@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Project Safe Report Outcomes in Cockpit State
 type: frontend
 complexity: medium

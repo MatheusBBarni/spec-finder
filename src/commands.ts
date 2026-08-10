@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process"
-import { relative } from "node:path"
+import { readFile } from "node:fs/promises"
+import { join, relative } from "node:path"
 import type { Writable } from "node:stream"
 import {
   parseMultipleArgs,
@@ -9,7 +10,15 @@ import {
   type BatchRunOptions,
   type PacketSummary,
 } from "./batch.ts"
-import { loadConfig, parseConfig, type SpecFinderConfig } from "./config.ts"
+import {
+  ConfigError,
+  PROVIDERS,
+  SPEED_VALUES,
+  applyRuntimeConfigOverrides,
+  loadConfig,
+  type ProviderName,
+  type SpecFinderConfig,
+} from "./config.ts"
 import {
   createCheckpointService,
   type CheckpointOutcome,
@@ -21,26 +30,26 @@ import { runExec, type ExecRunOptions } from "./exec.ts"
 import {
   type ExecRuntimeOverrides,
 } from "./exec-config.ts"
-import { findWorkspaceRoot } from "./paths.ts"
+import { CONFIG_FILE, SPEC_DIR, findWorkspaceRoot } from "./paths.ts"
 import { acquireRunLock } from "./run-lock.ts"
 import {
-  isSkillTarget,
   setupWorkspace,
-  type SkillInstallMode,
-  type SkillTarget,
   type SetupScope,
+  type SetupInputOrigin,
+  type SetupRequest,
+  type SetupResult,
+  type SetupSpeed,
 } from "./setup.ts"
+import { getSetupModelChoices, getSetupProfile, isCuratedSetupModel } from "./setup-profile.ts"
 import { isValidTaskSlug, loadTaskPacket, validateTasks, type TaskFile } from "./tasks.ts"
 import { CockpitStore } from "./ui/store.ts"
-import { startCockpit } from "./ui/cockpit.tsx"
+import { startCockpit, type CockpitSession } from "./ui/cockpit.tsx"
 import {
-  setupMultiSelect,
   setupSelect,
   type SetupPickerInput,
 } from "./ui/setup-picker.ts"
 import { PACKAGE_NAME, VERSION } from "./version.ts"
 
-const ALL_SKILL_TARGETS = ["claude", "codex", "cursor"] as const
 const TASK_ID_PATTERN = /^task_\d+$/
 const LEGACY_AUTO_COMMIT_PATTERN = /^-{0,2}auto-commit=(?:true|false)$/
 const EXEC_VALUE_OPTIONS = new Set(["--provider", "--model", "--reasoning", "--speed"])
@@ -87,16 +96,18 @@ export class ExecInvocationError extends Error {
   }
 }
 
-export interface SetupOptions {
-  targets: SkillTarget[]
-  scope: SetupScope
-  mode: SkillInstallMode
-}
+export type SetupOptions = SetupRequest
 
 export interface SetupResolutionOptions {
   interactive?: boolean
   input?: SetupPickerInput
   output?: Writable
+  root?: string
+  loadConfig?: (root: string) => Promise<SpecFinderConfig>
+}
+
+export interface SetupCommandOptions extends SetupResolutionOptions {
+  setupWorkspace?: (root: string, request: SetupRequest) => Promise<SetupResult>
 }
 
 export interface RunCommandOptions {
@@ -104,6 +115,8 @@ export interface RunCommandOptions {
   root?: string
   /** Test and embedding seam; defaults to process.stdout. */
   output?: Writable & { isTTY?: boolean }
+  /** Test and embedding seam; defaults to process.stdin. */
+  input?: { isTTY?: boolean }
   /** Override the normal config loader for deterministic command tests. */
   loadConfig?: (root: string) => Promise<SpecFinderConfig>
   /** Override the coordinator while preserving the command lifecycle contract. */
@@ -112,7 +125,7 @@ export interface RunCommandOptions {
   runTaskPacket?: (options: RunOptions) => Promise<RunResult>
   /** Override cockpit startup for renderer lifecycle tests. */
   startCockpit?: typeof startCockpit
-  /** Force terminal mode in tests; otherwise --no-ui or a non-TTY selects it. */
+  /** Force no-UI mode in tests; otherwise flags or non-TTY streams select it. */
   noUi?: boolean
 }
 
@@ -133,15 +146,23 @@ export type ExecCommandOptions = ExecRunOptions
 
 type CheckpointPhase = "begin" | "complete"
 
-export async function setupCommand(args: string[]): Promise<number> {
-  const root = process.cwd()
-  const options = await resolveSetupOptions(args)
-  const result = await setupWorkspace(root, options.targets, { scope: options.scope, mode: options.mode })
-  process.stdout.write(`${result.configCreated ? "created" : "validated"} ${result.configPath}\n`)
-  process.stdout.write(`setup scope: ${result.scope}\n`)
-  process.stdout.write(`canonical provider: ${result.canonical ?? "none (copy mode)"}\n`)
-  process.stdout.write(`copied skill entries: ${result.copied.length}\n`)
-  process.stdout.write(`linked skill entries: ${result.linked.length}\n`)
+export async function setupCommand(args: string[], commandOptions: SetupCommandOptions = {}): Promise<number> {
+  const root = commandOptions.root ?? process.cwd()
+  const output = commandOptions.output ?? process.stdout
+  const request = await resolveSetupOptions(args, {
+    ...commandOptions,
+    root,
+  })
+  const install = commandOptions.setupWorkspace ?? setupWorkspace
+  const result = await install(root, request)
+  output.write(`configured ${result.configPath}\n`)
+  output.write(`provider: ${result.provider}\n`)
+  output.write(`requested model: ${result.model}\n`)
+  output.write(`requested speed: ${result.speed}\n`)
+  output.write(`destination: ${result.destination}\n`)
+  output.write(`scope: ${result.scope}\n`)
+  output.write(`installed managed skills: ${result.installed.length}\n`)
+  output.write(`legacy Cursor skills: ${result.legacyCursor === "preserved" ? "preserved (not migrated)" : "absent (not migrated)"}\n`)
   return 0
 }
 
@@ -150,14 +171,84 @@ export async function resolveSetupOptions(
   resolutionOptions: SetupResolutionOptions = {},
 ): Promise<SetupOptions> {
   const provided = parseSetupArguments(args)
+  const root = resolutionOptions.root ?? process.cwd()
   const interactive = resolutionOptions.interactive ?? isInteractiveTerminal()
   const input = resolutionOptions.input ?? process.stdin
   const output = resolutionOptions.output ?? process.stdout
-  const targets = provided.targets ?? (interactive ? await promptForTargets(input, output) : [...ALL_SKILL_TARGETS])
-  const scope = provided.scope ?? (interactive ? await promptForScope(input, output) : "local")
-  const mode = provided.mode ?? (interactive ? await promptForMode(input, output) : "copy")
-  if (targets.length === 0) throw new Error("select at least one setup provider")
-  return { targets, scope, mode }
+  const saved = await loadSavedSetup(root, resolutionOptions.loadConfig ?? loadConfig)
+  const savedIntent = saved.config !== undefined && (saved.legacy || saved.config.setup.status === "configured")
+  const savedProvider = savedIntent ? saved.config?.provider : undefined
+  const defaultProvider = savedProvider ?? "codex"
+
+  let provider: ProviderName
+  let providerOrigin: SetupInputOrigin
+  if (provided.provider !== undefined) {
+    provider = provided.provider
+    providerOrigin = "flag"
+  } else if (interactive) {
+    provider = await promptForProvider(input, output, defaultProvider)
+    providerOrigin = savedProvider !== undefined && provider === savedProvider ? "saved" : "default"
+  } else {
+    provider = defaultProvider
+    providerOrigin = savedProvider !== undefined ? "saved" : "default"
+  }
+
+  const scope = provided.scope ?? (interactive
+    ? await promptForScope(input, output, saved.config?.setup.status === "configured" ? saved.config.setup.scope : saved.legacy ? undefined : "local")
+    : saved.config?.setup.status === "configured"
+      ? saved.config.setup.scope
+      : saved.legacy
+        ? await requireLegacyScope()
+        : "local")
+
+  const providerChanged = savedProvider !== undefined && provider !== savedProvider
+  const hasSavedProvider = savedProvider !== undefined && provider === savedProvider
+  const profile = getSetupProfile(provider)
+  let model: string
+  let modelOrigin: SetupInputOrigin
+  if (provided.model !== undefined) {
+    model = validateSetupModel(provider, provided.model)
+    modelOrigin = "flag"
+  } else if (interactive) {
+    const savedModel = hasSavedProvider ? saved.config?.model : undefined
+    model = await promptForModel(input, output, provider, savedModel, providerChanged || !savedIntent)
+    modelOrigin = hasSavedProvider && model === savedModel ? "saved" : "default"
+  } else if (hasSavedProvider && saved.config !== undefined && !providerChanged) {
+    model = saved.config.model
+    modelOrigin = "saved"
+  } else {
+    model = profile.defaultModel
+    modelOrigin = "default"
+  }
+
+  let speed: SetupSpeed
+  let speedOrigin: SetupInputOrigin
+  if (provided.speed !== undefined) {
+    speed = provided.speed
+    speedOrigin = "flag"
+  } else if (interactive) {
+    const savedSpeed = savedIntent ? saved.config?.speed : undefined
+    speed = await promptForSpeed(input, output, savedSpeed, !savedIntent)
+    speedOrigin = savedIntent && speed === savedSpeed ? "saved" : "default"
+  } else if (saved.config !== undefined && savedIntent) {
+    speed = saved.config.speed
+    speedOrigin = "saved"
+  } else {
+    speed = "normal"
+    speedOrigin = "default"
+  }
+
+  return {
+    provider,
+    model,
+    speed,
+    scope,
+    origin: {
+      provider: providerOrigin,
+      model: modelOrigin,
+      speed: speedOrigin,
+    },
+  }
 }
 
 /**
@@ -300,32 +391,40 @@ function execParseFailure(
 }
 
 interface ParsedSetupArguments {
-  targets?: SkillTarget[]
+  provider?: ProviderName
+  model?: string
+  speed?: SetupSpeed
   scope?: SetupScope
-  mode?: SkillInstallMode
 }
 
-function parseSetupArguments(args: readonly string[]): ParsedSetupArguments {
-  const targets: SkillTarget[] = []
-  let requestedTargets = false
+export function parseSetupArguments(args: readonly string[]): ParsedSetupArguments {
+  let provider: ProviderName | undefined
+  let model: string | undefined
+  let speed: SetupSpeed | undefined
   let scope: SetupScope | undefined
-  let mode: SkillInstallMode | undefined
+  let copySeen = false
 
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index]!
-    if (argument === "--agent") {
-      requestedTargets = true
-      const target = args[index + 1]
-      if (!target || target.startsWith("--")) throw new Error("setup requires a provider after --agent")
-      addSkillTarget(targets, target)
+    if (argument === "--agent" || argument === "--model" || argument === "--speed") {
+      const value = args[index + 1]
+      if (!value || value.startsWith("--")) throw new Error(`${argument} requires a value`)
       index += 1
+      if (argument === "--agent") provider = setProvider(provider, value)
+      else if (argument === "--model") model = setSingularValue(model, value, "model")
+      else speed = parseSetupSpeed(setSingularValue(speed, value, "speed"))
       continue
     }
     if (argument.startsWith("--agent=")) {
-      requestedTargets = true
-      const target = argument.slice("--agent=".length)
-      if (!target) throw new Error("setup requires a provider after --agent")
-      addSkillTarget(targets, target)
+      provider = setProvider(provider, argument.slice("--agent=".length))
+      continue
+    }
+    if (argument.startsWith("--model=")) {
+      model = setSingularValue(model, argument.slice("--model=".length), "model")
+      continue
+    }
+    if (argument.startsWith("--speed=")) {
+      speed = parseSetupSpeed(setSingularValue(speed, argument.slice("--speed=".length), "speed"))
       continue
     }
     if (argument === "--global") {
@@ -337,36 +436,46 @@ function parseSetupArguments(args: readonly string[]): ParsedSetupArguments {
       continue
     }
     if (argument === "--symlink") {
-      mode = setInstallMode(mode, "symlink")
-      continue
+      throw new Error("setup no longer supports --symlink; use --copy (copy is the only installation mode)")
     }
     if (argument === "--copy") {
-      mode = setInstallMode(mode, "copy")
+      if (copySeen) throw new Error("duplicate setup option: --copy")
+      copySeen = true
       continue
     }
     throw new Error(`unsupported setup option: ${argument}`)
   }
 
-  if (requestedTargets && targets.length === 0) throw new Error("select at least one setup provider")
   return {
-    ...(requestedTargets ? { targets } : {}),
-    ...(scope ? { scope } : {}),
-    ...(mode ? { mode } : {}),
+    ...(provider === undefined ? {} : { provider }),
+    ...(model === undefined ? {} : { model }),
+    ...(speed === undefined ? {} : { speed }),
+    ...(scope === undefined ? {} : { scope }),
   }
 }
 
-function addSkillTarget(targets: SkillTarget[], value: string): void {
-  if (!isSkillTarget(value)) throw new Error(`unsupported setup agent: ${value}`)
-  targets.push(value)
+function setProvider(current: ProviderName | undefined, value: string): ProviderName {
+  if (current !== undefined) throw new Error("setup accepts exactly one --agent provider; repeated --agent is not allowed")
+  if (!(PROVIDERS as readonly string[]).includes(value)) throw new Error(`unsupported setup agent: ${value}`)
+  return value as ProviderName
+}
+
+function setSingularValue<T>(current: T | undefined, value: string, label: string): string {
+  if (current !== undefined) throw new Error(`duplicate setup option: --${label}`)
+  if (value.trim().length === 0) throw new Error(`--${label} requires a non-empty value`)
+  return value
+}
+
+function parseSetupSpeed(value: string): SetupSpeed {
+  if (!(SPEED_VALUES as readonly string[]).includes(value)) {
+    throw new Error(`unsupported setup speed: ${value}; choose auto, normal, or fast`)
+  }
+  return value as SetupSpeed
 }
 
 function setSetupScope(current: SetupScope | undefined, next: SetupScope): SetupScope {
-  if (current && current !== next) throw new Error("setup accepts either --global or --local, not both")
-  return next
-}
-
-function setInstallMode(current: SkillInstallMode | undefined, next: SkillInstallMode): SkillInstallMode {
-  if (current && current !== next) throw new Error("setup accepts either --symlink or --copy, not both")
+  if (current === next) throw new Error(`duplicate setup scope: --${next}`)
+  if (current !== undefined) throw new Error("setup accepts either --global or --local, not both")
   return next
 }
 
@@ -374,43 +483,143 @@ function isInteractiveTerminal(): boolean {
   return process.stdin.isTTY === true && process.stdout.isTTY === true
 }
 
-async function promptForTargets(input: SetupPickerInput, output: Writable): Promise<SkillTarget[]> {
-  return setupMultiSelect({
-    message: "Select providers",
+async function promptForProvider(
+  input: SetupPickerInput,
+  output: Writable,
+  initialValue: ProviderName,
+): Promise<ProviderName> {
+  return setupSelect({
+    message: "Choose provider",
     items: [
-      { label: "Claude", value: "claude" },
-      { label: "Codex", value: "codex" },
-      { label: "Cursor", value: "cursor" },
+      { label: "Claude", value: "claude", hint: "skills in .claude/skills" },
+      { label: "Codex", value: "codex", hint: "skills in .agents/skills" },
+      { label: "Cursor", value: "cursor", hint: "skills in .agents/skills" },
+      { label: "Grok Build", value: "grok", hint: "skills in .agents/skills" },
     ],
-    initialSelected: [...ALL_SKILL_TARGETS],
+    initialValue,
     required: true,
+    requiredMessage: "Choose one provider before continuing",
     input,
     output,
   })
 }
 
-async function promptForScope(input: SetupPickerInput, output: Writable): Promise<SetupScope> {
+async function promptForScope(input: SetupPickerInput, output: Writable, initialValue?: SetupScope): Promise<SetupScope> {
   return setupSelect({
     message: "Choose installation scope",
     items: [
       { label: "Local", value: "local", hint: "current project" },
       { label: "Global", value: "global", hint: "home directory" },
     ],
+    ...(initialValue === undefined ? {} : { initialValue }),
+    required: true,
+    requiredMessage: "Choose a scope before continuing",
     input,
     output,
   })
 }
 
-async function promptForMode(input: SetupPickerInput, output: Writable): Promise<SkillInstallMode> {
+async function promptForModel(
+  input: SetupPickerInput,
+  output: Writable,
+  provider: ProviderName,
+  savedModel: string | undefined,
+  useFreshDefault: boolean,
+): Promise<string> {
+  const items = getSetupModelChoices(provider).map((value) => ({
+    label: value,
+    value,
+    ...(value === "auto"
+      ? { hint: "provider-directed" }
+      : value === getSetupProfile(provider).defaultModel
+        ? { hint: "catalogue default" }
+        : {}),
+  }))
+  const keepCustom = savedModel !== undefined && !isCuratedSetupModel(provider, savedModel)
+  if (keepCustom) items.unshift({ label: `Keep existing custom model (${savedModel})`, value: savedModel, hint: "saved runtime value" })
+  const initialValue = useFreshDefault
+    ? getSetupProfile(provider).defaultModel
+    : savedModel ?? getSetupProfile(provider).defaultModel
   return setupSelect({
-    message: "Choose skill installation mode",
-    items: [
-      { label: "Copy", value: "copy", hint: "independent provider copies" },
-      { label: "Symlink", value: "symlink", hint: "one canonical copy" },
-    ],
+    message: "Choose model",
+    items,
+    initialValue,
+    required: true,
+    requiredMessage: "Choose a model before continuing",
     input,
     output,
   })
+}
+
+async function promptForSpeed(
+  input: SetupPickerInput,
+  output: Writable,
+  savedSpeed: SetupSpeed | undefined,
+  useFreshDefault: boolean,
+): Promise<SetupSpeed> {
+  return setupSelect({
+    message: "Choose speed",
+    items: [
+      { label: "Auto", value: "auto", hint: "provider-directed" },
+      { label: "Normal", value: "normal", hint: "balanced" },
+      { label: "Fast", value: "fast", hint: "lower latency when available" },
+    ],
+    initialValue: useFreshDefault ? "normal" : savedSpeed ?? "normal",
+    required: true,
+    requiredMessage: "Choose a speed before continuing",
+    input,
+    output,
+  })
+}
+
+function validateSetupModel(provider: ProviderName, model: string): string {
+  const normalized = model.trim()
+  if (!isCuratedSetupModel(provider, normalized)) {
+    throw new Error(`unsupported setup model for ${provider}: ${model}; choose auto or a curated ${provider} model`)
+  }
+  return normalized
+}
+
+async function requireLegacyScope(): Promise<never> {
+  throw new Error("migrated v1/v2 setup has no saved scope; rerun with --local or --global")
+}
+
+interface SavedSetup {
+  config?: SpecFinderConfig
+  legacy: boolean
+}
+
+async function loadSavedSetup(
+  root: string,
+  load: (root: string) => Promise<SpecFinderConfig>,
+): Promise<SavedSetup> {
+  let config: SpecFinderConfig | undefined
+  try {
+    config = await load(root)
+  } catch (error) {
+    if (!isMissingConfigError(error)) throw error
+  }
+  return {
+    ...(config === undefined ? {} : { config }),
+    legacy: await isLegacyConfigFile(root),
+  }
+}
+
+async function isLegacyConfigFile(root: string): Promise<boolean> {
+  try {
+    const raw = await readFile(join(root, SPEC_DIR, CONFIG_FILE), "utf8")
+    const parsed = JSON.parse(raw) as { version?: unknown }
+    return parsed.version === 1 || parsed.version === 2
+  } catch (error) {
+    if (isMissingConfigError(error)) return false
+    return false
+  }
+}
+
+function isMissingConfigError(error: unknown): boolean {
+  return error instanceof ConfigError
+    ? error.message.startsWith("cannot read")
+    : error instanceof Error && error.message.startsWith("cannot read")
 }
 
 export async function configCommand(): Promise<number> {
@@ -525,69 +734,138 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+interface CommandLifecycle {
+  readonly controller: AbortController
+  readonly noUi: boolean
+  readonly startCockpit: (store: CockpitStore) => Promise<void>
+  readonly waitForDismissal: (reviewableFailure: boolean) => Promise<void>
+  readonly waitForNoWork: () => Promise<void>
+  readonly close: () => void
+}
+
+function isInteractiveRun(
+  args: readonly string[],
+  input: { isTTY?: boolean },
+  output: { isTTY?: boolean },
+  noUi?: boolean,
+): boolean {
+  return noUi !== true
+    && !args.includes("--no-ui")
+    && input.isTTY === true
+    && output.isTTY === true
+}
+
+function createCommandLifecycle(
+  args: readonly string[],
+  options: RunCommandOptions,
+  input: { isTTY?: boolean },
+  output: { isTTY?: boolean },
+): CommandLifecycle {
+  const noUi = !isInteractiveRun(args, input, output, options.noUi)
+  const controller = new AbortController()
+  const start = options.startCockpit ?? startCockpit
+  let cockpit: CockpitSession | null = null
+  let closeRequested = false
+
+  const close = () => {
+    closeRequested = true
+    const session = cockpit
+    if (session === null) return
+    cockpit = null
+    session.close()
+  }
+
+  const cancel = () => {
+    if (!controller.signal.aborted) controller.abort()
+    close()
+  }
+
+  return {
+    controller,
+    noUi,
+    startCockpit: async (store) => {
+      if (noUi) return
+      const session = await start(store, cancel)
+      cockpit = session
+      if (closeRequested) {
+        cockpit = null
+        session.close()
+      }
+    },
+    waitForDismissal: async (reviewableFailure) => {
+      if (!reviewableFailure || noUi || controller.signal.aborted) return
+      await cockpit?.waitForDismissal()
+    },
+    waitForNoWork: async () => {
+      if (noUi || controller.signal.aborted) return
+      await cockpit?.waitForExit?.()
+    },
+    close,
+  }
+}
+
 async function runSingleCommand(args: readonly string[], options: RunCommandOptions): Promise<number> {
   const slug = args.find((arg) => !arg.startsWith("-"))
   if (!slug) throw new Error("usage: spec-finder run <task_slug> [--no-ui]")
   const output = options.output ?? process.stdout
+  const input = options.input ?? process.stdin
   const root = options.root ?? await findWorkspaceRoot()
   const lease = await acquireRunLock(root)
   const load = options.loadConfig ?? loadConfig
-  let cockpit: { close: () => void } | null = null
+  const lifecycle = createCommandLifecycle(args, options, input, output)
   try {
     let config = await load(root)
     config = applyRunOverrides(config, args)
-    const noUi = options.noUi ?? (args.includes("--no-ui") || output.isTTY !== true)
-    const controller = new AbortController()
     const store = new CockpitStore()
     const consoleListener = createSingleConsoleListener(output)
-    const emit: RunEventListener = noUi ? consoleListener : store.listener
-    const start = options.startCockpit ?? startCockpit
-    if (!noUi) cockpit = await start(store, () => controller.abort())
+    const emit: RunEventListener = lifecycle.noUi ? consoleListener : store.listener
+    await lifecycle.startCockpit(store)
     const run = options.runTaskPacket ?? runTaskPacket
     const result = await run({
       root,
       slug,
       config,
-      signal: controller.signal,
+      signal: lifecycle.controller.signal,
       emit,
-      interactivePermissions: !noUi,
+      interactivePermissions: !lifecycle.noUi,
     })
+    if (result.ok && result.outcome === "no_work") await lifecycle.waitForNoWork()
+    await lifecycle.waitForDismissal(!result.ok)
     return result.ok ? 0 : 1
   } finally {
-    cockpit?.close()
+    lifecycle.close()
     await lease.release()
   }
 }
 
 async function runBatchCommand(args: BatchArguments, options: RunCommandOptions): Promise<number> {
   const output = options.output ?? process.stdout
+  const input = options.input ?? process.stdin
   const root = options.root ?? await findWorkspaceRoot()
   const lease = await acquireRunLock(root)
   const load = options.loadConfig ?? loadConfig
-  let cockpit: { close: () => void } | null = null
+  const lifecycle = createCommandLifecycle(args.runtimeArgs, options, input, output)
 
   try {
     let config = await load(root)
     config = applyRunOverrides(config, args.runtimeArgs)
-    const noUi = options.noUi ?? (args.runtimeArgs.includes("--no-ui") || output.isTTY !== true)
-    const controller = new AbortController()
     const store = new CockpitStore()
     const consoleListener = createBatchConsoleListener(output)
-    const emit: RunEventListener = noUi ? consoleListener : store.listener
-    const start = options.startCockpit ?? startCockpit
-    if (!noUi) cockpit = await start(store, () => controller.abort())
+    const emit: RunEventListener = lifecycle.noUi ? consoleListener : store.listener
+    await lifecycle.startCockpit(store)
     const coordinate = options.runBatch ?? runBatch
     const result = await coordinate({
       root,
       slugs: args.slugs,
       config,
-      signal: controller.signal,
+      signal: lifecycle.controller.signal,
       onEvent: emit,
-      interactivePermissions: !noUi,
+      interactivePermissions: !lifecycle.noUi,
     })
+    await lifecycle.waitForDismissal(result.status === "failed")
     return batchExitCode(result)
   } finally {
-    cockpit?.close()
+    lifecycle.close()
     await lease.release()
   }
 }
@@ -596,7 +874,13 @@ function createSingleConsoleListener(output: Writable): RunEventListener {
   return (event) => {
     if (event.type === "activity") output.write(`${event.taskId ? `${event.taskId}: ` : ""}${event.message.trim()}\n`)
     if (event.type === "task_status") output.write(`${event.taskId}: ${event.status}\n`)
-    if (event.type === "run_finished") output.write(`${event.ok ? "ok" : "failed"}: ${event.message}\n`)
+    if (event.type === "run_finished") {
+      if (event.ok && event.outcome === "no_work" && event.reason === "all_tasks_complete") {
+        output.write("ok: no executable tasks; all tasks are already complete\n")
+        return
+      }
+      output.write(`${event.ok ? "ok" : "failed"}: ${event.message}\n`)
+    }
   }
 }
 
@@ -705,11 +989,15 @@ function applyRunOverrides(config: SpecFinderConfig, args: readonly string[]): S
   const model = valueFor(args, "--model")
   const reasoning = valueFor(args, "--reasoning")
   const speed = valueFor(args, "--speed")
-  return parseConfig({
-    ...config,
+  const switchesToGrok = provider === "grok" && config.provider !== "grok"
+  const selectedModel = model ?? (switchesToGrok ? "auto" : undefined)
+  const selectedReasoning = reasoning ?? (switchesToGrok ? "auto" : undefined)
+  return applyRuntimeConfigOverrides(config, {
     ...(provider ? { provider: provider as SpecFinderConfig["provider"] } : {}),
-    ...(model ? { model } : {}),
-    ...(reasoning ? { reasoning: reasoning as SpecFinderConfig["reasoning"] } : {}),
+    ...(selectedModel === undefined ? {} : { model: selectedModel }),
+    ...(selectedReasoning === undefined
+      ? {}
+      : { reasoning: selectedReasoning as SpecFinderConfig["reasoning"] }),
     ...(speed ? { speed: speed as SpecFinderConfig["speed"] } : {}),
   })
 }

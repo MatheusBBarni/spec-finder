@@ -50,8 +50,13 @@ describe("checkpoint Git parsing", () => {
   })
 
   test("produces the deterministic task checkpoint message", () => {
-    expect(checkpointCommitMessage("task_03")).toBe("chore(spec-finder): checkpoint task_03")
-    expect(() => checkpointCommitMessage("task;push")).toThrow("invalid task ID")
+    expect(checkpointCommitMessage("single-provider-setup", "Add Versioned Setup Configuration and Provider Policy", "backend"))
+      .toBe("feat: single-provider-setup Add Versioned Setup Configuration and Provider Policy")
+    expect(checkpointCommitMessage("visible-errors", "Surface failures", "fix")).toBe("fix: visible-errors Surface failures")
+    expect(checkpointCommitMessage("setup-docs", "Document setup", "docs")).toBe("chore: setup-docs Document setup")
+    expect(checkpointCommitMessage("demo", "  Normalize\n task   title  ", "refactor")).toBe("feat: demo Normalize task title")
+    expect(() => checkpointCommitMessage("task;push", "Task name", "backend")).toThrow("invalid task slug")
+    expect(() => checkpointCommitMessage("demo", "   ", "backend")).toThrow("task name must not be empty")
   })
 })
 
@@ -81,7 +86,7 @@ describe("safe Git checkpoint service", () => {
     expect(outcome.state).toBe("created")
     expect(outcome.commit).toMatch(/^[a-f0-9]{40,64}$/)
     expect(await gitText(fixture.root, ["rev-list", "--count", "HEAD"])).toBe("2")
-    expect(await gitText(fixture.root, ["show", "-s", "--format=%s", "HEAD"])).toBe("chore(spec-finder): checkpoint task_01")
+    expect(await gitText(fixture.root, ["show", "-s", "--format=%s", "HEAD"])).toBe("feat: demo Checkpoint task")
     expect(await gitText(fixture.root, ["status", "--porcelain"])).toBe("")
 
     const tree = await gitText(fixture.root, ["-c", "core.quotePath=false", "ls-tree", "-r", "-z", "--name-only", "HEAD"])
@@ -97,7 +102,7 @@ describe("safe Git checkpoint service", () => {
     expect(calls.some((args) => forbidden.has(args[0] ?? ""))).toBe(false)
     expect(calls.some((args) => args.includes("--no-verify") || args.includes("--author"))).toBe(false)
     expect(calls.some((args) => args[0] === "add" && args[1] === "--")).toBe(true)
-    expect(calls.find((args) => args[0] === "commit")).toEqual(["commit", "-m", "chore(spec-finder): checkpoint task_01"])
+    expect(calls.find((args) => args[0] === "commit")).toEqual(["commit", "-m", "feat: demo Checkpoint task"])
   })
 
   test("refuses dirty, staged, and untracked baselines without a commit", async () => {

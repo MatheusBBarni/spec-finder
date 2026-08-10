@@ -5,6 +5,7 @@ import type {
   BatchPacketFinishedEvent,
   BatchPacketStartedEvent,
   BatchStartedEvent,
+  NoWorkReason,
   RunEvent,
   RunEventListener,
 } from "../events.ts"
@@ -13,8 +14,17 @@ import type { CheckpointRecord, TaskFile, TaskStatus } from "../tasks.ts"
 import {
   appendTranscriptLines,
   applySessionUpdate,
+  formatDisplayText,
   type TranscriptEntry,
 } from "./transcript.ts"
+import {
+  advanceTaskTimer,
+  beginTaskTimer,
+  finishTaskTimer,
+  systemNow,
+  type MonotonicNow,
+  type TaskTimer,
+} from "./timer.ts"
 
 export type CockpitPane = "tasks" | "transcript"
 export type RuntimeOptionName = Extract<RunEvent, { type: "runtime_option" }>["name"]
@@ -30,6 +40,8 @@ export interface CockpitTask {
   readonly type: string
   readonly complexity: string
   readonly status: TaskStatus
+  /** Safe, workspace-relative report reference supplied only with completion. */
+  readonly reportReference?: string
   readonly dependencies: readonly string[]
   /** Checkpoint delivery is independent from the task lifecycle status. */
   readonly checkpoint: CockpitCheckpoint | null
@@ -53,6 +65,13 @@ export interface StoppingPacketContext {
   readonly outcome: "failed" | "cancelled"
 }
 
+export interface CockpitFinishedState {
+  readonly ok: boolean
+  readonly message: string
+  readonly outcome?: "no_work"
+  readonly reason?: NoWorkReason
+}
+
 export type CockpitBatchStatus = BatchEventStatus | null
 
 export interface CockpitState {
@@ -68,10 +87,13 @@ export interface CockpitState {
   readonly followingActiveTask: boolean
   readonly helpOpen: boolean
   readonly transcripts: Readonly<Record<string, readonly TranscriptEntry[]>>
+  readonly taskTimers: Readonly<Record<string, TaskTimer>>
   readonly taskReasons: Readonly<Record<string, string>>
+  /** Complete surfaced task failures retained only for the current cockpit session. */
+  readonly taskFailureDetails: Readonly<Record<string, string>>
   readonly runActivity: readonly TranscriptEntry[]
   readonly runtimeOptions: Readonly<Partial<Record<RuntimeOptionName, RuntimeOptionOutcome>>>
-  readonly finished: Readonly<{ ok: boolean; message: string }> | null
+  readonly finished: Readonly<CockpitFinishedState> | null
   readonly batchStatus: CockpitBatchStatus
   readonly packetSummaries: readonly PacketSummary[]
   /** Read-only task snapshots retained for every packet tab. */
@@ -96,7 +118,9 @@ function createInitialState(): CockpitState {
     followingActiveTask: true,
     helpOpen: false,
     transcripts: {},
+    taskTimers: {},
     taskReasons: {},
+    taskFailureDetails: {},
     runActivity: [],
     runtimeOptions: {},
     finished: null,
@@ -111,6 +135,8 @@ function createInitialState(): CockpitState {
 }
 
 export class CockpitStore {
+  constructor(private readonly now: MonotonicNow = systemNow) {}
+
   private state: CockpitState = createInitialState()
   private listeners = new Set<() => void>()
   private sequence = 0
@@ -168,7 +194,7 @@ export class CockpitStore {
         this.consumeBatchFinished(event)
         break
       case "task_status":
-        this.consumeTaskStatus(event.taskId, event.status)
+        this.consumeTaskStatus(event.taskId, event.status, event.reportReference)
         break
       case "checkpoint":
         this.consumeCheckpoint(event.taskId, event)
@@ -178,7 +204,7 @@ export class CockpitStore {
         else this.consumeRunActivity(event.message)
         break
       case "session_update":
-        this.consumeSessionUpdate(event.taskId, event.sessionId, event.update)
+        this.consumeSessionUpdate(event.taskId, event.sessionId, event.update, event.phase)
         break
       case "runtime_option": {
         const detail = event.detail === undefined ? {} : { detail: event.detail }
@@ -202,9 +228,15 @@ export class CockpitStore {
         const message = blockedDelivery && event.ok
           ? `${event.message}; checkpoint delivery blocked`
           : event.message
+        const finished: CockpitFinishedState = {
+          ok: event.ok && !blockedDelivery,
+          message,
+          ...(event.outcome === undefined ? {} : { outcome: event.outcome }),
+          ...(event.reason === undefined ? {} : { reason: event.reason }),
+        }
         this.set({
           ...this.state,
-          finished: { ok: event.ok && !blockedDelivery, message },
+          finished,
           activeTaskId: null,
         })
         break
@@ -254,10 +286,12 @@ export class CockpitStore {
       tasks,
       visibleTaskIds,
       checkpointOutcomes,
+      taskTimers: {},
       activeTaskId: null,
       selectedTaskId: visibleTaskIds[0] ?? null,
       transcripts,
       taskReasons,
+      taskFailureDetails: {},
       runActivity,
       runtimeOptions: {},
       finished: null,
@@ -290,6 +324,7 @@ export class CockpitStore {
       ])),
     }
     const packetCheckpointOutcomes = checkpointOutcomeRecord(tasks, (task) => qualifiedTaskKey(slug, task.id))
+    const taskFailureDetails = withoutQualifiedPacket(this.state.taskFailureDetails, slug)
     const packetTasks = { ...this.state.packetTasks, [slug]: tasks }
     const packetVisibleTaskIds = { ...this.state.packetVisibleTaskIds, [slug]: visibleTaskIds }
     const packetSummaries = this.state.packetSummaries.map((summary, index) => (
@@ -312,6 +347,8 @@ export class CockpitStore {
         ...this.state.taskReasons,
         ...checkpointReasons(tasks, (task) => qualifiedTaskKey(slug, task.id)),
       },
+      taskFailureDetails,
+      taskTimers: {},
       runtimeOptions: {},
       finished: null,
       batchStatus: "running",
@@ -434,11 +471,38 @@ export class CockpitStore {
     this.set({ ...this.state, helpOpen: !this.state.helpOpen })
   }
 
-  private consumeTaskStatus(taskId: string, status: TaskStatus): void {
+  tick(nowMs?: number): void {
+    if (this.state.finished !== null) return
+
+    const runningTaskIds = new Set(
+      this.state.tasks
+        .filter((task) => task.status === "in_progress")
+        .map((task) => task.id),
+    )
+    const runningTimers = Object.entries(this.state.taskTimers)
+      .filter(([taskId, timer]) => runningTaskIds.has(taskId) && timer.kind === "running")
+    if (runningTimers.length === 0) return
+
+    const observedNow = nowMs ?? this.now()
+    let taskTimers: Record<string, TaskTimer> | null = null
+    for (const [taskId, timer] of runningTimers) {
+      const next = advanceTaskTimer(timer, observedNow)
+      if (next === timer) continue
+      if (taskTimers === null) taskTimers = { ...this.state.taskTimers }
+      taskTimers[taskId] = next
+    }
+
+    if (taskTimers !== null) this.set({ ...this.state, taskTimers })
+  }
+
+  private consumeTaskStatus(taskId: string, status: TaskStatus, reportReference?: string): void {
     const localTaskId = this.localTaskId(taskId)
     if (!localTaskId) return
     const transcriptKey = this.taskKey(localTaskId)
-    const tasks = this.state.tasks.map((task) => task.id === localTaskId ? { ...task, status } : task)
+    const safeReportReference = status === "completed" ? validateReportReference(reportReference) : undefined
+    const tasks = this.state.tasks.map((task) => task.id === localTaskId
+      ? projectTaskStatus(task, status, safeReportReference)
+      : task)
     const packetTasks = this.state.activePacket
       ? { ...this.state.packetTasks, [this.state.activePacket.slug]: tasks }
       : this.state.packetTasks
@@ -451,11 +515,22 @@ export class CockpitStore {
       : visibleTasks.some((task) => task.id === this.state.selectedTaskId)
         ? this.state.selectedTaskId
         : visibleTasks[0]?.id ?? null
+    const taskTimers = this.projectTaskTimer(localTaskId, status)
     let transcripts = this.state.transcripts
     let taskReasons = this.state.taskReasons
+    const taskFailureDetails = withoutKey(this.state.taskFailureDetails, transcriptKey)
 
     if (isCompleted(status)) {
       transcripts = appendTaskLines(transcripts, transcriptKey, "outcome", "Task completed", this.nextSequence())
+      if (safeReportReference !== undefined) {
+        transcripts = appendTaskLines(
+          transcripts,
+          transcriptKey,
+          "outcome",
+          `Report: ${safeReportReference}`,
+          this.nextSequence(),
+        )
+      }
       taskReasons = withoutKey(taskReasons, transcriptKey)
     } else if (status === "failed") {
       const reason = formatTaskReason(status, undefined, [])
@@ -476,7 +551,37 @@ export class CockpitStore {
 
     taskReasons = refreshBlockedReasons(tasks, taskReasons, (id) => this.taskKey(id))
     taskReasons = refreshCheckpointReasons(tasks, taskReasons, (id) => this.taskKey(id))
-    this.set({ ...this.state, tasks, packetTasks, activeTaskId, selectedTaskId, transcripts, taskReasons })
+    this.set({
+      ...this.state,
+      tasks,
+      packetTasks,
+      activeTaskId,
+      selectedTaskId,
+      transcripts,
+      taskTimers,
+      taskReasons,
+      taskFailureDetails,
+    })
+  }
+
+  private projectTaskTimer(taskId: string, status: TaskStatus): Readonly<Record<string, TaskTimer>> {
+    const previous = this.state.taskTimers[taskId]
+    if (status === "blocked") {
+      if (previous === undefined) return this.state.taskTimers
+      const { [taskId]: _removed, ...withoutTask } = this.state.taskTimers
+      return withoutTask
+    }
+
+    if (status === "in_progress") {
+      if (previous !== undefined) return this.state.taskTimers
+      const next = beginTaskTimer(previous, this.now())
+      return next === previous ? this.state.taskTimers : { ...this.state.taskTimers, [taskId]: next }
+    }
+
+    if (!isTimerTerminal(status)) return this.state.taskTimers
+    if (previous !== undefined && previous.kind !== "running") return this.state.taskTimers
+    const next = finishTaskTimer(previous, this.now())
+    return next === previous ? this.state.taskTimers : { ...this.state.taskTimers, [taskId]: next }
   }
 
   private consumeCheckpoint(
@@ -506,30 +611,44 @@ export class CockpitStore {
         : `Local checkpoint created: ${checkpoint.commit}`
       const transcripts = appendTaskLines(this.state.transcripts, transcriptKey, "outcome", detail, this.nextSequence())
       const taskReasons = withoutKey(this.state.taskReasons, transcriptKey)
-      this.set({ ...this.state, tasks, packetTasks, checkpointOutcomes, transcripts, taskReasons })
+      const taskFailureDetails = withoutKey(this.state.taskFailureDetails, transcriptKey)
+      this.set({ ...this.state, tasks, packetTasks, checkpointOutcomes, transcripts, taskReasons, taskFailureDetails })
       return
     }
 
     const detail = `Checkpoint blocked: ${checkpoint.reason}`
     const transcripts = appendTaskLines(this.state.transcripts, transcriptKey, "error", detail, this.nextSequence())
     const taskReasons = { ...this.state.taskReasons, [transcriptKey]: checkpoint.reason }
-    this.set({ ...this.state, tasks, packetTasks, checkpointOutcomes, transcripts, taskReasons })
+    // Checkpoint delivery is a separate surfaced failure source used by the
+    // retained delivery review; unsuccessful task activity can also retain
+    // exact failure or blocked-handoff detail.
+    const exactReason = event.state === "blocked" ? event.reason.trim() : ""
+    const taskFailureDetails = exactReason
+      ? { ...this.state.taskFailureDetails, [transcriptKey]: exactReason }
+      : withoutKey(this.state.taskFailureDetails, transcriptKey)
+    this.set({ ...this.state, tasks, packetTasks, checkpointOutcomes, transcripts, taskReasons, taskFailureDetails })
   }
 
   private consumeTaskActivity(taskId: string, message: string): void {
     const localTaskId = this.localTaskId(taskId)
     if (!localTaskId) return
     const transcriptKey = this.taskKey(localTaskId)
-    const trimmed = message.trim()
-    if (!trimmed || !(transcriptKey in this.state.transcripts)) return
+    const exactDetail = message.trim()
+    if (!exactDetail || !(transcriptKey in this.state.transcripts)) return
+    const displayMessage = formatDisplayText(message).trim()
     const status = this.state.tasks.find((task) => task.id === localTaskId)?.status
     const unsuccessful = status === "failed" || status === "blocked"
     const kind = unsuccessful ? "error" : "activity"
-    const transcripts = appendTaskLines(this.state.transcripts, transcriptKey, kind, trimmed, this.nextSequence())
+    const transcripts = displayMessage
+      ? appendTaskLines(this.state.transcripts, transcriptKey, kind, displayMessage, this.nextSequence())
+      : this.state.transcripts
     const taskReasons = unsuccessful
-      ? { ...this.state.taskReasons, [transcriptKey]: formatTaskReason(status, trimmed, []) ?? trimmed }
+      ? { ...this.state.taskReasons, [transcriptKey]: formatTaskReason(status, displayMessage, []) ?? displayMessage }
       : this.state.taskReasons
-    this.set({ ...this.state, transcripts, taskReasons })
+    const taskFailureDetails = unsuccessful
+      ? { ...this.state.taskFailureDetails, [transcriptKey]: exactDetail }
+      : this.state.taskFailureDetails
+    this.set({ ...this.state, transcripts, taskReasons, taskFailureDetails })
   }
 
   private consumeRunActivity(message: string): void {
@@ -541,13 +660,18 @@ export class CockpitStore {
     })
   }
 
-  private consumeSessionUpdate(taskId: string, sessionId: string, update: Extract<RunEvent, { type: "session_update" }>["update"]): void {
+  private consumeSessionUpdate(
+    taskId: string,
+    sessionId: string,
+    update: Extract<RunEvent, { type: "session_update" }>["update"],
+    phase: Extract<RunEvent, { type: "session_update" }>["phase"],
+  ): void {
     const localTaskId = this.localTaskId(taskId)
     if (!localTaskId) return
     const transcriptKey = this.taskKey(localTaskId)
     const current = this.state.transcripts[transcriptKey]
     if (!current) return
-    const next = applySessionUpdate(current, update, this.nextSequence(), sessionId)
+    const next = applySessionUpdate(current, update, this.nextSequence(), sessionId, phase)
     this.set({
       ...this.state,
       transcripts: { ...this.state.transcripts, [transcriptKey]: next },
@@ -650,6 +774,11 @@ export function selectTaskReason(state: CockpitState, taskId: string): string | 
   return state.taskReasons[key]
 }
 
+export function selectTaskFailureDetail(state: CockpitState, taskId: string): string | undefined {
+  const key = state.activePacket ? qualifiedTaskKey(state.activePacket.slug, taskId) : taskId
+  return state.taskFailureDetails[key]
+}
+
 export function selectTaskCheckpoint(state: CockpitState, taskId: string): CockpitCheckpoint | undefined {
   const task = selectTask(state, taskId)
   if (task?.checkpoint) return task.checkpoint
@@ -670,6 +799,27 @@ export function formatTaskReason(
   if (failedDependencyIds.length === 1) return `Blocked because dependency ${failedDependencyIds[0]} failed`
   const last = failedDependencyIds.at(-1)
   return `Blocked because dependencies ${failedDependencyIds.slice(0, -1).join(", ")} and ${last} failed`
+}
+
+function projectTaskStatus(
+  task: CockpitTask,
+  status: TaskStatus,
+  reportReference: string | undefined,
+): CockpitTask {
+  const { reportReference: _previousReference, ...withoutReference } = task
+  return reportReference === undefined
+    ? { ...withoutReference, status }
+    : { ...withoutReference, status, reportReference }
+}
+
+function validateReportReference(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value !== value.trim()) return undefined
+  if (value.startsWith("/") || value.includes("\\") || /[\u0000-\u001f\u007f]/u.test(value)) return undefined
+  if (/^[a-z]:/iu.test(value) || value.startsWith("\\\\")) return undefined
+
+  const segments = value.split("/")
+  if (segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")) return undefined
+  return value
 }
 
 function appendTaskLines(
@@ -732,12 +882,25 @@ function withoutKey(
   return Object.fromEntries(Object.entries(record).filter(([entryKey]) => entryKey !== key))
 }
 
+function withoutQualifiedPacket(
+  record: Readonly<Record<string, string>>,
+  slug: string,
+): Readonly<Record<string, string>> {
+  const prefix = `${slug}/`
+  if (!Object.keys(record).some((key) => key.startsWith(prefix))) return record
+  return Object.fromEntries(Object.entries(record).filter(([key]) => !key.startsWith(prefix)))
+}
+
 function firstMeaningfulLine(message: string | undefined): string | undefined {
   return message?.split(/\r?\n/u).map((line) => line.trim()).find(Boolean)
 }
 
 function isCompleted(status: TaskStatus): boolean {
   return status === "completed" || status === "done" || status === "finished"
+}
+
+function isTimerTerminal(status: TaskStatus): boolean {
+  return isCompleted(status) || status === "failed"
 }
 
 function unfinishedTasks(tasks: readonly CockpitTask[]): readonly CockpitTask[] {

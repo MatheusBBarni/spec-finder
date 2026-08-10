@@ -3,9 +3,10 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { PassThrough } from "node:stream"
-import { DEFAULT_CONFIG } from "../src/config.ts"
+import type { SessionUpdate } from "@agentclientprotocol/sdk"
+import { DEFAULT_CONFIG, parseConfig, type SpecFinderConfig } from "../src/config.ts"
 import type { CheckpointServiceContract } from "../src/checkpoints.ts"
-import { checkpointCommand, runCommand, resolveSetupOptions } from "../src/commands.ts"
+import { checkpointCommand, runCommand, resolveSetupOptions, setupCommand } from "../src/commands.ts"
 import type { BatchResult } from "../src/batch.ts"
 import { parseTask, type TaskFile } from "../src/tasks.ts"
 import type { SetupPickerInput } from "../src/ui/setup-picker.ts"
@@ -52,46 +53,143 @@ async function waitForText(text: () => string, expected: string): Promise<void> 
 }
 
 describe("setup command options", () => {
-  test("keeps every repeated --agent selection and accepts explicit non-interactive choices", async () => {
-    await expect(resolveSetupOptions([
-      "--agent", "claude",
-      "--agent", "cursor",
-      "--agent", "claude",
-      "--global",
-      "--symlink",
-    ], { interactive: false })).resolves.toEqual({
-      targets: ["claude", "cursor", "claude"],
+  test("rejects repeated providers, duplicate values, conflicting scope, symlink, and invalid curated models", async () => {
+    await expect(resolveSetupOptions(["--agent", "claude", "--agent", "claude"], { interactive: false }))
+      .rejects.toThrow("repeated --agent")
+    await expect(resolveSetupOptions(["--model", "auto", "--model", "fable"], { interactive: false }))
+      .rejects.toThrow("duplicate setup option: --model")
+    await expect(resolveSetupOptions(["--speed", "normal", "--speed", "fast"], { interactive: false }))
+      .rejects.toThrow("duplicate setup option: --speed")
+    await expect(resolveSetupOptions(["--global", "--local"], { interactive: false }))
+      .rejects.toThrow("either --global or --local")
+    await expect(resolveSetupOptions(["--symlink"], { interactive: false }))
+      .rejects.toThrow("no longer supports --symlink")
+    await expect(resolveSetupOptions(["--agent", "claude", "--model", "gpt-5.6-luna", "--local"], { interactive: false }))
+      .rejects.toThrow("unsupported setup model")
+    await expect(resolveSetupOptions(["--copy", "--local"], { interactive: false })).resolves.toMatchObject({ provider: "codex" })
+  })
+
+  test("uses Codex, its catalogue default, normal speed, and local scope for a fresh non-interactive workspace", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-fresh-"))
+    try {
+      await expect(resolveSetupOptions([], { interactive: false, root })).resolves.toEqual({
+        provider: "codex",
+        model: "gpt-5.6-luna",
+        speed: "normal",
+        scope: "local",
+        origin: { provider: "default", model: "default", speed: "default" },
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("accepts Grok Build setup with its provider-directed model default", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-grok-setup-"))
+    try {
+      await expect(resolveSetupOptions(["--agent", "grok"], { interactive: false, root })).resolves.toEqual({
+        provider: "grok",
+        model: "auto",
+        speed: "normal",
+        scope: "local",
+        origin: { provider: "flag", model: "default", speed: "default" },
+      })
+      await expect(resolveSetupOptions(["--agent", "grok", "--model", "volatile-model"], { interactive: false, root }))
+        .rejects.toThrow("unsupported setup model for grok")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("reuses configured provider/model/speed/scope and preserves a same-provider custom model", async () => {
+    const configured = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "claude",
+      model: "team-custom-model",
+      speed: "fast",
+      setup: { status: "configured", scope: "global", destination: ".claude/skills" },
+    })
+    await expect(resolveSetupOptions([], {
+      interactive: false,
+      root: "/tmp/spec-finder-saved-setup",
+      loadConfig: async () => configured,
+    })).resolves.toEqual({
+      provider: "claude",
+      model: "team-custom-model",
+      speed: "fast",
       scope: "global",
-      mode: "symlink",
+      origin: { provider: "saved", model: "saved", speed: "saved" },
     })
   })
 
-  test("uses all, local, and copy defaults without a terminal", async () => {
-    await expect(resolveSetupOptions([], { interactive: false })).resolves.toEqual({
-      targets: ["claude", "codex", "cursor"],
+  test("reuses a saved Grok provider and its provider-directed model", async () => {
+    const configured = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "grok",
+      model: "auto",
+      speed: "fast",
+      setup: { status: "configured", scope: "local", destination: ".agents/skills" },
+    })
+
+    await expect(resolveSetupOptions([], {
+      interactive: false,
+      root: "/tmp/spec-finder-saved-grok-setup",
+      loadConfig: async () => configured,
+    })).resolves.toEqual({
+      provider: "grok",
+      model: "auto",
+      speed: "fast",
       scope: "local",
-      mode: "copy",
+      origin: { provider: "saved", model: "saved", speed: "saved" },
     })
   })
 
-  test("prompts only for setup choices omitted from flags", async () => {
-    const terminal = terminalHarness()
-    const resolution = resolveSetupOptions(["--agent", "codex", "--local"], {
-      interactive: true,
-      input: terminal.input,
-      output: terminal.output,
+  test("defaults a changed provider to its newest model while retaining saved speed", async () => {
+    const configured = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "codex",
+      model: "gpt-5.6-sol",
+      speed: "fast",
+      setup: { status: "configured", scope: "local", destination: ".agents/skills" },
     })
-    await waitForText(terminal.text, "Choose skill installation mode")
-    terminal.input.write("\u001B[B")
-    terminal.input.write("\r")
-    const options = await resolution
-
-    expect(options).toEqual({ targets: ["codex"], scope: "local", mode: "symlink" })
-    expect(terminal.text()).not.toContain("Select providers")
-    expect(terminal.text()).not.toContain("Choose installation scope")
+    await expect(resolveSetupOptions(["--agent", "claude"], {
+      interactive: false,
+      loadConfig: async () => configured,
+    })).resolves.toEqual({
+      provider: "claude",
+      model: "fable",
+      speed: "fast",
+      scope: "local",
+      origin: { provider: "flag", model: "default", speed: "saved" },
+    })
   })
 
-  test("uses arrows, Space, and Enter across all interactive setup choices", async () => {
+  test("requires an explicit scope after v2 migration and then preserves its runtime intent", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-v2-"))
+    try {
+      await mkdir(join(root, ".spec-finder"), { recursive: true })
+      await writeFile(join(root, ".spec-finder", "config.json"), JSON.stringify({
+        version: 2,
+        provider: "codex",
+        model: "old-custom",
+        reasoning: "high",
+        speed: "fast",
+        permissions: "prompt",
+        auto_commit: false,
+      }))
+      await expect(resolveSetupOptions([], { interactive: false, root })).rejects.toThrow("has no saved scope")
+      await expect(resolveSetupOptions(["--global"], { interactive: false, root })).resolves.toMatchObject({
+        provider: "codex",
+        model: "old-custom",
+        speed: "fast",
+        scope: "global",
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("uses one keyboard-selectable value per interactive step and ignores Space in single-select mode", async () => {
     const terminal = terminalHarness()
     const resolution = resolveSetupOptions([], {
       interactive: true,
@@ -99,61 +197,486 @@ describe("setup command options", () => {
       output: terminal.output,
     })
 
-    await waitForText(terminal.text, "Select providers")
-    terminal.input.write("\u001B[B\u001B[B")
+    await waitForText(terminal.text, "Choose provider")
     terminal.input.write(" ")
     terminal.input.write("\r")
-
     await waitForText(terminal.text, "Choose installation scope")
-    terminal.input.write("\u001B[B")
+    terminal.input.write("\u001B[B\r")
+    await waitForText(terminal.text, "Choose model")
+    terminal.input.write("\r")
+    await waitForText(terminal.text, "Choose speed")
     terminal.input.write("\r")
 
-    await waitForText(terminal.text, "Choose skill installation mode")
-    terminal.input.write("\u001B[B")
-    terminal.input.write("\r")
-
-    await expect(resolution).resolves.toEqual({
-      targets: ["claude", "codex"],
-      scope: "global",
-      mode: "symlink",
-    })
-    expect(terminal.input.rawModes).toEqual([true, false, true, false, true, false])
-    expect(terminal.input.isPaused()).toBe(true)
-    expect(terminal.text()).toContain("↑/↓ move · Space toggle · Enter confirm · Esc cancel")
-  })
-
-  test("requires one provider and restores raw mode after cancellation", async () => {
-    const terminal = terminalHarness()
-    const resolution = resolveSetupOptions(["--local", "--copy"], {
-      interactive: true,
-      input: terminal.input,
-      output: terminal.output,
-    })
-
-    await waitForText(terminal.text, "Select providers")
-    terminal.input.write(" ")
-    terminal.input.write("\u001B[B ")
-    terminal.input.write("\u001B[B ")
-    terminal.input.write("\r")
-    await waitForText(terminal.text, "Select at least one provider before continuing")
-    terminal.input.write("\u001B")
-
-    await expect(resolution).rejects.toThrow("setup cancelled")
-    expect(terminal.input.rawModes).toEqual([true, false])
+    await expect(resolution).resolves.toMatchObject({ provider: "codex", scope: "global", model: "gpt-5.6-luna", speed: "normal" })
+    expect(terminal.text()).not.toContain("Space toggle")
+    expect(terminal.input.rawModes).toEqual([true, false, true, false, true, false, true, false])
     expect(terminal.input.isPaused()).toBe(true)
   })
 
-  test("rejects conflicting flags and missing providers", async () => {
-    await expect(resolveSetupOptions(["--global", "--local"], { interactive: false }))
-      .rejects.toThrow("setup accepts either --global or --local, not both")
-    await expect(resolveSetupOptions(["--symlink", "--copy"], { interactive: false }))
-      .rejects.toThrow("setup accepts either --symlink or --copy, not both")
-    await expect(resolveSetupOptions(["--agent"], { interactive: false }))
-      .rejects.toThrow("setup requires a provider after --agent")
+  test("requires an explicit migrated scope selection and reports cancellation without success", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-v2-picker-"))
+    try {
+      await mkdir(join(root, ".spec-finder"), { recursive: true })
+      await writeFile(join(root, ".spec-finder", "config.json"), JSON.stringify({
+        version: 2,
+        provider: "codex",
+        model: "auto",
+        reasoning: "high",
+        speed: "normal",
+        permissions: "prompt",
+        auto_commit: false,
+      }))
+      const terminal = terminalHarness()
+      const resolution = resolveSetupOptions([], {
+        root,
+        interactive: true,
+        input: terminal.input,
+        output: terminal.output,
+      })
+      await waitForText(terminal.text, "Choose provider")
+      terminal.input.write("\r")
+      await waitForText(terminal.text, "Choose installation scope")
+      terminal.input.write("\r")
+      await waitForText(terminal.text, "Choose a scope before continuing")
+      terminal.input.write("\u001B[B\r")
+      await waitForText(terminal.text, "Choose model")
+      terminal.input.write("\u001B")
+      await expect(resolution).rejects.toThrow("setup cancelled")
+      expect(terminal.input.rawModes.at(-1)).toBe(false)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("summarizes requested setup values and explicit legacy preservation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-summary-"))
+    const terminal = commandOutput()
+    try {
+      const code = await setupCommand(["--agent", "cursor", "--model", "auto", "--speed", "fast", "--global"], {
+        root,
+        output: terminal.output,
+        loadConfig: async () => DEFAULT_CONFIG,
+        setupWorkspace: async (_root, request) => ({
+          configPath: join(root, ".spec-finder", "config.json"),
+          provider: request.provider,
+          model: request.model,
+          speed: request.speed,
+          destination: ".agents/skills",
+          scope: request.scope,
+          installed: [".agents/skills/sf-task-report"],
+          legacyCursor: "preserved",
+        }),
+      })
+      expect(code).toBe(0)
+      expect(terminal.text()).toContain("requested model: auto")
+      expect(terminal.text()).toContain("requested speed: fast")
+      expect(terminal.text()).toContain("destination: .agents/skills")
+      expect(terminal.text()).toContain("legacy Cursor skills: preserved (not migrated)")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })
 
 describe("run command batch integration", () => {
+  test("accepts a Grok runtime override without changing saved setup metadata", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-grok-runtime-override-"))
+    const stored = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "codex",
+      model: "gpt-5.6-luna",
+      reasoning: "high",
+      setup: { status: "configured", scope: "local", destination: ".agents/skills" },
+    })
+    let received: SpecFinderConfig | undefined
+
+    try {
+      const exitCode = await runCommand(["demo", "--no-ui", "--provider", "grok"], {
+        root,
+        output: commandOutput().output,
+        loadConfig: async () => stored,
+        runTaskPacket: async (options) => {
+          received = options.config
+          return { ok: true, completed: 1, failed: 0, blocked: 0 }
+        },
+      })
+
+      expect(exitCode).toBe(0)
+      expect(received?.provider).toBe("grok")
+      expect(received?.model).toBe("auto")
+      expect(received?.reasoning).toBe("auto")
+      expect(received?.setup).toBe(stored.setup)
+
+      let explicitReceived: SpecFinderConfig | undefined
+      const explicitExitCode = await runCommand([
+        "demo",
+        "--no-ui",
+        "--provider",
+        "grok",
+        "--model",
+        "grok-4.5",
+        "--reasoning",
+        "low",
+      ], {
+        root,
+        output: commandOutput().output,
+        loadConfig: async () => stored,
+        runTaskPacket: async (options) => {
+          explicitReceived = options.config
+          return { ok: true, completed: 1, failed: 0, blocked: 0 }
+        },
+      })
+
+      expect(explicitExitCode).toBe(0)
+      expect(explicitReceived?.model).toBe("grok-4.5")
+      expect(explicitReceived?.reasoning).toBe("low")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("layers a provider override over configured v3 metadata without changing its destination", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-configured-override-"))
+    const stored = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "codex",
+      setup: { status: "configured", scope: "local", destination: ".agents/skills" },
+    })
+    let received: SpecFinderConfig | undefined
+
+    try {
+      const result = await runCommand(["demo", "--no-ui", "--provider", "claude"], {
+        root,
+        output: commandOutput().output,
+        loadConfig: async () => stored,
+        runTaskPacket: async (options) => {
+          received = options.config
+          return { ok: true, completed: 1, failed: 0, blocked: 0 }
+        },
+      })
+
+      expect(result).toBe(0)
+      expect(received?.provider).toBe("claude")
+      expect(received?.setup).toBe(stored.setup)
+      expect(received?.setup).toEqual({
+        status: "configured",
+        scope: "local",
+        destination: ".agents/skills",
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("explains a typed no-work result in singular no-ui output and succeeds", async () => {
+    const output = commandOutput()
+    const result = await runCommand(["complete", "--no-ui"], {
+      root: "/tmp/spec-finder-command-no-work-output",
+      output: output.output,
+      loadConfig: async () => DEFAULT_CONFIG,
+      runTaskPacket: async (options) => {
+        options.emit({
+          type: "run_finished",
+          ok: true,
+          message: "0 tasks completed",
+          outcome: "no_work",
+          reason: "all_tasks_complete",
+        })
+        return {
+          ok: true,
+          completed: 0,
+          failed: 0,
+          blocked: 0,
+          outcome: "no_work",
+          reason: "all_tasks_complete",
+        }
+      },
+    })
+
+    expect(result).toBe(0)
+    expect(output.text()).toBe("ok: no executable tasks; all tasks are already complete\n")
+  })
+
+  test("waits for an interactive typed no-work exit before closing the cockpit", async () => {
+    const output = commandOutput(true)
+    let releaseExit: (() => void) | undefined
+    let waitForExitCalls = 0
+    let waitForDismissalCalls = 0
+    let closeCalls = 0
+    let settled = false
+    const exit = new Promise<void>((resolve) => { releaseExit = resolve })
+    const command = runCommand(["complete"], {
+      root: "/tmp/spec-finder-command-no-work-interactive",
+      input: { isTTY: true },
+      output: output.output,
+      loadConfig: async () => DEFAULT_CONFIG,
+      startCockpit: async () => ({
+        waitForExit: () => {
+          waitForExitCalls += 1
+          return exit
+        },
+        waitForDismissal: async () => { waitForDismissalCalls += 1 },
+        close: () => { closeCalls += 1 },
+      }),
+      runTaskPacket: async (options) => {
+        options.emit({
+          type: "run_finished",
+          ok: true,
+          message: "No executable tasks: all tasks are already complete",
+          outcome: "no_work",
+          reason: "all_tasks_complete",
+        })
+        return {
+          ok: true,
+          completed: 0,
+          failed: 0,
+          blocked: 0,
+          outcome: "no_work",
+          reason: "all_tasks_complete",
+        }
+      },
+    })
+    void command.then(() => { settled = true })
+
+    for (let attempt = 0; attempt < 100 && waitForExitCalls === 0; attempt += 1) await Bun.sleep(1)
+    expect(waitForExitCalls).toBe(1)
+    expect(settled).toBeFalse()
+    expect(closeCalls).toBe(0)
+    expect(waitForDismissalCalls).toBe(0)
+
+    releaseExit?.()
+    expect(await command).toBe(0)
+    expect(closeCalls).toBe(1)
+  })
+
+  test("automatically closes normal interactive success without waiting for no-work exit", async () => {
+    const output = commandOutput(true)
+    let waitForExitCalls = 0
+    let closeCalls = 0
+    const result = await runCommand(["alpha"], {
+      root: "/tmp/spec-finder-command-normal-interactive",
+      input: { isTTY: true },
+      output: output.output,
+      loadConfig: async () => DEFAULT_CONFIG,
+      startCockpit: async () => ({
+        waitForExit: async () => { waitForExitCalls += 1 },
+        waitForDismissal: async () => undefined,
+        close: () => { closeCalls += 1 },
+      }),
+      runTaskPacket: async () => ({ ok: true, completed: 1, failed: 0, blocked: 0 }),
+    })
+
+    expect(result).toBe(0)
+    expect(waitForExitCalls).toBe(0)
+    expect(closeCalls).toBe(1)
+  })
+
+  test("retains interactive single and batch failures until dismissal", async () => {
+    for (const mode of ["single", "batch"] as const) {
+      const root = await mkdtemp(join(tmpdir(), `spec-finder-${mode}-failure-review-`))
+      const terminal = commandOutput(true)
+      let dismiss: (() => void) | undefined
+      let waitCalls = 0
+      let waitForExitCalls = 0
+      let closeCalls = 0
+      const dismissal = new Promise<void>((resolve) => { dismiss = resolve })
+      const session = {
+        waitForDismissal: () => {
+          waitCalls += 1
+          return dismissal
+        },
+        waitForExit: async () => { waitForExitCalls += 1 },
+        close: () => { closeCalls += 1 },
+      }
+
+      try {
+        const result = mode === "single"
+          ? runCommand(["alpha"], {
+              root,
+              input: { isTTY: true },
+              output: terminal.output,
+              loadConfig: async () => DEFAULT_CONFIG,
+              startCockpit: async () => session,
+              runTaskPacket: async () => ({ ok: false, completed: 0, failed: 1, blocked: 0 }),
+            })
+          : runCommand(["--multiple", "alpha,beta"], {
+              root,
+              input: { isTTY: true },
+              output: terminal.output,
+              loadConfig: async () => DEFAULT_CONFIG,
+              startCockpit: async () => session,
+              runBatch: async () => ({
+                ok: false,
+                status: "failed",
+                stoppingSlug: "alpha",
+                packets: [
+                  { slug: "alpha", outcome: "failed", detail: "stopped" },
+                  { slug: "beta", outcome: "not_started" },
+                ],
+              }),
+            })
+        let settled = false
+        void result.then(() => { settled = true })
+        for (let attempt = 0; attempt < 20 && waitCalls === 0; attempt += 1) await Bun.sleep(1)
+
+        expect(waitCalls).toBe(1)
+        expect(settled).toBeFalse()
+        dismiss?.()
+        expect(await result).toBe(1)
+        expect(closeCalls).toBe(1)
+        expect(waitForExitCalls).toBe(0)
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    }
+  })
+
+  test("requires both terminal streams and preserves console failure behavior before starting the cockpit", async () => {
+    const scenarios = [
+      { name: "stdin", args: ["alpha"], inputTTY: false, outputTTY: true },
+      { name: "stdout", args: ["alpha"], inputTTY: true, outputTTY: false },
+      { name: "flag", args: ["alpha", "--no-ui"], inputTTY: true, outputTTY: true },
+    ] as const
+
+    for (const scenario of scenarios) {
+      const root = await mkdtemp(join(tmpdir(), `spec-finder-non-tty-review-${scenario.name}-`))
+      const terminal = commandOutput(scenario.outputTTY)
+      let starts = 0
+      try {
+        const result = await runCommand([...scenario.args], {
+          root,
+          input: { isTTY: scenario.inputTTY },
+          output: terminal.output,
+          loadConfig: async () => DEFAULT_CONFIG,
+          startCockpit: async () => {
+            starts += 1
+            return { close: () => undefined, waitForDismissal: async () => undefined }
+          },
+          runTaskPacket: async (options) => {
+            options.emit({ type: "task_status", taskId: "task_01", status: "failed" })
+            options.emit({ type: "activity", taskId: "task_01", message: "console failure detail" })
+            options.emit({ type: "run_finished", ok: false, message: "console failure" })
+            return { ok: false, completed: 0, failed: 1, blocked: 0 }
+          },
+        })
+        expect(result).toBe(1)
+        expect(starts).toBe(0)
+        expect(terminal.text()).toContain("task_01: failed")
+        expect(terminal.text()).toContain("task_01: console failure detail")
+        expect(terminal.text()).toContain("failed: console failure")
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    }
+  })
+
+  test("does not wait for successful, cancelled, or preflight-failed interactive outcomes", async () => {
+    const scenarios = ["success", "cancelled", "preflight"] as const
+    for (const scenario of scenarios) {
+      const root = await mkdtemp(join(tmpdir(), `spec-finder-${scenario}-review-`))
+      let waitCalls = 0
+      let closeCalls = 0
+      try {
+        const common = {
+          root,
+          input: { isTTY: true },
+          output: commandOutput(true).output,
+          loadConfig: async () => DEFAULT_CONFIG,
+          startCockpit: async () => ({
+            waitForDismissal: async () => { waitCalls += 1 },
+            close: () => { closeCalls += 1 },
+          }),
+        }
+        const result = scenario === "success"
+          ? await runCommand(["alpha"], {
+              ...common,
+              runTaskPacket: async () => ({ ok: true, completed: 1, failed: 0, blocked: 0 }),
+            })
+          : await runCommand(["--multiple", "alpha"], {
+              ...common,
+              runBatch: async () => ({
+                ok: false,
+                status: scenario === "cancelled" ? "cancelled" : "preflight_failed",
+                packets: [{ slug: "alpha", outcome: scenario === "cancelled" ? "cancelled" : "not_started" }],
+              }),
+            })
+
+        expect(result).toBe(scenario === "success" ? 0 : 1)
+        expect(waitCalls).toBe(0)
+        expect(closeCalls).toBe(1)
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    }
+  })
+
+  test("closes immediately on active cancellation and never re-enters failure review", async () => {
+    for (const mode of ["single", "batch"] as const) {
+      const root = await mkdtemp(join(tmpdir(), `spec-finder-${mode}-cancel-review-`))
+      const terminal = commandOutput(true)
+      let cancel: (() => void) | undefined
+      let releaseRunner: (() => void) | undefined
+      let markStarted: (() => void) | undefined
+      let waitCalls = 0
+      let closeCalls = 0
+      const started = new Promise<void>((resolve) => { markStarted = resolve })
+      const runnerRelease = new Promise<void>((resolve) => { releaseRunner = resolve })
+      const session = {
+        waitForDismissal: async () => { waitCalls += 1 },
+        close: () => { closeCalls += 1 },
+      }
+
+      try {
+        const command = mode === "single"
+          ? runCommand(["alpha"], {
+              root,
+              input: { isTTY: true },
+              output: terminal.output,
+              loadConfig: async () => DEFAULT_CONFIG,
+              startCockpit: async (_store, onCancel) => {
+                cancel = onCancel
+                return session
+              },
+              runTaskPacket: async () => {
+                markStarted?.()
+                await runnerRelease
+                return { ok: false, completed: 0, failed: 1, blocked: 0 }
+              },
+            })
+          : runCommand(["--multiple", "alpha"], {
+              root,
+              input: { isTTY: true },
+              output: terminal.output,
+              loadConfig: async () => DEFAULT_CONFIG,
+              startCockpit: async (_store, onCancel) => {
+                cancel = onCancel
+                return session
+              },
+              runBatch: async () => {
+                markStarted?.()
+                await runnerRelease
+                return {
+                  ok: false,
+                  status: "failed",
+                  stoppingSlug: "alpha",
+                  packets: [{ slug: "alpha", outcome: "failed", detail: "stopped" }],
+                }
+              },
+            })
+
+        await started
+        cancel?.()
+        expect(closeCalls).toBe(1)
+        releaseRunner?.()
+        expect(await command).toBe(1)
+        expect(waitCalls).toBe(0)
+        expect(closeCalls).toBe(1)
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    }
+  })
+
   test("routes validated batch arguments once with shared signal/config and deterministic success output", async () => {
     const terminal = commandOutput()
     const signals: AbortSignal[] = []
@@ -296,7 +819,7 @@ describe("run command batch integration", () => {
       },
       startCockpit: async () => {
         rendererCalls += 1
-        return { close: () => undefined }
+        return { close: () => undefined, waitForDismissal: async () => undefined }
       },
       runBatch: async () => {
         coordinatorCalls += 1
@@ -314,9 +837,13 @@ describe("run command batch integration", () => {
     await expect(runCommand(["--multiple", "alpha,beta"], {
       root: "/tmp/spec-finder-command-test",
       output: output.output,
+      input: { isTTY: true },
       noUi: false,
       loadConfig: async () => DEFAULT_CONFIG,
-      startCockpit: async () => ({ close: () => { closeCalls += 1 } }),
+      startCockpit: async () => ({
+        close: () => { closeCalls += 1 },
+        waitForDismissal: async () => undefined,
+      }),
       runBatch: async () => { throw new Error("preflight exploded") },
     })).rejects.toThrow("preflight exploded")
     expect(closeCalls).toBe(1)
@@ -338,6 +865,67 @@ describe("run command batch integration", () => {
     expect(singleCalls).toEqual(["single-packet"])
     expect(singleOutput.text()).toContain("task_01: single packet activity")
     expect(singleOutput.text()).toContain("ok: single packet complete")
+  })
+
+  test("closes one renderer after a thrown single-runner error and propagates it", async () => {
+    const output = commandOutput(true)
+    let closeCalls = 0
+
+    await expect(runCommand(["alpha"], {
+      root: "/tmp/spec-finder-command-test",
+      output: output.output,
+      input: { isTTY: true },
+      loadConfig: async () => DEFAULT_CONFIG,
+      startCockpit: async () => ({
+        close: () => { closeCalls += 1 },
+        waitForExit: async () => { throw new Error("no-work exit should not be awaited") },
+        waitForDismissal: async () => undefined,
+      }),
+      runTaskPacket: async () => { throw new Error("runner exploded") },
+    })).rejects.toThrow("runner exploded")
+
+    expect(closeCalls).toBe(1)
+  })
+
+  test("keeps no-ui output free of session updates and report references", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-command-report-output-"))
+    const output = commandOutput()
+    try {
+      const result = await runCommand(["demo", "--no-ui"], {
+        root,
+        output: output.output,
+        loadConfig: async () => DEFAULT_CONFIG,
+        runTaskPacket: async (options) => {
+          const reportMetadata = {
+            sessionUpdate: "session_info_update",
+            title: "Final report prompt /Users/alice/spec-finder/reports/task_01.md",
+          } satisfies SessionUpdate
+          options.emit({
+            type: "session_update",
+            taskId: "task_01",
+            sessionId: "reused-session",
+            phase: "report",
+            update: reportMetadata,
+          })
+          options.emit({
+            type: "task_status",
+            taskId: "task_01",
+            status: "completed",
+            reportReference: ".spec-finder/tasks/demo/reports/task_01.md",
+          })
+          options.emit({ type: "run_finished", ok: true, message: "single packet complete" })
+          return { ok: true, completed: 1, failed: 0, blocked: 0 }
+        },
+      })
+
+      expect(result).toBe(0)
+      expect(output.text()).toBe("task_01: completed\nok: single packet complete\n")
+      expect(output.text()).not.toContain("Report:")
+      expect(output.text()).not.toContain("session_info_update")
+      expect(output.text()).not.toContain("/Users/alice/spec-finder")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   test("refuses a second run in the same workspace until the active run releases its lease", async () => {

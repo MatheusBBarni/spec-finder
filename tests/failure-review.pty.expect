@@ -1,0 +1,76 @@
+#!/usr/bin/expect -f
+
+set timeout 20
+match_max 200000
+log_user 0
+set child_spawn_id ""
+
+proc fail {message} {
+    global child_spawn_id
+    if {$child_spawn_id ne ""} {
+        catch {send -i $child_spawn_id -- "\003"}
+        catch {close -i $child_spawn_id}
+        catch {wait -i $child_spawn_id}
+        set child_spawn_id ""
+    }
+    puts stderr "test:pty failed: $message"
+    exit 1
+}
+
+foreach tool {/usr/bin/script /usr/bin/expect} {
+    if {![file executable $tool]} {
+        fail "required executable is missing: $tool"
+    }
+}
+
+proc literal_pattern {text} {
+    set ansi {\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))}
+    set separator "(?:$ansi|\\r|\\n)*"
+    set pattern $separator
+    foreach character [split $text ""] {
+        set escaped [regsub -all {[][(){}.^$*+?|\\]} $character {\\&}]
+        append pattern $escaped $separator
+    }
+    return $pattern
+}
+
+proc expect_text {text description} {
+    set pattern [literal_pattern $text]
+    expect -re $pattern {
+        return
+    } eof {
+        fail "missing $description before the PTY closed"
+    } timeout {
+        fail "timed out waiting for $description"
+    }
+}
+
+spawn -noecho /usr/bin/script -q /dev/null bun run tests/fixtures/failure-review-cli.ts
+set child_spawn_id $spawn_id
+
+expect_text "RUN.FAILURES" "failure review label"
+expect_text "task_01" "failed task ID"
+expect_text "PTY fixture failure: line one" "first surfaced error line"
+expect_text "PTY fixture failure: line two" "second surfaced error line"
+expect_text "PTY fixture failure: line three" "third surfaced error line"
+expect_text "Resolve the listed error, then rerun the task packet." "generic recovery hint"
+
+set timeout 0
+expect timeout {
+    puts "test:pty: retained failure review observed before dismissal"
+} eof {
+    fail "failure review exited before Esc dismissal"
+}
+set timeout 20
+
+send -- "\033"
+expect_text "FIXTURE_EXIT=1" "post-dismissal fixture exit marker"
+expect eof
+
+set wait_status [wait]
+if {[llength $wait_status] < 4 || [lindex $wait_status 3] != 1} {
+    fail "expected original exit status 1, got $wait_status"
+}
+
+puts "test:pty: Esc restored terminal and preserved exit status 1"
+puts "test:pty: PASS"

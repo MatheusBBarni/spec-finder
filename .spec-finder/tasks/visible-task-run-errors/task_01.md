@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Establish Command-Owned Cockpit Sessions
 type: frontend
 complexity: high

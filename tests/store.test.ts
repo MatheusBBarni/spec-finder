@@ -8,11 +8,13 @@ import {
   selectSelectedTask,
   selectSelectedTranscript,
   selectTaskCheckpoint,
+  selectTaskFailureDetail,
   selectTaskReason,
   selectTaskTranscript,
   selectUnfinishedTasks,
   selectVisibleTasks,
 } from "../src/ui/store.ts"
+import { formatTaskTimer } from "../src/ui/timer.ts"
 
 describe("cockpit store", () => {
   test("initializes task-scoped state and follows the first active task", () => {
@@ -38,6 +40,162 @@ describe("cockpit store", () => {
       followingActiveTask: true,
     })
     expect(selectSelectedTask(store.getSnapshot())?.id).toBe("task_01")
+  })
+
+  test("resets the ephemeral timer projection for each run", () => {
+    let nowMs = 1_000
+    const store = new CockpitStore(() => nowMs)
+    store.consume({
+      type: "run_started",
+      slug: "first",
+      config: DEFAULT_CONFIG,
+      tasks: [task(1, "First"), task(2, "Second")],
+    })
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    expect(store.getSnapshot().taskTimers.task_01).toEqual({
+      kind: "running",
+      startedAtMs: 1_000,
+      elapsedSeconds: 0,
+    })
+
+    nowMs = 9_000
+    store.consume({
+      type: "run_started",
+      slug: "second",
+      config: DEFAULT_CONFIG,
+      tasks: [task(1, "Fresh one"), task(2, "Fresh two")],
+    })
+
+    expect(store.getSnapshot().taskTimers).toEqual({})
+    expect(formatTaskTimer("pending", store.getSnapshot().taskTimers.task_01)).toBe("—")
+    expect(formatTaskTimer("pending", store.getSnapshot().taskTimers.task_02)).toBe("—")
+  })
+
+  test("starts once, ticks only running tasks, and keeps view state separate", () => {
+    let nowMs = 1_000
+    const store = new CockpitStore(() => nowMs)
+    store.consume({
+      type: "run_started",
+      slug: "demo",
+      config: DEFAULT_CONFIG,
+      tasks: [task(1, "First"), task(2, "Second")],
+    })
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    const firstTimer = store.getSnapshot().taskTimers.task_01
+
+    nowMs = 2_500
+    store.tick()
+    expect(store.getSnapshot().taskTimers.task_01).toEqual({
+      kind: "running",
+      startedAtMs: 1_000,
+      elapsedSeconds: 1,
+    })
+
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    expect(store.getSnapshot().taskTimers.task_01).toMatchObject({ startedAtMs: 1_000 })
+    expect(store.getSnapshot().taskTimers.task_01).not.toBe(firstTimer)
+
+    nowMs = 3_500
+    store.consume({ type: "task_status", taskId: "task_02", status: "in_progress" })
+    nowMs = 4_500
+    store.tick()
+
+    expect(store.getSnapshot().taskTimers.task_01).toMatchObject({ elapsedSeconds: 3 })
+    expect(store.getSnapshot().taskTimers.task_02).toMatchObject({
+      kind: "running",
+      startedAtMs: 3_500,
+      elapsedSeconds: 1,
+    })
+
+    store.consume({ type: "activity", taskId: "task_01", message: "task output" })
+    store.consume({ type: "activity", message: "run output" })
+    expect(store.getSnapshot().taskTimers.task_01).toMatchObject({ elapsedSeconds: 3 })
+    expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).toEqual(["task output"])
+    expect(store.getSnapshot().runActivity.map((entry) => entry.text)).toEqual(["Starting demo", "run output"])
+  })
+
+  test("freezes the first terminal value and handles missing baselines", () => {
+    let nowMs = 2_000
+    const store = new CockpitStore(() => nowMs)
+    store.consume({
+      type: "run_started",
+      slug: "demo",
+      config: DEFAULT_CONFIG,
+      tasks: [task(1, "Observed"), task(2, "Never started"), task(3, "Blocked")],
+    })
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    nowMs = 5_250
+    store.consume({ type: "task_status", taskId: "task_01", status: "completed" })
+    const finishedTimer = store.getSnapshot().taskTimers.task_01
+
+    nowMs = 20_000
+    store.consume({ type: "task_status", taskId: "task_01", status: "failed" })
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    store.tick()
+
+    expect(store.getSnapshot().taskTimers.task_01).toBe(finishedTimer)
+    expect(formatTaskTimer("completed", finishedTimer)).toBe("00:03")
+
+    store.consume({ type: "task_status", taskId: "task_02", status: "completed" })
+    expect(store.getSnapshot().taskTimers.task_02).toEqual({ kind: "unavailable" })
+    expect(formatTaskTimer("completed", store.getSnapshot().taskTimers.task_02)).toBe("unavailable")
+
+    store.consume({ type: "task_status", taskId: "task_03", status: "blocked" })
+    expect(store.getSnapshot().taskTimers.task_03).toBeUndefined()
+    expect(formatTaskTimer("blocked", store.getSnapshot().taskTimers.task_03)).toBe("—")
+  })
+
+  test("suppresses timer-only notifications when the displayed second is unchanged", () => {
+    let nowMs = 10_000
+    const store = new CockpitStore(() => nowMs)
+    store.consume({
+      type: "run_started",
+      slug: "demo",
+      config: DEFAULT_CONFIG,
+      tasks: [task(1, "First")],
+    })
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+
+    let notifications = 0
+    store.subscribe(() => {
+      notifications += 1
+    })
+    nowMs = 10_999
+    const sameSecondSnapshot = store.getSnapshot()
+    store.tick()
+    expect(notifications).toBe(0)
+    expect(store.getSnapshot()).toBe(sameSecondSnapshot)
+
+    store.tick(Number.NaN)
+    store.tick(-1)
+    store.tick(Number.POSITIVE_INFINITY)
+    expect(notifications).toBe(0)
+    expect(store.getSnapshot()).toBe(sameSecondSnapshot)
+
+    nowMs = 11_000
+    store.tick()
+    expect(notifications).toBe(1)
+    expect(store.getSnapshot().taskTimers.task_01).toMatchObject({ elapsedSeconds: 1 })
+  })
+
+  test("does not invent a task duration when run-level completion has no task terminal", () => {
+    let nowMs = 3_000
+    const store = new CockpitStore(() => nowMs)
+    store.consume({
+      type: "run_started",
+      slug: "demo",
+      config: DEFAULT_CONFIG,
+      tasks: [task(1, "Still running")],
+    })
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    const runningTimer = store.getSnapshot().taskTimers.task_01
+
+    nowMs = 9_000
+    store.consume({ type: "run_finished", ok: true, message: "finished without task status" })
+
+    expect(store.getSnapshot().taskTimers.task_01).toBe(runningTimer)
+    expect(store.getSnapshot().taskTimers.task_01?.kind).toBe("running")
+    expect(store.getSnapshot().finished?.message).toBe("finished without task status")
   })
 
   test("hides tasks completed before opening and retains tasks completed during the session", () => {
@@ -100,15 +258,88 @@ describe("cockpit store", () => {
     expect(store.getSnapshot()).toMatchObject({ selectedTaskId: "task_02", followingActiveTask: true })
   })
 
+  test("retains only safe completed report references and appends labelled outcome detail", () => {
+    const store = startedStore([task(1, "Report task")])
+    const initial = store.getSnapshot()
+    const reference = ".spec-finder/tasks/demo/reports/task_01.md"
+
+    store.consume({ type: "task_status", taskId: "task_01", status: "completed", reportReference: reference })
+
+    expect(initial.tasks[0]?.reportReference).toBeUndefined()
+    expect(initial.transcripts.task_01).toEqual([])
+    expect(store.getSnapshot().tasks[0]).toMatchObject({ status: "completed", reportReference: reference })
+    expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).toEqual([
+      "Task completed",
+      `Report: ${reference}`,
+    ])
+  })
+
+  test("omits malformed or non-completed report references without changing lifecycle semantics", () => {
+    const invalidReferences = [
+      "",
+      " /reports/task_01.md",
+      "/reports/task_01.md",
+      "../reports/task_01.md",
+      "reports/../task_01.md",
+      "reports//task_01.md",
+      "reports/./task_01.md",
+      "C:\\reports\\task_01.md",
+      "C:reports/task_01.md",
+      "\\\\server\\share\\task_01.md",
+      "reports/task_01\n.md",
+      "reports\\task_01.md",
+    ]
+
+    for (const reportReference of invalidReferences) {
+      const store = startedStore([task(1, "Report task")])
+      store.consume({ type: "task_status", taskId: "task_01", status: "completed", reportReference })
+      const state = store.getSnapshot()
+      expect(state.tasks[0]?.reportReference).toBeUndefined()
+      expect(selectTaskTranscript(state, "task_01").map((entry) => entry.text)).toEqual(["Task completed"])
+    }
+
+    for (const status of ["failed", "blocked"] as const) {
+      const store = startedStore([task(1, "Report task")])
+      store.consume({ type: "task_status", taskId: "task_01", status, reportReference: "reports/task_01.md" })
+      const state = store.getSnapshot()
+      expect(state.tasks[0]).toMatchObject({ status })
+      expect(state.tasks[0]?.reportReference).toBeUndefined()
+      expect(selectTaskTranscript(state, "task_01").map((entry) => entry.text)).not.toContain("Report: reports/task_01.md")
+    }
+  })
+
   test("keeps task activity and streamed session updates isolated", () => {
     const store = startedStore([task(1, "First"), task(2, "Second")])
     store.consume({ type: "activity", taskId: "task_01", message: "Inspecting task one" })
+    store.consume({
+      type: "session_update",
+      taskId: "task_01",
+      sessionId: "reused-session",
+      phase: "implementation",
+      update: message("phase-message", "Implementation"),
+    })
+    store.consume({
+      type: "session_update",
+      taskId: "task_01",
+      sessionId: "reused-session",
+      phase: "implementation",
+      update: message("phase-message", " output"),
+    })
+    store.consume({
+      type: "session_update",
+      taskId: "task_01",
+      sessionId: "reused-session",
+      phase: "report",
+      update: message("phase-message", "Report output"),
+    })
     store.consume({ type: "session_update", taskId: "task_02", sessionId: "test-session", update: message("message-2", "Task two") })
     store.consume({ type: "session_update", taskId: "task_02", sessionId: "test-session", update: message("message-2", " output") })
     store.consume({ type: "activity", taskId: "task_02", message: "Finished task two fixture" })
 
     expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).toEqual([
       "Inspecting task one",
+      "Implementation output",
+      "Report output",
     ])
     expect(selectTaskTranscript(store.getSnapshot(), "task_02").map((entry) => entry.text)).toEqual([
       "Task two output",
@@ -148,6 +379,9 @@ describe("cockpit store", () => {
       message: "Provider connection failed\nAdditional transport detail",
     })
     expect(selectTaskReason(store.getSnapshot(), "task_01")).toBe("Provider connection failed")
+    expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBe(
+      "Provider connection failed\nAdditional transport detail",
+    )
     expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.kind)).toEqual([
       "error",
       "error",
@@ -162,6 +396,92 @@ describe("cockpit store", () => {
     })
   })
 
+  test("keeps the exact failure detail separate from the safe compact reason", () => {
+    const store = startedStore([task(1, "Report failure")])
+    const unsafeActivity = "final report failed at /Users/alice/spec-finder/reports/task_01.md\u001B[31m\nadditional detail"
+    store.consume({ type: "task_status", taskId: "task_01", status: "failed" })
+    const beforeActivity = store.getSnapshot()
+    store.consume({ type: "activity", taskId: "task_01", message: unsafeActivity })
+
+    const state = store.getSnapshot()
+    const reason = selectTaskReason(state, "task_01")
+    const detail = selectTaskFailureDetail(state, "task_01")
+    const transcript = selectTaskTranscript(state, "task_01").map((entry) => entry.text).join("\n")
+
+    expect(reason).toContain("[path redacted]")
+    expect(detail).toBe(unsafeActivity)
+    expect(beforeActivity.taskFailureDetails).toEqual({})
+    expect(state.taskFailureDetails).not.toBe(beforeActivity.taskFailureDetails)
+    expect(transcript).not.toContain("/Users/alice/spec-finder")
+    expect(transcript).not.toContain("\u001B")
+    expect(state.tasks[0]?.status).toBe("failed")
+  })
+
+  test("leaves missing failure activity explicit and does not synthesize detail", () => {
+    const store = startedStore([task(1, "Missing detail")])
+    store.consume({ type: "task_status", taskId: "task_01", status: "failed" })
+    store.consume({ type: "run_finished", ok: false, message: "1 failed · 0 blocked" })
+
+    expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBeUndefined()
+    expect(store.getSnapshot().taskFailureDetails).toEqual({})
+    expect(selectTaskReason(store.getSnapshot(), "task_01")).toBe("Task failed; see latest activity")
+  })
+
+  test("captures unsuccessful activity and clears it on lifecycle resets", () => {
+    const store = startedStore([task(1, "Retryable")])
+    store.consume({ type: "task_status", taskId: "task_01", status: "failed" })
+    expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBeUndefined()
+    store.consume({
+      type: "activity",
+      taskId: "task_01",
+      message: "  First line\nSecond line  ",
+    })
+    expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBe("First line\nSecond line")
+
+    store.consume({ type: "task_status", taskId: "task_01", status: "completed" })
+    expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBeUndefined()
+
+    store.consume({ type: "task_status", taskId: "task_01", status: "blocked" })
+    store.consume({
+      type: "activity",
+      taskId: "task_01",
+      message: "final report handoff blocked: provider detail",
+    })
+    expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBe("final report handoff blocked: provider detail")
+
+    store.consume({ type: "task_status", taskId: "task_01", status: "failed" })
+    store.consume({ type: "activity", taskId: "task_01", message: "Later failure" })
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBeUndefined()
+
+    store.consume({ type: "run_started", slug: "next", config: DEFAULT_CONFIG, tasks: [task(1, "Fresh task")] })
+    expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBeUndefined()
+  })
+
+  test("clears stale detail when a batch packet starts again", () => {
+    const store = new CockpitStore()
+    store.consume({ type: "batch_started", slugs: ["alpha"] })
+    store.consume({
+      type: "batch_packet_started",
+      slug: "alpha",
+      index: 0,
+      total: 1,
+      tasks: [task(1, "Retryable packet task")],
+    })
+    store.consume({ type: "task_status", taskId: "alpha/task_01", status: "failed" })
+    store.consume({ type: "activity", taskId: "alpha/task_01", message: "stale packet detail" })
+    expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBe("stale packet detail")
+
+    store.consume({
+      type: "batch_packet_started",
+      slug: "alpha",
+      index: 0,
+      total: 1,
+      tasks: [task(1, "Retryable packet task")],
+    })
+    expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBeUndefined()
+  })
+
   test("surfaces an explicit report-handoff reason for a blocked task", () => {
     const store = startedStore([task(1, "Report handoff")])
     store.consume({ type: "task_status", taskId: "task_01", status: "blocked" })
@@ -172,6 +492,9 @@ describe("cockpit store", () => {
     })
 
     expect(selectTaskReason(store.getSnapshot(), "task_01")).toBe(
+      "final report handoff blocked: ACP turn aborted; rerun retries the report without rerunning implementation",
+    )
+    expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBe(
       "final report handoff blocked: ACP turn aborted; rerun retries the report without rerunning implementation",
     )
     expect(selectTaskTranscript(store.getSnapshot(), "task_01").at(-1)).toMatchObject({
@@ -209,6 +532,7 @@ describe("cockpit store", () => {
     })
     expect(selectTaskCheckpoint(state, "task_01")).toEqual({ state: "created", commit })
     expect(selectTaskReason(state, "task_02")).toBe("hook refused local commit")
+    expect(selectTaskFailureDetail(state, "task_02")).toBe("hook refused local commit")
     expect(selectTaskTranscript(state, "task_02").at(-1)).toMatchObject({
       kind: "error",
       text: "Checkpoint blocked: hook refused local commit",
@@ -310,10 +634,63 @@ describe("cockpit store", () => {
       slug: "",
       tasks: [],
       transcripts: {},
+      taskTimers: {},
       runActivity: [],
       runtimeOptions: {},
       finished: null,
     })
+  })
+
+  test("retains typed no-work metadata while keeping legacy terminal summaries generic", () => {
+    const noWorkStore = startedStore([
+      task(1, "Completed one", [], "completed"),
+      task(2, "Completed two", [], "done"),
+      task(3, "Completed three", [], "finished"),
+    ])
+    noWorkStore.consume({
+      type: "run_finished",
+      ok: true,
+      message: "No executable tasks: all tasks are already complete",
+      outcome: "no_work",
+      reason: "all_tasks_complete",
+    })
+
+    expect(noWorkStore.getSnapshot().finished).toEqual({
+      ok: true,
+      message: "No executable tasks: all tasks are already complete",
+      outcome: "no_work",
+      reason: "all_tasks_complete",
+    })
+
+    const legacyStore = startedStore([task(1, "Completed one", [], "completed")])
+    legacyStore.consume({ type: "run_finished", ok: true, message: "1 task completed" })
+    expect(legacyStore.getSnapshot().finished).toEqual({ ok: true, message: "1 task completed" })
+  })
+
+  test("leaves batch projection intact for nested singular terminal metadata", () => {
+    const store = new CockpitStore()
+    store.consume({ type: "batch_started", slugs: ["alpha", "beta"] })
+    store.consume({
+      type: "batch_packet_started",
+      slug: "alpha",
+      index: 0,
+      total: 2,
+      tasks: [task(1, "Alpha task")],
+    })
+
+    store.consume({
+      type: "run_finished",
+      ok: true,
+      message: "No executable tasks: all tasks are already complete",
+      outcome: "no_work",
+      reason: "all_tasks_complete",
+    })
+
+    expect(store.getSnapshot()).toMatchObject({ batchStatus: "running", finished: null, slug: "alpha" })
+    expect(store.getSnapshot().packetSummaries).toEqual([
+      { slug: "alpha", outcome: "not_started" },
+      { slug: "beta", outcome: "not_started" },
+    ])
   })
 
   test("keeps permission events outside the final read-only view state", () => {
@@ -337,6 +714,7 @@ describe("cockpit store", () => {
     expect(responded).toBeFalse()
     expect("permission" in store.getSnapshot()).toBeFalse()
     expect("activity" in store.getSnapshot()).toBeFalse()
+    expect(store.getSnapshot().taskTimers).toEqual({})
     expect("movePermission" in store).toBeFalse()
     expect("selectPermission" in store).toBeFalse()
     expect("cancelPermission" in store).toBeFalse()
@@ -417,7 +795,18 @@ describe("cockpit store", () => {
       tasks: [task(1, "Alpha task")],
     })
     store.consume({ type: "task_status", taskId: "alpha/task_01", status: "failed" })
-    store.consume({ type: "activity", taskId: "alpha/task_01", message: "Alpha failure" })
+    store.consume({
+      type: "activity",
+      taskId: "alpha/task_01",
+      message: "Alpha failure\nalpha transport detail",
+    })
+    store.consume({
+      type: "session_update",
+      taskId: "alpha/task_01",
+      sessionId: "reused-session",
+      phase: "implementation",
+      update: message("alpha-session", "Alpha session output"),
+    })
     const alphaSnapshot = store.getSnapshot()
 
     store.consume({ type: "batch_packet_finished", slug: "alpha", index: 0, outcome: "failed", detail: "stopped" })
@@ -429,17 +818,39 @@ describe("cockpit store", () => {
       tasks: [task(1, "Beta task")],
     })
     store.consume({ type: "task_status", taskId: "beta/task_01", status: "failed" })
-    store.consume({ type: "activity", taskId: "beta/task_01", message: "Beta failure" })
+    store.consume({
+      type: "activity",
+      taskId: "beta/task_01",
+      message: "Beta failure\nbeta transport detail",
+    })
+    store.consume({
+      type: "session_update",
+      taskId: "alpha/task_01",
+      sessionId: "reused-session",
+      phase: "report",
+      update: message("stale-session", "stale alpha session"),
+    })
+    store.consume({
+      type: "session_update",
+      taskId: "beta/task_01",
+      sessionId: "reused-session",
+      phase: "report",
+      update: message("beta-session", "Beta session output"),
+    })
     store.consume({ type: "activity", taskId: "task_01", message: "bare stale event" })
     store.consume({ type: "activity", taskId: "alpha/task_01", message: "stale alpha event" })
 
     expect(Object.keys(alphaSnapshot.transcripts)).toEqual(["alpha/task_01"])
     expect(selectTaskReason(alphaSnapshot, "task_01")).toBe("Alpha failure")
+    expect(selectTaskFailureDetail(alphaSnapshot, "task_01")).toBe("Alpha failure\nalpha transport detail")
     expect(Object.keys(store.getSnapshot().transcripts)).toEqual(["alpha/task_01", "beta/task_01"])
     expect(selectTaskReason(store.getSnapshot(), "task_01")).toBe("Beta failure")
+    expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBe("Beta failure\nbeta transport detail")
     expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).toContain("Beta failure")
+    expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).toContain("Beta session output")
     expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).not.toContain("bare stale event")
     expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).not.toContain("stale alpha event")
+    expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).not.toContain("stale alpha session")
   })
 
   test("projects preflighted tasks for a parent packet before that packet starts", () => {

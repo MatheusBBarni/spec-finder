@@ -1,5 +1,5 @@
 import { access, lstat, realpath } from "node:fs/promises"
-import { dirname, isAbsolute, join, relative, resolve } from "node:path"
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 
 export const SPEC_DIR = ".spec-finder"
@@ -99,4 +99,44 @@ export function assertInsideWorkspace(root: string, candidate: string): string {
     throw new Error(`path escapes workspace: ${candidate}`)
   }
   return target
+}
+
+/**
+ * Convert an existing workspace artifact into a canonical, safe relative
+ * reference. Any filesystem or containment uncertainty omits the optional
+ * reference instead of turning a validated task into a failure.
+ */
+export async function resolveWorkspaceRelativeReference(
+  root: string,
+  candidate: string,
+): Promise<string | undefined> {
+  if (candidate.trim().length === 0 || containsPathControl(candidate) || isWindowsAbsolutePath(candidate)) return undefined
+
+  try {
+    const canonicalRoot = await realpath(root)
+    const targetInput = isAbsolute(candidate) ? candidate : resolve(canonicalRoot, candidate)
+    const canonicalTarget = await realpath(targetInput)
+    const offset = relative(canonicalRoot, canonicalTarget)
+    if (offset.length === 0 || isAbsolute(offset) || isWindowsAbsolutePath(offset) || containsPathControl(offset)) return undefined
+
+    const reference = offset.split(sep).join("/")
+    if (reference.length === 0
+      || reference.startsWith("/")
+      || isWindowsAbsolutePath(reference)
+      || containsPathControl(reference)) return undefined
+    if (reference.split("/").some((segment) => segment.length === 0 || segment === "." || segment === "..")) {
+      return undefined
+    }
+    return reference
+  } catch {
+    return undefined
+  }
+}
+
+function containsPathControl(value: string): boolean {
+  return /[\u0000-\u001f\u007f]/.test(value)
+}
+
+function isWindowsAbsolutePath(value: string): boolean {
+  return /^[a-z]:[\\/]/i.test(value) || value.startsWith("\\\\")
 }

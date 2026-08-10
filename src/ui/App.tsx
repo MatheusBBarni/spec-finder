@@ -8,6 +8,7 @@ import {
   selectSelectedTranscript,
   selectPacketTaskView,
   selectTaskCheckpoint,
+  selectTaskFailureDetail,
   selectTaskReason,
   selectVisibleTasks,
   type CockpitState,
@@ -17,6 +18,7 @@ import {
   type RuntimeOptionName,
 } from "./store.ts"
 import { transcriptPresentation, type TranscriptEntry, type TranscriptKind } from "./transcript.ts"
+import { formatTaskTimer } from "./timer.ts"
 
 const colors = {
   // DESIGN.md surface-soft: deliberate near-black canvas for terminal gutters.
@@ -43,27 +45,23 @@ const colors = {
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const
 const SPINNER_INTERVAL_MS = 120
 
-export interface TaskTiming {
-  startedAt: number
-  elapsedMs?: number
-}
-
 interface AppProps {
   store: CockpitStore
   onCancel: () => void
+  onDismiss: () => void
+  onExit?: () => void
 }
 
-export function App({ store, onCancel }: AppProps) {
+export function App({ store, onCancel, onDismiss, onExit = () => {} }: AppProps) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
   const renderer = useRenderer()
   const { width, height } = useTerminalDimensions()
   const taskListRef = useRef<ScrollBoxRenderable>(null)
   const transcriptRef = useRef<ScrollBoxRenderable>(null)
   const batchSummaryRef = useRef<ScrollBoxRenderable>(null)
-  const taskTimings = useRef(new Map<string, TaskTiming>())
   const summaryDismissed = useRef(false)
+  const exitRequested = useRef(false)
   const [spinnerIndex, setSpinnerIndex] = useState(0)
-  const [clock, setClock] = useState(() => performance.now())
   const [summaryOpen, setSummaryOpen] = useState(false)
   const [batchCursorIndex, setBatchCursorIndex] = useState(0)
   const [batchTaskCursorIndex, setBatchTaskCursorIndex] = useState(0)
@@ -71,16 +69,34 @@ export function App({ store, onCancel }: AppProps) {
   summaryOpenRef.current = summaryOpen
   const compact = width < 80 || height < 24
   const batchMode = isBatchCockpit(state)
+  const retainedFailureReview = isRetainedFailureReview(state)
+  const noWorkSummary = isNoWorkSummary(state)
   const taskState = selectPacketTaskView(state, batchCursorIndex, batchTaskCursorIndex)
   const selectedTask = selectSelectedTask(taskState)
   const selectedTranscript = selectSelectedTranscript(taskState)
-  const hasRunningTasks = taskState.tasks.some((task) => task.status === "in_progress")
+  const hasRunningTasks = state.finished === null && state.tasks.some((task) => task.status === "in_progress")
+  // Inactive batch packets share the task-row renderer but not the active
+  // packet's local timer projection. Their observed values are therefore
+  // intentionally unavailable rather than borrowed by colliding task IDs.
+  const taskTimers = taskState === state ? state.taskTimers : {}
   const spinner = SPINNER_FRAMES[spinnerIndex] ?? "⠋"
+
+  const requestExit = (action: () => void): void => {
+    if (exitRequested.current) return
+    exitRequested.current = true
+    onExit()
+    action()
+  }
 
   useKeyboard((key) => {
     const escape = key.name === "escape" || key.name === "esc" || key.sequence === "\u001b" || key.raw === "\u001b"
     if (escape) {
       if (summaryOpenRef.current) {
+        if (noWorkSummary) return
+        if (retainedFailureReview) {
+          onDismiss()
+          return
+        }
         summaryDismissed.current = true
         setSummaryOpen(false)
         return
@@ -92,14 +108,16 @@ export function App({ store, onCancel }: AppProps) {
     }
     if (summaryOpenRef.current) {
       if (key.name === "q" || (key.ctrl && key.name === "c")) {
-        onCancel()
-        renderer.destroy()
+        requestExit(() => {
+          if (retainedFailureReview) onDismiss()
+          else onCancel()
+        })
       }
+      if (noWorkSummary) return
       return
     }
     if (key.name === "q" || (key.ctrl && key.name === "c")) {
-      onCancel()
-      renderer.destroy()
+      requestExit(onCancel)
       return
     }
     if (key.name === "?") {
@@ -158,48 +176,39 @@ export function App({ store, onCancel }: AppProps) {
 
   useEffect(() => {
     if (state.finished) {
-      if (!summaryDismissed.current) setSummaryOpen(true)
+      if (noWorkSummary || !summaryDismissed.current) setSummaryOpen(true)
       return
     }
+    exitRequested.current = false
     if (state.slug) {
       summaryDismissed.current = false
-      taskTimings.current.clear()
       setSummaryOpen(false)
     }
   }, [state.finished, state.slug])
 
   useEffect(() => {
-    const now = performance.now()
-    for (const task of taskState.tasks) {
-      const timing = taskTimings.current.get(task.id)
-      if (task.status === "in_progress" && !timing) {
-        taskTimings.current.set(task.id, { startedAt: now })
-      } else if (timing && isTerminal(task.status) && timing.elapsedMs === undefined) {
-        timing.elapsedMs = Math.max(0, now - timing.startedAt)
-      }
-    }
-    setClock(now)
     if (!hasRunningTasks) {
       setSpinnerIndex(0)
-      renderer.dropLive()
       return
     }
 
     renderer.requestLive()
     const timer = setInterval(() => {
       setSpinnerIndex((index) => (index + 1) % SPINNER_FRAMES.length)
-      setClock(performance.now())
+      store.tick()
     }, SPINNER_INTERVAL_MS)
     return () => {
       clearInterval(timer)
       renderer.dropLive()
     }
-  }, [hasRunningTasks, renderer, taskState.tasks])
+  }, [hasRunningTasks, renderer, store])
 
   return (
     <box width="100%" height="100%" flexDirection="column" backgroundColor={colors.background}>
       {summaryOpen ? (
-        <RunSummary state={state} width={width} height={height} batchSummaryRef={batchSummaryRef} />
+        retainedFailureReview
+          ? <FailureReview state={state} width={width} height={height} />
+          : <RunSummary state={state} width={width} height={height} batchSummaryRef={batchSummaryRef} />
       ) : (
         <LiveCockpit
           state={taskState}
@@ -214,10 +223,84 @@ export function App({ store, onCancel }: AppProps) {
           batchSummaryRef={batchSummaryRef}
           batchCursorIndex={batchCursorIndex}
           spinner={spinner}
-          clock={clock}
-          taskTimings={taskTimings.current}
+          taskTimers={taskTimers}
         />
       )}
+    </box>
+  )
+}
+
+function FailureReview({ state, width, height }: { state: CockpitState; width: number; height: number }) {
+  const packetIndex = state.stoppingPacket?.index ?? state.activePacket?.index ?? 0
+  const taskState = state.batchStatus === null ? state : selectPacketTaskView(state, packetIndex, 0)
+  const failedTask = taskState.tasks.find((task) => (
+    task.status === "failed" || task.status === "blocked" || task.checkpoint?.state === "blocked"
+  ))
+  const detail = failedTask ? selectTaskFailureDetail(taskState, failedTask.id) : undefined
+  const reason = failedTask && (failedTask.status === "blocked" || failedTask.checkpoint?.state === "blocked")
+    ? selectTaskReason(taskState, failedTask.id)
+    : undefined
+  const surfacedError = detail ?? reason ?? "No surfaced task error was provided."
+  const completed = taskState.tasks.filter((task) => isCompleted(task.status)).length
+  const failed = taskState.tasks.filter((task) => task.status === "failed").length
+  const blocked = taskState.tasks.filter((task) => task.status === "blocked").length
+  const checkpointBlocked = taskState.tasks.filter((task) => task.checkpoint?.state === "blocked").length
+  const delivered = Math.max(0, completed - checkpointBlocked)
+  const panelWidth = Math.max(24, Math.min(width - 2, 100))
+  const innerWidth = Math.max(panelWidth - 4, 18)
+  const taskIdentity = failedTask
+    ? `${taskState.slug}/${failedTask.id}`
+    : (state.stoppingPacket?.slug ?? taskState.slug) || "unavailable"
+  const heading = checkpointBlocked > 0
+    ? `Execution Complete: ${delivered}/${taskState.tasks.length} delivered, ${checkpointBlocked} checkpoint blocked`
+    : `Execution Complete: ${completed}/${taskState.tasks.length} succeeded, ${failed} failed${blocked > 0 ? `, ${blocked} blocked` : ""}`
+  const packetOutcomes = state.packetSummaries.length > 0
+    ? state.packetSummaries.map((summary) => `${summary.slug} ${summary.outcome}`).join(" · ")
+    : null
+  const panelHeight = Math.max(10, height - 3)
+  const fixedRows = 10
+    + (packetOutcomes ? 1 : 0)
+    + (state.stoppingPacket ? 1 : 0)
+    + (checkpointBlocked > 0 ? 1 : 0)
+  const detailHeight = Math.max(2, panelHeight - fixedRows)
+  return (
+    <box width="100%" height="100%" flexDirection="column" paddingLeft={1} paddingTop={1}>
+      <box
+        width={panelWidth}
+        height={panelHeight}
+        flexShrink={0}
+        flexDirection="column"
+        borderStyle="single"
+        borderColor={colors.danger}
+        backgroundColor={colors.panel}
+        paddingLeft={1}
+        paddingRight={1}
+      >
+        <text fg={colors.accentBright} wrapMode="none"><strong>{state.batchStatus === null ? "RUN.STATUS" : "RUN.STATUS · BATCH SEQUENCE"}</strong></text>
+        <text fg={colors.danger} wrapMode="none"><strong>{fit(state.batchStatus === null ? heading : batchHeading(state), innerWidth)}</strong></text>
+        {packetOutcomes ? <text fg={colors.muted} wrapMode="none">{fit(`PACKETS: ${packetOutcomes}`, innerWidth)}</text> : null}
+        {state.stoppingPacket ? <text fg={colors.warning} wrapMode="none">{fit(`STOPPING PACKET: ${state.stoppingPacket.slug} (${state.stoppingPacket.outcome})`, innerWidth)}</text> : null}
+        <text fg={colors.accentBright} wrapMode="none"><strong>RUN.FAILURES</strong></text>
+        <text fg={colors.danger} wrapMode="none"><strong>{fit(`${failedTask ? failureLabel(failedTask) : "FAIL"} ${failedTask?.id ?? "unavailable"} · TASK: ${taskIdentity}`, innerWidth)}</strong></text>
+        <text fg={colors.textStrong} wrapMode="none">{fit(`OUTCOME: FAILED · SUCCEEDED ${delivered} · FAILED ${failed} · BLOCKED ${blocked} · TOTAL ${taskState.tasks.length}`, innerWidth)}</text>
+        {checkpointBlocked > 0 ? <text fg={colors.warning} wrapMode="none">CHECKPOINT DELIVERY: 0 created · {checkpointBlocked} blocked</text> : null}
+        <text fg={colors.muted} wrapMode="none">{fit(state.batchStatus === null ? heading : state.finished?.message ?? "Batch failed", innerWidth)}</text>
+        <text fg={colors.accentBright}><strong>ERROR</strong></text>
+        <scrollbox
+          id="failure-detail-scroll"
+          height={detailHeight}
+          scrollY
+          focused
+          viewportCulling
+          contentOptions={{ flexDirection: "column" }}
+        >
+          <text fg={detail ? colors.danger : colors.warning} wrapMode="word" flexShrink={0}>{surfacedError}</text>
+        </scrollbox>
+        <text fg={colors.warning} wrapMode="word">Resolve the listed error, then rerun the task packet.</text>
+      </box>
+      <box height={1} marginTop={1} paddingLeft={1}>
+        <text fg={colors.muted} wrapMode="none">[<span fg={colors.accent}>ESC</span>/<span fg={colors.accent}>Q</span>/<span fg={colors.accent}>CTRL+C</span>] DISMISS</text>
+      </box>
     </box>
   )
 }
@@ -235,8 +318,7 @@ function LiveCockpit({
   batchSummaryRef,
   batchCursorIndex,
   spinner,
-  clock,
-  taskTimings,
+  taskTimers,
 }: {
   state: CockpitState
   batchState: CockpitState
@@ -250,8 +332,7 @@ function LiveCockpit({
   batchSummaryRef: RefObject<ScrollBoxRenderable | null>
   batchCursorIndex: number
   spinner: string
-  clock: number
-  taskTimings: Map<string, TaskTiming>
+  taskTimers: CockpitState["taskTimers"]
 }) {
   const batchMode = isBatchCockpit(state)
   const taskPanelWidth = compact ? "100%" : Math.max(30, Math.min(50, Math.floor(width * 0.28)))
@@ -261,6 +342,7 @@ function LiveCockpit({
   const taskProgress = taskProgressLabel(state)
   const progressWidth = Math.max(6, taskWidth - 4)
   const visibleTasks = selectVisibleTasks(state)
+  const metadataLimit = Math.max(1, taskWidth - 4)
   const titleLimit = Math.max(10, taskWidth - 12)
 
   return (
@@ -313,7 +395,8 @@ function LiveCockpit({
                 selected={task.id === state.selectedTaskId}
                 spinner={spinner}
                 titleLimit={titleLimit}
-                elapsed={taskElapsedText(task, taskTimings, clock)}
+                metadataLimit={metadataLimit}
+                elapsed={formatTaskTimer(task.status, taskTimers[task.id])}
                 width="100%"
               />
             ))}
@@ -363,6 +446,7 @@ function TaskRow({
   selected,
   spinner,
   titleLimit,
+  metadataLimit,
   elapsed,
   width,
 }: {
@@ -370,6 +454,7 @@ function TaskRow({
   selected: boolean
   spinner: string
   titleLimit: number
+  metadataLimit: number
   elapsed: string
   width: number | "100%"
 }) {
@@ -393,7 +478,7 @@ function TaskRow({
         <strong>{selected ? "> " : "  "}{marker} {task.id} </strong>{fit(task.title, titleLimit)}
       </text>
       <text fg={selected ? colors.muted : colors.dim} wrapMode="none">
-        {task.type} · {elapsed}
+        {taskMetadataText(task.type, elapsed, metadataLimit)}
       </text>
       {checkpointText ? (
         <text fg={checkpointColor(task.checkpoint)} wrapMode="none">
@@ -658,10 +743,18 @@ function TaskStatusStrip({ state, task }: { state: CockpitState; task: CockpitTa
   const checkpoint = task ? selectTaskCheckpoint(state, task.id) : undefined
   const detail = checkpoint?.state === "blocked" ? checkpointDisplayText(checkpoint) : reason ?? checkpointDisplayText(checkpoint)
   const detailColor = checkpoint ? checkpointColor(checkpoint) : reason ? colors.danger : colors.dim
+  const detailLines = [
+    detail ?? "Read-only progress; no workflow controls",
+    task?.reportReference === undefined ? undefined : `Report: ${task.reportReference}`,
+  ].filter((line): line is string => line !== undefined)
   return (
-    <box height={detail ? 5 : 4} borderStyle="single" borderColor={color} backgroundColor={colors.panel} paddingLeft={1} paddingRight={1}>
+    <box height={(detail ? 5 : 4) + (task?.reportReference === undefined ? 0 : 1)} borderStyle="single" borderColor={color} backgroundColor={colors.panel} paddingLeft={1} paddingRight={1}>
       <text fg={color} wrapMode="none"><strong>{task ? `${statusIcon(task.status)} ${label}` : "› Waiting for task"}</strong></text>
-      <text fg={detailColor} wrapMode="none">{fit(detail ?? "Read-only progress; no workflow controls", 120)}</text>
+      {detailLines.map((line, index) => (
+        <text key={`${task?.id ?? "waiting"}-status-detail-${index}`} fg={index === 0 ? detailColor : colors.textStrong} wrapMode="none">
+          {fit(line, 120)}
+        </text>
+      ))}
     </box>
   )
 }
@@ -681,6 +774,10 @@ function RunSummary({
     return <BatchRunSummary state={state} width={width} height={height} scrollRef={batchSummaryRef} />
   }
 
+  if (isNoWorkSummary(state)) {
+    return <NoWorkRunSummary state={state} width={width} />
+  }
+
   const completed = state.tasks.filter((task) => isCompleted(task.status)).length
   const failed = state.tasks.filter((task) => task.status === "failed").length
   const blocked = state.tasks.filter((task) => task.status === "blocked").length
@@ -689,6 +786,7 @@ function RunSummary({
   const checkpointCreated = checkpointTasks.filter((task) => task.checkpoint?.state === "created").length
   const delivered = completed - checkpointBlocked
   const failures = state.tasks.filter((task) => task.status === "failed" || task.status === "blocked" || task.checkpoint?.state === "blocked")
+  const reportTasks = state.tasks.filter((task) => isCompleted(task.status) && task.reportReference !== undefined)
   const panelWidth = Math.max(24, Math.min(width - 4, 86))
   const innerWidth = Math.max(panelWidth - 4, 16)
   const failedRun = state.finished?.ok === false || failed > 0 || blocked > 0 || checkpointBlocked > 0
@@ -716,6 +814,17 @@ function RunSummary({
         ) : null}
       </box>
 
+      {reportTasks.length > 0 ? (
+        <box width={panelWidth} marginTop={1} borderStyle="single" borderColor={colors.accent} backgroundColor={colors.panel} paddingLeft={1} paddingRight={1}>
+          <text fg={colors.accentBright} wrapMode="none"><strong>RUN.REPORTS</strong></text>
+          {reportTasks.map((task) => (
+            <text key={`report-${task.id}`} fg={colors.textStrong} wrapMode="none">
+              {fit(`${task.id} · Report: ${task.reportReference}`, innerWidth)}
+            </text>
+          ))}
+        </box>
+      ) : null}
+
       {failures.length > 0 ? (
         <box width={panelWidth} marginTop={1} borderStyle="single" borderColor={colors.danger} backgroundColor={colors.panel} paddingLeft={1} paddingRight={1}>
           <text fg={colors.accentBright} wrapMode="none"><strong>RUN.FAILURES</strong></text>
@@ -741,6 +850,29 @@ function RunSummary({
 
       <box height={1} marginTop={1} paddingLeft={1}>
         <text fg={colors.muted} wrapMode="none">[<span fg={colors.accent}>ESC</span>] BACK   [<span fg={colors.accent}>Q</span>] QUIT</text>
+      </box>
+      <box flexGrow={1} />
+    </box>
+  )
+}
+
+function NoWorkRunSummary({ state, width }: { state: CockpitState; width: number }) {
+  const completed = state.tasks.filter((task) => isCompleted(task.status)).length
+  const panelWidth = Math.max(24, Math.min(width - 4, 86))
+  const innerWidth = Math.max(panelWidth - 4, 16)
+  return (
+    <box flexGrow={1} flexDirection="column" paddingLeft={1} paddingTop={1}>
+      <box width={panelWidth} borderStyle="single" borderColor={colors.accent} backgroundColor={colors.panel} paddingLeft={1} paddingRight={1}>
+        <text fg={colors.accentBright} wrapMode="none"><strong>RUN.STATUS</strong></text>
+        <text fg={colors.accent} wrapMode="none"><strong>{fit("NO EXECUTABLE TASKS", innerWidth)}</strong></text>
+        <text fg={colors.textStrong} wrapMode="word">All tasks are already complete</text>
+        <text fg={colors.textStrong} wrapMode="word">{`Tasks ${completed}/${state.tasks.length} complete`}</text>
+        <text fg={colors.active} wrapMode="none">{progressBar(state, innerWidth)}</text>
+        <text> </text>
+        <text fg={colors.muted} wrapMode="word">{state.finished?.message ?? "No executable tasks"}</text>
+      </box>
+      <box height={1} marginTop={1} paddingLeft={1}>
+        <text fg={colors.muted} wrapMode="none">[<span fg={colors.accent}>Q</span>/<span fg={colors.accent}>CTRL+C</span>] EXIT</text>
       </box>
       <box flexGrow={1} />
     </box>
@@ -797,7 +929,8 @@ function HelpOverlay({ width, height, batchMode }: { width: number; height: numb
       <text fg={colors.text}>Home / End         Jump to transcript start / live tail</text>
       <text fg={colors.text}>? / Esc            Close this help</text>
       <text fg={colors.text}>q / Ctrl+C         Cancel the run and leave the terminal UI</text>
-      <text fg={colors.muted} marginTop={1}>View only: navigation, scrolling, help, and terminal cancellation.</text>
+      <text fg={colors.muted} marginTop={1}>Timer: elapsed time is an observation, not an automatic stall verdict.</text>
+      <text fg={colors.muted}>View only: navigation, scrolling, help, and terminal cancellation.</text>
     </box>
   )
 }
@@ -1070,30 +1203,12 @@ function progressBar(state: CockpitState, width: number): string {
   return "█".repeat(filled) + "░".repeat(width - filled)
 }
 
-export function taskElapsedText(task: CockpitTask, timings: Map<string, TaskTiming>, now: number): string {
-  if (task.status === "pending" || task.status === "blocked") return "—"
-  const timing = timings.get(task.id)
-  if (!timing) return "unavailable"
-  const elapsed = timing.elapsedMs ?? Math.max(0, now - timing.startedAt)
-  return formatElapsed(elapsed)
-}
-
-function formatElapsed(milliseconds: number): string {
-  const seconds = Math.max(0, Math.floor(milliseconds / 1000))
-  const minutes = Math.floor(seconds / 60)
-  return `${String(minutes).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`
-}
-
 function taskStatusText(status: TaskStatus): string {
-  if (isCompleted(status)) return "Task complete"
+  if (isCompleted(status)) return "Task completed"
   if (status === "in_progress") return "Task running"
   if (status === "failed") return "Task failed"
   if (status === "blocked") return "Task blocked"
   return "Task pending"
-}
-
-function isTerminal(status: TaskStatus): boolean {
-  return isCompleted(status) || status === "failed"
 }
 
 function footerText(state: CockpitState, compact: boolean): string {
@@ -1107,6 +1222,18 @@ function footerText(state: CockpitState, compact: boolean): string {
 
 function isBatchCockpit(state: CockpitState): boolean {
   return state.packetSummaries.length > 0 || state.batchStatus !== null
+}
+
+function isRetainedFailureReview(state: CockpitState): boolean {
+  if (state.finished?.ok !== false) return false
+  return state.batchStatus !== "cancelled" && state.batchStatus !== "preflight_failed"
+}
+
+function isNoWorkSummary(state: CockpitState): boolean {
+  return state.batchStatus === null
+    && state.finished?.ok === true
+    && state.finished.outcome === "no_work"
+    && state.finished.reason === "all_tasks_complete"
 }
 
 function taskRowId(taskId: string): string {
@@ -1201,6 +1328,11 @@ function humanize(value: string): string {
 function fit(value: string, limit: number): string {
   if (limit <= 1) return value.slice(0, Math.max(0, limit))
   return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`
+}
+
+function taskMetadataText(type: string, elapsed: string, limit: number): string {
+  const typeLimit = limit - elapsed.length - 3
+  return typeLimit > 0 ? `${fit(type, typeLimit)} · ${elapsed}` : elapsed
 }
 
 function clip(value: string, limit: number): string {

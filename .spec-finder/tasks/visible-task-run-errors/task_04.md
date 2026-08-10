@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Render Accessible Retained Failure Diagnostics
 type: frontend
 complexity: medium

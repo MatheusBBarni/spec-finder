@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Integrate task timer projection into CockpitStore
 type: frontend
 complexity: medium

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { chmod, mkdir, mkdtemp, readFile, unlink, writeFile } from "node:fs/promises"
+import { access, chmod, mkdir, mkdtemp, readFile, symlink, unlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DEFAULT_CONFIG, parseConfig } from "../src/config.ts"
@@ -7,9 +7,164 @@ import { runTaskPacket } from "../src/engine.ts"
 import type { RunEvent } from "../src/events.ts"
 import { runGit as runCheckpointGit } from "../src/checkpoints.ts"
 import type { CheckpointServiceContract } from "../src/checkpoints.ts"
+import { createGrokAuthMethodPreference } from "../src/providers.ts"
 
 describe("task engine", () => {
-  test("requires a separate report turn before completing a task", async () => {
+  test("returns a typed no-work result for a valid all-complete packet without launching a provider", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-engine-no-work-"))
+    const packet = join(root, ".spec-finder", "tasks", "demo")
+    await mkdir(packet, { recursive: true })
+    const statuses = ["completed", "done", "finished"] as const
+    const taskPaths = statuses.map((status, index) => {
+      const number = String(index + 1).padStart(2, "0")
+      return { path: join(packet, `task_${number}.md`), number, status }
+    })
+    await Promise.all(taskPaths.map(({ path, number, status }) => writeFile(path, `---
+status: ${status}
+title: Terminal task ${number}
+type: test
+complexity: low
+dependencies: []
+---
+
+# Task ${number}: Terminal task ${number}
+`)))
+    const events: RunEvent[] = []
+
+    const result = await runTaskPacket({
+      root,
+      slug: "demo",
+      config: parseConfig({ ...DEFAULT_CONFIG, auto_commit: false }),
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: "/provider-launch-must-not-run",
+        args: [],
+        env: {},
+        authMethod: null,
+      },
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      completed: 0,
+      failed: 0,
+      blocked: 0,
+      outcome: "no_work",
+      reason: "all_tasks_complete",
+    })
+    expect(events.map((event) => event.type)).toEqual(["run_started", "run_finished"])
+    expect(events).toContainEqual({
+      type: "run_finished",
+      ok: true,
+      message: "No executable tasks: all tasks are already complete",
+      outcome: "no_work",
+      reason: "all_tasks_complete",
+    })
+    expect(events.some((event) => ["task_status", "activity", "session_update", "permission_requested", "checkpoint"].includes(event.type))).toBeFalse()
+    for (const { path, status } of taskPaths) expect(await readFile(path, "utf8")).toContain(`status: ${status}`)
+    await expect(access(join(packet, "reports"))).rejects.toThrow()
+  })
+
+  test("keeps an aborted all-complete packet on the cancelled path", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-engine-no-work-cancelled-"))
+    const packet = join(root, ".spec-finder", "tasks", "demo")
+    await mkdir(packet, { recursive: true })
+    await writeFile(join(packet, "task_01.md"), `---
+status: completed
+title: Already complete
+type: test
+complexity: low
+dependencies: []
+---
+
+# Task 01: Already complete
+`)
+    const controller = new AbortController()
+    controller.abort()
+    const events: RunEvent[] = []
+
+    const result = await runTaskPacket({
+      root,
+      slug: "demo",
+      config: DEFAULT_CONFIG,
+      signal: controller.signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: "/cancelled-no-work-provider-must-not-run",
+        args: [],
+        env: {},
+        authMethod: null,
+      },
+    })
+
+    expect(result).toEqual({ ok: false, completed: 0, failed: 0, blocked: 0 })
+    expect(events).toContainEqual({ type: "run_finished", ok: false, message: "run cancelled" })
+    const finished = events.find((event) => event.type === "run_finished")
+    expect(finished && "outcome" in finished).toBeFalse()
+    expect(finished && "reason" in finished).toBeFalse()
+  })
+
+  test("keeps a taskless packet as an error without emitting a no-work event", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-engine-taskless-"))
+    const packet = join(root, ".spec-finder", "tasks", "demo")
+    await mkdir(packet, { recursive: true })
+    const events: RunEvent[] = []
+
+    await expect(runTaskPacket({
+      root,
+      slug: "demo",
+      config: DEFAULT_CONFIG,
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: "/taskless-provider-must-not-run",
+        args: [],
+        env: {},
+        authMethod: null,
+      },
+    })).rejects.toThrow("no task_XX.md files found")
+    expect(events).toEqual([])
+  })
+
+  test("keeps validation failures as errors without emitting a no-work event", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-engine-invalid-"))
+    const packet = join(root, ".spec-finder", "tasks", "demo")
+    await mkdir(packet, { recursive: true })
+    await writeFile(join(packet, "task_01.md"), `---
+status: completed
+title: Invalid task
+type: test
+complexity: low
+dependencies: []
+---
+
+# Task 01: Different title
+`)
+    const events: RunEvent[] = []
+
+    await expect(runTaskPacket({
+      root,
+      slug: "demo",
+      config: DEFAULT_CONFIG,
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: "/invalid-packet-provider-must-not-run",
+        args: [],
+        env: {},
+        authMethod: null,
+      },
+    })).rejects.toThrow("task packet is invalid")
+    expect(events).toEqual([])
+    await expect(access(join(packet, "memory"))).rejects.toThrow()
+  })
+
+  test("keeps Grok implementation and report turns in one fresh authenticated ACP session", async () => {
     const root = await mkdtemp(join(tmpdir(), "spec-finder-engine-"))
     const packet = join(root, ".spec-finder", "tasks", "demo")
     await mkdir(packet, { recursive: true })
@@ -17,6 +172,7 @@ describe("task engine", () => {
     const promptLog = join(root, "prompts.log")
     const processLog = join(root, "processes.log")
     const lifecycleLog = join(root, "lifecycle.log")
+    const events: RunEvent[] = []
     await writeFile(taskPath, `---
 status: pending
 title: Build the mock
@@ -34,7 +190,7 @@ dependencies: []
     const fixture = join(import.meta.dir, "fixtures", "mock-agent.ts")
     const config = parseConfig({
       ...DEFAULT_CONFIG,
-      provider: "cursor",
+      provider: "grok",
       model: "auto",
       reasoning: "auto",
       speed: "auto",
@@ -46,21 +202,31 @@ dependencies: []
       slug: "demo",
       config,
       signal: new AbortController().signal,
-      emit: () => {},
+      emit: (event) => events.push(event),
       interactivePermissions: false,
       providerLaunch: {
         command: process.execPath,
         args: [fixture],
         env: {
+          SPEC_FINDER_TEST_AUTH_METHODS: "cached_token",
+          SPEC_FINDER_TEST_EXPECT_AUTH_METHOD: "cached_token",
+          SPEC_FINDER_TEST_ADVERTISE_CLOSE: "1",
+          SPEC_FINDER_TEST_REQUEST_PERMISSION: "1",
           SPEC_FINDER_TEST_PROMPT_LOG: promptLog,
           SPEC_FINDER_TEST_PROCESS_LOG: processLog,
           SPEC_FINDER_TEST_LIFECYCLE_LOG: lifecycleLog,
+          SPEC_FINDER_TEST_EMIT_REPORT_SESSION_INFO: "1",
         },
         authMethod: null,
+        authPreference: createGrokAuthMethodPreference(false),
       },
     })
 
     expect(result).toEqual({ ok: true, completed: 1, failed: 0, blocked: 0 })
+    expect(events).toContainEqual({ type: "run_finished", ok: true, message: "1 task completed" })
+    const finished = events.find((event) => event.type === "run_finished")
+    expect(finished && "outcome" in finished).toBeFalse()
+    expect(finished && "reason" in finished).toBeFalse()
     expect(await readFile(taskPath, "utf8")).toContain("status: completed")
     expect(await readFile(join(packet, "memory", "MEMORY.md"), "utf8")).toContain("## Shared Decisions")
     expect(await readFile(join(packet, "memory", "task_01.md"), "utf8")).toContain("- Build the mock")
@@ -71,10 +237,94 @@ dependencies: []
     expect(new Set(processIds).size).toBe(1)
     expect((await readFile(lifecycleLog, "utf8")).trim().split("\n")).toEqual([
       "initialize",
+      "authenticate:cached_token",
+      "session/new",
+      "session/prompt",
+      "session/prompt",
+      "session/close",
+    ])
+    const updates = events.filter((event): event is Extract<RunEvent, { type: "session_update" }> => event.type === "session_update")
+    expect(updates.length).toBeGreaterThan(0)
+    expect(new Set(updates.map((event) => event.sessionId))).toEqual(new Set(["test-session"]))
+    expect(new Set(updates.map((event) => event.phase))).toEqual(new Set(["implementation", "report"]))
+    expect(updates.some((event) => event.update.sessionUpdate === "agent_message_chunk"
+      && event.update.content.type === "text"
+      && event.update.content.text === "permission response: allow")).toBeTrue()
+    const reportMetadata = updates.find((event) => event.update.sessionUpdate === "session_info_update")
+    expect(reportMetadata?.phase).toBe("report")
+    expect(reportMetadata?.update).toMatchObject({ title: expect.stringContaining(root) })
+    expect(events).toContainEqual({
+      type: "task_status",
+      taskId: "task_01",
+      status: "completed",
+      reportReference: ".spec-finder/tasks/demo/reports/task_01.md",
+    })
+  })
+
+  test("keeps Cursor implementation and report turns in one fresh ACP session", async () => {
+    const fixture = await createRetryFixture("Cursor session compatibility")
+    const processLog = join(fixture.root, "cursor-processes.log")
+    const lifecycleLog = join(fixture.root, "cursor-lifecycle.log")
+    const events: RunEvent[] = []
+
+    const result = await runTaskPacket({
+      root: fixture.root,
+      slug: "demo",
+      config: fixture.config,
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: process.execPath,
+        args: [fixture.agent],
+        env: {
+          SPEC_FINDER_TEST_PROCESS_LOG: processLog,
+          SPEC_FINDER_TEST_LIFECYCLE_LOG: lifecycleLog,
+        },
+        authMethod: null,
+      },
+    })
+
+    expect(result).toEqual({ ok: true, completed: 1, failed: 0, blocked: 0 })
+    const processIds = (await readFile(processLog, "utf8")).trim().split("\n")
+    expect(processIds).toHaveLength(2)
+    expect(new Set(processIds).size).toBe(1)
+    expect((await readFile(lifecycleLog, "utf8")).trim().split("\n")).toEqual([
+      "initialize",
       "session/new",
       "session/prompt",
       "session/prompt",
     ])
+    const updates = events.filter((event): event is Extract<RunEvent, { type: "session_update" }> => event.type === "session_update")
+    expect(new Set(updates.map((event) => event.sessionId))).toEqual(new Set(["test-session"]))
+    expect(new Set(updates.map((event) => event.phase))).toEqual(new Set(["implementation", "report"]))
+  })
+
+  test("omits a report reference when the accepted artifact resolves outside the workspace", async () => {
+    const fixture = await createRetryFixture("External report reference")
+    const externalReports = await mkdtemp(join(tmpdir(), "spec-finder-engine-external-report-"))
+    await symlink(externalReports, join(fixture.root, ".spec-finder", "tasks", "demo", "reports"), "dir")
+    const events: RunEvent[] = []
+
+    const result = await runTaskPacket({
+      root: fixture.root,
+      slug: "demo",
+      config: fixture.config,
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: process.execPath,
+        args: [fixture.agent],
+        env: { SPEC_FINDER_TEST_EMIT_REPORT_SESSION_INFO: "1" },
+        authMethod: null,
+      },
+    })
+
+    expect(result).toEqual({ ok: true, completed: 1, failed: 0, blocked: 0 })
+    expect(await readFile(join(externalReports, "task_01.md"), "utf8")).toContain("Final verdict: completed")
+    expect(events).toContainEqual({ type: "task_status", taskId: "task_01", status: "completed" })
+    expect(events.some((event) => event.type === "task_status" && event.reportReference !== undefined)).toBeFalse()
   })
 
   test("retries a failed implementation once before continuing to the report phase", async () => {
@@ -174,6 +424,7 @@ dependencies: []
     )
     expect(activityMessages(events).filter((message) => message.includes("retrying attempt"))).toHaveLength(1)
     expect(activityMessages(events)).toContain("ACP process ended before the task handoff completed (exit 23)")
+    expect(events).toContainEqual({ type: "run_finished", ok: false, message: "1 failed · 0 blocked" })
   }, 2_000)
 
   test("retries only the report phase when the first report is incomplete", async () => {
@@ -278,6 +529,8 @@ dependencies: []
     expect(activityMessages(firstEvents)).toContain(
       "final report handoff blocked: report stopped: refusal; rerun retries the report without rerunning implementation",
     )
+    expect(firstEvents.some((event) => event.type === "task_status" && event.status === "completed")).toBeFalse()
+    expect(firstEvents.some((event) => event.type === "task_status" && event.reportReference !== undefined)).toBeFalse()
 
     const resumedEvents: RunEvent[] = []
     const resumed = await runTaskPacket({
@@ -455,6 +708,7 @@ dependencies: []
       event.type === "activity" && event.message.includes("cockpit is read-only")
     )).toHaveLength(2)
     expect(events.some((event) => event.type === "permission_requested")).toBe(false)
+    expect(events.some((event) => event.type === "task_status" && event.reportReference !== undefined)).toBeFalse()
   })
 
   test("branches on auto_commit and orders begin before in_progress and complete after completed", async () => {

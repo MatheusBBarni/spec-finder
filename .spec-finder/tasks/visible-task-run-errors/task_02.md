@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Preserve Complete Task Failure Details
 type: frontend
 complexity: medium

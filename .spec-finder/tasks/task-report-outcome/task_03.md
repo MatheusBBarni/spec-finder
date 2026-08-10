@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Harden Transcript Metadata Projection
 type: frontend
 complexity: medium

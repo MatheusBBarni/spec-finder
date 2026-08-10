@@ -2,7 +2,7 @@
 
 Spec Finder is a skill-driven specification framework with a local ACP cockpit, heavily inspired by Compozy. It brings back the compact workflow that made pre-0.3 Compozy useful—idea → PRD → TechSpec → executable tasks—without adding a daemon or a second source of truth.
 
-Specifications stay in the repository. Skills are portable Agent Skills. Claude, Codex, and Cursor run through their own ACP harnesses while Spec Finder owns task ordering, lifecycle state, permissions, and evidence reports.
+Specifications stay in the repository. Skills are portable Agent Skills. Claude, Codex, Cursor, and Grok Build run through their own ACP harnesses while Spec Finder owns task ordering, lifecycle state, permissions, and evidence reports.
 
 ## Requirements
 
@@ -11,8 +11,18 @@ Specifications stay in the repository. Skills are portable Agent Skills. Claude,
   - Claude: `@agentclientprotocol/claude-agent-acp`
   - Codex: `@agentclientprotocol/codex-acp`
   - Cursor: `cursor-agent acp`
+  - Grok Build: `grok --no-auto-update agent stdio`
 
-The default Claude and Codex profiles use `npx --yes`, so their adapters can be resolved on demand. Cursor requires the Cursor CLI on `PATH`.
+The default Claude and Codex profiles use `npx --yes`, so their adapters can be resolved on demand. Cursor requires the Cursor CLI on `PATH`; Grok Build requires the `grok` binary on `PATH`. Spec Finder does not install provider binaries, authenticate providers, or run provider update commands.
+
+### Grok Build prerequisites
+
+Grok Build is currently packet-only in source. [Issue #9's redacted validation evidence](https://github.com/MatheusBBarni/spec-finder/issues/9) records `grok 1.0.0 (3cd0d0cbcebe) [stable]` on Darwin 25.6.0 arm64: with `XAI_API_KEY` absent, cached-login packet execution completed with `auto` model, reasoning, and speed defaults plus confirmed cleanup. Its `_meta["x.ai/sessionConfig"].options` metadata was normalized into neutral runtime choices. On that version, explicit model or reasoning reaches the generic ACP `session/set_config_option` setter, which Grok rejects before prompting; Spec Finder surfaces a bounded clear failure and does not fall back. This is not a compatibility promise for later Grok Build releases. Grok is not certified for one-turn `exec`.
+
+Before selecting Grok Build in `setup` or running a packet with `--provider grok`:
+
+- Confirm that `grok` is available on `PATH` and run `grok --version`. If the binary is missing, install or repair Grok Build using xAI's documented method, put the resulting executable on `PATH`, start a fresh shell if needed, and repeat the version check. Spec Finder does not install, replace, or update the binary.
+- Authenticate outside Spec Finder with `grok login`. An existing cached login is sufficient. In a headless or non-browser environment, a nonblank `XAI_API_KEY` is an alternative: when it is set and the ACP agent advertises `xai.api_key`, Spec Finder selects that method; blank values are treated as absent, and otherwise it uses advertised cached-token authentication. The API-key selection path has redacted fixture coverage; no live API key is required. Keep credentials out of configuration files, task packets, logs, and this repository; Spec Finder never stores or prints a key value.
 
 ## Install
 
@@ -30,23 +40,33 @@ spec-finder setup
 └── tasks/
 ```
 
-In an interactive terminal, `setup` opens keyboard pickers for providers, installation scope, and copy or symlink mode. Use `↑`/`↓` to move, `Space` to toggle providers, `Enter` to confirm, and `Esc` to cancel. All providers start selected; local scope and copied skills are the defaults. Supply any choice as a flag to skip only its corresponding picker. Non-interactive setup defaults to all providers, local scope, and copied skills.
+In an interactive terminal, `setup` resolves exactly one provider and asks for its installation scope, model, and speed. Use `↑`/`↓` to move, `Enter` to confirm, and `Esc` to cancel; the provider and every other choice are single-select. Supplying a flag skips only that choice's picker. `--copy` remains accepted for compatibility and is the only installation mode.
 
-Limit setup to one or more targets when needed; repeat `--agent` to select more than one:
+The automation grammar is:
 
-```bash
-spec-finder setup --agent codex --agent cursor --global --symlink
+```text
+spec-finder setup [--agent claude|codex|cursor|grok] [--model auto|CURATED] \
+  [--speed auto|normal|fast] [--local|--global] [--copy]
 ```
 
-The `.spec-finder/config.json` and `.spec-finder/tasks/` scaffolding always remain in the current project. Skill destinations depend on scope:
+Each `--agent`, `--model`, and `--speed` option is optional and accepts at most one value. `--model` accepts the universal `auto` value or a curated model for the selected provider. `--speed` accepts auto, normal, or fast. `--local` and `--global` are independent scope flags; supply at most one. Repeated or duplicate setup options, conflicting scopes, and `--symlink` are rejected before any writes; the error directs users to `--copy`.
 
-| Provider | Local | Global |
-|---|---|---|
-| Claude | `.claude/skills` | `~/.claude/skills` |
-| Codex | `.agents/skills` | `~/.agents/skills` |
-| Cursor | `.cursor/skills` | `~/.cursor/skills` |
+Fresh setup defaults to Codex, `gpt-5.6-luna`, `normal` speed, and local scope. A valid configured v3 rerun reuses omitted provider, model, speed, and scope values, including a saved custom model. Selecting a different provider uses that provider's newest catalogue model while an omitted speed still reuses the saved speed. `auto` remains available for every provider.
 
-`--copy` copies the seven bundled `sf-*` skills into every selected provider. `--symlink` copies them once to a canonical provider—Codex when selected, otherwise the first selected provider—and creates a per-skill symlink for every other selected provider. Rerunning setup replaces only those seven `sf-*` entries; unrelated skills in the target directories are preserved.
+The `.spec-finder/config.json` and `.spec-finder/tasks/` scaffolding always remain in the current project. Skill destinations are derived from the selected provider and scope:
+
+| Provider | Curated setup models | Default model | Local skills | Global skills |
+|---|---|---|---|---|
+| Claude | `auto`, `fable`, `opus`, `sonnet`, `haiku` | `fable` | `.claude/skills` | `~/.claude/skills` |
+| Codex | `auto`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` | `gpt-5.6-luna` | `.agents/skills` | `~/.agents/skills` |
+| Cursor | `auto` | `auto` | `.agents/skills` | `~/.agents/skills` |
+| Grok Build | `auto` | `auto` | `.agents/skills` | `~/.agents/skills` |
+
+Existing v1 and v2 configuration files are read through an in-memory migration and are not rewritten until setup succeeds. Their historic installation scope is unknown: an interactive first setup requires an explicit scope choice, while a non-interactive first setup must include `--local` or `--global`; Spec Finder never guesses the old scope. A fresh workspace keeps the local default. Successful setup writes version 3 metadata with the provider-derived logical destination and selected scope.
+
+Cursor always installs managed skills in `.agents/skills` (or `~/.agents/skills` for global scope). Existing `.cursor/skills` content is legacy user content and is preserved untouched: setup performs no automatic migration, cleanup, merger, or deletion. When that path exists, the completion line says `legacy Cursor skills: preserved (not migrated)`; otherwise it reports that the path was absent and not migrated. Unrelated skills in the selected destination are preserved as well.
+
+Setup does not launch a provider or perform live capability discovery. Completion lines intentionally say `requested model` and `requested speed`; those values describe setup intent, not a guarantee that an account or client can apply them. Runtime ACP feedback is authoritative and may report a capability as applied, defaulted, or unsupported after a session starts.
 
 ## Stable npm releases (maintainers)
 
@@ -200,20 +220,26 @@ spec-finder run my-feature \
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "provider": "codex",
-  "model": "auto",
+  "model": "gpt-5.6-luna",
   "reasoning": "high",
   "speed": "normal",
   "permissions": "prompt",
-  "auto_commit": false
+  "auto_commit": false,
+  "setup": {
+    "status": "configured",
+    "scope": "local",
+    "destination": ".agents/skills"
+  }
 }
 ```
 
 Key behavior:
 
-- `model`: `auto` or a provider model ID. Claude uses `ANTHROPIC_MODEL`; Cursor receives `--model`; Codex uses advertised ACP session options.
-- `reasoning`: `auto`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`. It is applied only when advertised.
+- `provider`: `claude`, `codex`, `cursor`, or `grok`. Grok is supported by packet `run`; it is not currently certified for one-turn `exec`. Switching an existing packet run to Grok defaults omitted model and reasoning overrides to `auto`, so values saved for another provider are not sent to Grok; explicit `--model` and `--reasoning` values still win.
+- `model`: `auto` or a provider model ID. Claude uses `ANTHROPIC_MODEL`; Cursor receives `--model`; Codex uses advertised ACP session options. Grok Build leaves `auto` to provider defaults and applies an explicit model through an advertised ACP session option or fails clearly.
+- `reasoning`: `auto`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`. Grok Build leaves `auto` to provider defaults and applies an explicit choice through an advertised ACP session option or fails clearly; other providers apply it only when advertised.
 - `speed`: `auto`, `normal`, or `fast`. Unsupported providers continue with a truthful `unsupported` cockpit outcome.
 - `permissions`: `prompt` cancels permission requests in the read-only cockpit with a visible notice; with `--no-ui`, it prompts in an interactive terminal and cancels when input is unavailable. `approve-all` automatically chooses an allow option; `deny` automatically chooses a reject option.
 - `auto_commit`: `false` by default. Set it to `true` to enable one local recovery checkpoint after each task that passes implementation, verification, report, and status gates. The setting is configuration-only; invocation tokens such as `auto-commit=true|false` are rejected.
@@ -229,7 +255,7 @@ spec-finder checkpoint complete <task_slug> <task_id>
 
 `begin` must succeed before task execution; `complete` runs only after the report and `status: completed` gate. A blocked delivery stops downstream tasks while preserving the verified task record. Resolve the local Git condition and rerun the packet normally; the rerun retries delivery without rerunning the verified implementation. Set `auto_commit` back to `false` to keep the existing no-commit flow.
 
-Provider process commands are built into Spec Finder for Claude, Codex, and Cursor. They are implementation details rather than user configuration. Spec Finder also follows each provider's default ACP mode: mode IDs are advertised by the agent and are not portable across providers. Final reports are always required in `reports/`, completed tasks are skipped, and the run stops after a task failure.
+Provider process commands are built into Spec Finder for Claude, Codex, Cursor, and Grok Build. They are implementation details rather than user configuration. The Grok packet launch is `grok --no-auto-update agent stdio`; it requires the external binary and authentication prerequisites above. Spec Finder also follows each provider's default ACP mode: mode IDs are advertised by the agent and are not portable across providers. Final reports are always required in `reports/`, completed tasks are skipped, and the run stops after a task failure.
 
 ## One-turn `exec`
 
@@ -251,16 +277,16 @@ Exactly one non-empty positional prompt is required. Prompt text is quoted posit
 
 The four overrides are validated against the existing configuration schema:
 
-- `--provider NAME`: `claude`, `codex`, or `cursor`.
+- `--provider NAME`: `claude`, `codex`, `cursor`, or `grok`. Grok is listed for the shared configuration grammar, but remains packet-only until its separate exec certification passes.
 - `--model ID`: any non-empty model ID; `auto` is the default profile value.
 - `--reasoning LEVEL`: `auto`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`.
 - `--speed MODE`: `auto`, `normal`, or `fast`.
 
-Overrides apply after profile selection. Model values use the existing provider adapter mapping (Claude environment, Cursor launch argument, or Codex ACP option); reasoning and speed are applied only when the certified provider advertises them, otherwise exec emits the fixed `runtime option omitted` warning. Exec adds no provider-specific flags.
+Overrides apply after profile selection. Model values use the existing provider adapter mapping (Claude environment, Cursor launch argument, Codex ACP option, or Grok Build provider defaults); reasoning and speed are applied only when the certified provider advertises them, otherwise exec emits the fixed `runtime option omitted` warning. Grok Build is blocked before exec launch, so its packet-only ACP option behavior does not certify exec behavior. Exec adds no provider-specific flags.
 
 Runtime precedence is exactly `CLI flags > nearest repository .spec-finder/config.json > ~/.spec-finder/config.json`. The repository and user files are complete runtime profiles selected by fallback; fields are not merged. An existing but invalid repository profile fails clearly and does not fall through to the user file. When no repository profile exists, the user profile must be valid. Configuration resolution completes before provider startup.
 
-The names above are the values accepted by the shared configuration schema, not a claim that every value is currently launchable through `exec`. Task 09's certification is currently blocked, so the source-owned `exec` registry marks Claude, Codex, and Cursor unavailable for real exec launches. A real provider is rejected before spawn until its complete certification matrix passes. Packet `run` provider support is a separate compatibility path and is not disabled by this exec gate.
+The names above are the values accepted by the shared configuration schema, not a claim that every value is currently launchable through `exec`. Task 09's certification is currently blocked, so the source-owned `exec` registry marks Claude, Codex, Cursor, and Grok Build unavailable for real exec launches. Grok Build's source-owned certification entry remains `exec: false`; packet launch resolution is intentionally independent of that gate. A real provider is rejected before spawn until its complete certification matrix passes. Grok Build is packet-only for now: packet `run` provider support is a separate compatibility path and is not disabled by this exec gate.
 
 ### Workspace, permissions, and host access
 
@@ -300,7 +326,7 @@ Exec intentionally does not provide multi-turn or resumed sessions, stdin/file p
 
 ### Release evidence and manual validation handoff
 
-The reviewed task 09 certification record is [here](.spec-finder/tasks/ad-hoc-acp-exec/reports/task_09.md). Its verdict is **blocked**: all real exec providers remain disabled and host access remains read-only. The following M-03 through M-07 review is the release boundary, not a readiness claim:
+The reviewed task 09 certification record is [here](.spec-finder/tasks/ad-hoc-acp-exec/reports/task_09.md). Its verdict is **blocked**: all real exec providers, including Grok Build, remain disabled and host access remains read-only. The following M-03 through M-07 review is the release boundary, not a readiness claim:
 
 | Metric | Reviewed evidence | Current decision |
 |---|---|---|
@@ -319,7 +345,7 @@ M-01 and M-02 are external, manual measurements; they add no product instrumenta
 
 Do not add telemetry, counters, trust persistence, history, or a Spec Finder-owned measurement file to satisfy these handoffs.
 
-Version 1 configuration files are accepted for migration. Rerun `spec-finder setup` to rewrite an existing verbose file to the compact version 2 format.
+Version 1 and version 2 configuration files are accepted for migration. They are read in memory as version 3 with an `unconfigured` setup state; rerun `spec-finder setup` and choose `--local` or `--global` (or make the interactive scope choice) to write configured version 3 metadata. Historic scope is never guessed.
 
 Validate and inspect the effective file:
 
@@ -330,7 +356,7 @@ spec-finder config
 ## CLI
 
 ```text
-spec-finder setup [--agent claude|codex|cursor]... [--local|--global] [--copy|--symlink]
+spec-finder setup [--agent claude|codex|cursor|grok] [--model auto|CURATED] [--speed auto|normal|fast] [--local|--global] [--copy]
 spec-finder upgrade
 spec-finder run <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
 spec-finder run --multiple <slug1,slug2,...> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
@@ -340,6 +366,8 @@ spec-finder checkpoint complete <task_slug> <task_id>
 spec-finder config
 spec-finder version
 ```
+
+The `--provider` option accepts `claude`, `codex`, `cursor`, or `grok`. Grok Build remains packet-only; `spec-finder exec --provider grok` is rejected before provider spawn while its separate packet launch remains available.
 
 `upgrade` runs `npm install --global spec-finder@latest`, keeping npm as the package authority.
 
