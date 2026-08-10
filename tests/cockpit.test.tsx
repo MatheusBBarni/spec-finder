@@ -820,6 +820,93 @@ describe("read-only progress cockpit", () => {
     }
   })
 
+  test("renders a persistent typed no-work summary with plain-text reason, counts, and exit guidance", async () => {
+    const store = startedStore([
+      task(1, "Completed one", [], "completed"),
+      task(2, "Completed two", [], "done"),
+      task(3, "Completed three", [], "finished"),
+    ])
+    store.consume({
+      type: "run_finished",
+      ok: true,
+      message: "No executable tasks: all tasks are already complete",
+      outcome: "no_work",
+      reason: "all_tasks_complete",
+    })
+    const screen = await testRender(<App store={store} onCancel={() => {}} onDismiss={() => {}} />, {
+      width: 80,
+      height: 24,
+      exitOnCtrlC: false,
+    })
+
+    try {
+      await screen.renderOnce()
+      await act(async () => { await Promise.resolve() })
+      await screen.renderOnce()
+      let frame = screen.captureCharFrame()
+      expect(frame).toContain("NO EXECUTABLE TASKS")
+      expect(frame).toContain("All tasks are already complete")
+      expect(frame).toContain("Tasks 3/3 complete")
+      expect(frame).toContain("Q")
+      expect(frame).toContain("CTRL+C")
+      assertNoControls(frame)
+
+      await pressEscape(screen)
+      expect(screen.captureCharFrame()).toContain("NO EXECUTABLE TASKS")
+
+      setRendererCapabilities(screen.renderer, { rgb: false, ansi256: false })
+      await screen.renderOnce()
+      frame = screen.captureCharFrame()
+      expect(frame).toContain("NO EXECUTABLE TASKS")
+      expect(frame).toContain("All tasks are already complete")
+      expect(frame).toContain("Tasks 3/3 complete")
+      expect(frame).toContain("CTRL+C")
+      assertNoControls(frame)
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+  test("signals and cancels exactly once from both no-work exit keys", async () => {
+    for (const key of ["q", "ctrl-c"] as const) {
+      const store = startedStore([task(1, "Completed", [], "completed")])
+      store.consume({
+        type: "run_finished",
+        ok: true,
+        message: "No executable tasks: all tasks are already complete",
+        outcome: "no_work",
+        reason: "all_tasks_complete",
+      })
+      let cancelled = 0
+      let exited = 0
+      const screen = await testRender(
+        <App
+          store={store}
+          onCancel={() => { cancelled += 1 }}
+          onDismiss={() => {}}
+          onExit={() => { exited += 1 }}
+        />,
+        { width: 80, height: 24, exitOnCtrlC: false },
+      )
+
+      try {
+        await screen.renderOnce()
+        await act(async () => { await Promise.resolve() })
+        await screen.renderOnce()
+        expect(screen.captureCharFrame()).toContain("NO EXECUTABLE TASKS")
+        await act(async () => {
+          if (key === "q") screen.mockInput.pressKey("q")
+          else screen.mockInput.pressCtrlC()
+          await Promise.resolve()
+        })
+        expect({ key, cancelled, exited }).toEqual({ key, cancelled: 1, exited: 1 })
+        expect(screen.renderer.isDestroyed).toBeFalse()
+      } finally {
+        await destroy(screen)
+      }
+    }
+  })
+
   test("dismisses a settled failure with Esc, q, or Ctrl+C without cancelling or destroying the renderer", async () => {
     for (const key of ["escape", "q", "ctrl-c"] as const) {
       const store = startedStore([task(1, "Failed task")])
@@ -1077,11 +1164,26 @@ describe("cockpit session lifecycle", () => {
     expect(closeCalls).toBe(1)
   })
 
+  test("resolves the one-shot exit wait idempotently", async () => {
+    const session = createCockpitSessionController(() => undefined)
+    let exited = false
+    const waiting = session.waitForExit().then(() => { exited = true })
+
+    await Promise.resolve()
+    expect(exited).toBeFalse()
+    session.signalExit()
+    session.signalExit()
+    await waiting
+    expect(exited).toBeTrue()
+  })
+
   test("close releases a pending dismissal wait", async () => {
     const session = createCockpitSessionController(() => undefined)
     const waiting = session.waitForDismissal()
+    const exit = session.waitForExit()
     session.close()
     await expect(waiting).resolves.toBeUndefined()
+    await expect(exit).resolves.toBeUndefined()
   })
 })
 

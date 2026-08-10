@@ -480,6 +480,58 @@ describe("cockpit store", () => {
     })
   })
 
+  test("retains typed no-work metadata while keeping legacy terminal summaries generic", () => {
+    const noWorkStore = startedStore([
+      task(1, "Completed one", [], "completed"),
+      task(2, "Completed two", [], "done"),
+      task(3, "Completed three", [], "finished"),
+    ])
+    noWorkStore.consume({
+      type: "run_finished",
+      ok: true,
+      message: "No executable tasks: all tasks are already complete",
+      outcome: "no_work",
+      reason: "all_tasks_complete",
+    })
+
+    expect(noWorkStore.getSnapshot().finished).toEqual({
+      ok: true,
+      message: "No executable tasks: all tasks are already complete",
+      outcome: "no_work",
+      reason: "all_tasks_complete",
+    })
+
+    const legacyStore = startedStore([task(1, "Completed one", [], "completed")])
+    legacyStore.consume({ type: "run_finished", ok: true, message: "1 task completed" })
+    expect(legacyStore.getSnapshot().finished).toEqual({ ok: true, message: "1 task completed" })
+  })
+
+  test("leaves batch projection intact for nested singular terminal metadata", () => {
+    const store = new CockpitStore()
+    store.consume({ type: "batch_started", slugs: ["alpha", "beta"] })
+    store.consume({
+      type: "batch_packet_started",
+      slug: "alpha",
+      index: 0,
+      total: 2,
+      tasks: [task(1, "Alpha task")],
+    })
+
+    store.consume({
+      type: "run_finished",
+      ok: true,
+      message: "No executable tasks: all tasks are already complete",
+      outcome: "no_work",
+      reason: "all_tasks_complete",
+    })
+
+    expect(store.getSnapshot()).toMatchObject({ batchStatus: "running", finished: null, slug: "alpha" })
+    expect(store.getSnapshot().packetSummaries).toEqual([
+      { slug: "alpha", outcome: "not_started" },
+      { slug: "beta", outcome: "not_started" },
+    ])
+  })
+
   test("keeps permission events outside the final read-only view state", () => {
     const store = startedStore([task(1, "Demo")])
     let responded = false

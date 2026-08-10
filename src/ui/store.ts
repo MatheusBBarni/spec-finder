@@ -5,6 +5,7 @@ import type {
   BatchPacketFinishedEvent,
   BatchPacketStartedEvent,
   BatchStartedEvent,
+  NoWorkReason,
   RunEvent,
   RunEventListener,
 } from "../events.ts"
@@ -56,6 +57,13 @@ export interface StoppingPacketContext {
   readonly outcome: "failed" | "cancelled"
 }
 
+export interface CockpitFinishedState {
+  readonly ok: boolean
+  readonly message: string
+  readonly outcome?: "no_work"
+  readonly reason?: NoWorkReason
+}
+
 export type CockpitBatchStatus = BatchEventStatus | null
 
 export interface CockpitState {
@@ -76,7 +84,7 @@ export interface CockpitState {
   readonly taskFailureDetails: Readonly<Record<string, string>>
   readonly runActivity: readonly TranscriptEntry[]
   readonly runtimeOptions: Readonly<Partial<Record<RuntimeOptionName, RuntimeOptionOutcome>>>
-  readonly finished: Readonly<{ ok: boolean; message: string }> | null
+  readonly finished: Readonly<CockpitFinishedState> | null
   readonly batchStatus: CockpitBatchStatus
   readonly packetSummaries: readonly PacketSummary[]
   /** Read-only task snapshots retained for every packet tab. */
@@ -208,9 +216,15 @@ export class CockpitStore {
         const message = blockedDelivery && event.ok
           ? `${event.message}; checkpoint delivery blocked`
           : event.message
+        const finished: CockpitFinishedState = {
+          ok: event.ok && !blockedDelivery,
+          message,
+          ...(event.outcome === undefined ? {} : { outcome: event.outcome }),
+          ...(event.reason === undefined ? {} : { reason: event.reason }),
+        }
         this.set({
           ...this.state,
-          finished: { ok: event.ok && !blockedDelivery, message },
+          finished,
           activeTaskId: null,
         })
         break

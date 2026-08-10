@@ -2,9 +2,9 @@
 
 ## Current State
 
-- The approved packet contains three pending tasks in canonical order:
-  engine/event contract, cockpit projection/lifecycle, then single-run command
-  integration.
+- The approved packet contains three canonical tasks in order: task_01's
+  engine/event contract is completed, task_02 owns cockpit projection and
+  lifecycle, and task_03 owns single-run command integration.
 
 ## Shared Decisions
 
@@ -23,6 +23,12 @@
   `reason: "all_tasks_complete"` on `run_finished` only after a non-aborted
   empty `executionOrder`; taskless and invalid packets still fail before
   terminal events.
+- Singular `CockpitStore.finished` now preserves optional `outcome` and
+  `reason` fields from typed `run_finished` events, while the existing batch
+  guard ignores nested singular terminal events.
+- The real cockpit session exposes idempotent `waitForExit`/close behavior and
+  App signals the exit wait before its existing Q/Ctrl+C cancel path; legacy
+  injected command sessions may omit `waitForExit` for compatibility.
 - The current worktree contains user-owned batch changes in event, store, App,
   command, and test surfaces. Preserve them and merge no-work changes
   additively; batch `already_complete` presentation is not direct scope.

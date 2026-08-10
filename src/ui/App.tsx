@@ -53,9 +53,10 @@ interface AppProps {
   store: CockpitStore
   onCancel: () => void
   onDismiss: () => void
+  onExit?: () => void
 }
 
-export function App({ store, onCancel, onDismiss }: AppProps) {
+export function App({ store, onCancel, onDismiss, onExit = () => {} }: AppProps) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
   const { width, height } = useTerminalDimensions()
   const taskListRef = useRef<ScrollBoxRenderable>(null)
@@ -63,6 +64,7 @@ export function App({ store, onCancel, onDismiss }: AppProps) {
   const batchSummaryRef = useRef<ScrollBoxRenderable>(null)
   const taskTimings = useRef(new Map<string, TaskTiming>())
   const summaryDismissed = useRef(false)
+  const exitRequested = useRef(false)
   const [spinnerIndex, setSpinnerIndex] = useState(0)
   const [clock, setClock] = useState(() => performance.now())
   const [summaryOpen, setSummaryOpen] = useState(false)
@@ -73,16 +75,25 @@ export function App({ store, onCancel, onDismiss }: AppProps) {
   const compact = width < 80 || height < 24
   const batchMode = isBatchCockpit(state)
   const retainedFailureReview = isRetainedFailureReview(state)
+  const noWorkSummary = isNoWorkSummary(state)
   const taskState = selectPacketTaskView(state, batchCursorIndex, batchTaskCursorIndex)
   const selectedTask = selectSelectedTask(taskState)
   const selectedTranscript = selectSelectedTranscript(taskState)
   const hasRunningTasks = taskState.tasks.some((task) => task.status === "in_progress")
   const spinner = SPINNER_FRAMES[spinnerIndex] ?? "⠋"
 
+  const requestExit = (action: () => void): void => {
+    if (exitRequested.current) return
+    exitRequested.current = true
+    onExit()
+    action()
+  }
+
   useKeyboard((key) => {
     const escape = key.name === "escape" || key.name === "esc" || key.sequence === "\u001b" || key.raw === "\u001b"
     if (escape) {
       if (summaryOpenRef.current) {
+        if (noWorkSummary) return
         if (retainedFailureReview) {
           onDismiss()
           return
@@ -98,13 +109,16 @@ export function App({ store, onCancel, onDismiss }: AppProps) {
     }
     if (summaryOpenRef.current) {
       if (key.name === "q" || (key.ctrl && key.name === "c")) {
-        if (retainedFailureReview) onDismiss()
-        else onCancel()
+        requestExit(() => {
+          if (retainedFailureReview) onDismiss()
+          else onCancel()
+        })
       }
+      if (noWorkSummary) return
       return
     }
     if (key.name === "q" || (key.ctrl && key.name === "c")) {
-      onCancel()
+      requestExit(onCancel)
       return
     }
     if (key.name === "?") {
@@ -163,9 +177,10 @@ export function App({ store, onCancel, onDismiss }: AppProps) {
 
   useEffect(() => {
     if (state.finished) {
-      if (!summaryDismissed.current) setSummaryOpen(true)
+      if (noWorkSummary || !summaryDismissed.current) setSummaryOpen(true)
       return
     }
+    exitRequested.current = false
     if (state.slug) {
       summaryDismissed.current = false
       taskTimings.current.clear()
@@ -763,6 +778,10 @@ function RunSummary({
     return <BatchRunSummary state={state} width={width} height={height} scrollRef={batchSummaryRef} />
   }
 
+  if (isNoWorkSummary(state)) {
+    return <NoWorkRunSummary state={state} width={width} />
+  }
+
   const completed = state.tasks.filter((task) => isCompleted(task.status)).length
   const failed = state.tasks.filter((task) => task.status === "failed").length
   const blocked = state.tasks.filter((task) => task.status === "blocked").length
@@ -835,6 +854,29 @@ function RunSummary({
 
       <box height={1} marginTop={1} paddingLeft={1}>
         <text fg={colors.muted} wrapMode="none">[<span fg={colors.accent}>ESC</span>] BACK   [<span fg={colors.accent}>Q</span>] QUIT</text>
+      </box>
+      <box flexGrow={1} />
+    </box>
+  )
+}
+
+function NoWorkRunSummary({ state, width }: { state: CockpitState; width: number }) {
+  const completed = state.tasks.filter((task) => isCompleted(task.status)).length
+  const panelWidth = Math.max(24, Math.min(width - 4, 86))
+  const innerWidth = Math.max(panelWidth - 4, 16)
+  return (
+    <box flexGrow={1} flexDirection="column" paddingLeft={1} paddingTop={1}>
+      <box width={panelWidth} borderStyle="single" borderColor={colors.accent} backgroundColor={colors.panel} paddingLeft={1} paddingRight={1}>
+        <text fg={colors.accentBright} wrapMode="none"><strong>RUN.STATUS</strong></text>
+        <text fg={colors.accent} wrapMode="none"><strong>{fit("NO EXECUTABLE TASKS", innerWidth)}</strong></text>
+        <text fg={colors.textStrong} wrapMode="word">All tasks are already complete</text>
+        <text fg={colors.textStrong} wrapMode="word">{`Tasks ${completed}/${state.tasks.length} complete`}</text>
+        <text fg={colors.active} wrapMode="none">{progressBar(state, innerWidth)}</text>
+        <text> </text>
+        <text fg={colors.muted} wrapMode="word">{state.finished?.message ?? "No executable tasks"}</text>
+      </box>
+      <box height={1} marginTop={1} paddingLeft={1}>
+        <text fg={colors.muted} wrapMode="none">[<span fg={colors.accent}>Q</span>/<span fg={colors.accent}>CTRL+C</span>] EXIT</text>
       </box>
       <box flexGrow={1} />
     </box>
@@ -1206,6 +1248,13 @@ function isBatchCockpit(state: CockpitState): boolean {
 function isRetainedFailureReview(state: CockpitState): boolean {
   if (state.finished?.ok !== false) return false
   return state.batchStatus !== "cancelled" && state.batchStatus !== "preflight_failed"
+}
+
+function isNoWorkSummary(state: CockpitState): boolean {
+  return state.batchStatus === null
+    && state.finished?.ok === true
+    && state.finished.outcome === "no_work"
+    && state.finished.reason === "all_tasks_complete"
 }
 
 function taskRowId(taskId: string): string {
