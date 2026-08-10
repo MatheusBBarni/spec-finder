@@ -40,3 +40,24 @@
   release, manually smoke one single failure and one batch failure in a real
   terminal, confirm each review remains readable until dismissal and the
   terminal is restored, then confirm `--no-ui` completes immediately.
+
+## Verification Refresh (2026-08-10)
+
+- `rtk bun run test:pty` exited 0 on Darwin 25.6.0 arm64: the protocol observed
+  the retained `RUN.FAILURES` review, `task_01`, all three multiline fixture
+  lines, and the exact generic hint before Esc; it then observed terminal
+  restoration and preserved exit status `1`.
+- `rtk bun test tests/store.test.ts tests/cockpit.test.tsx tests/commands.test.ts`
+  exited 0 with 83 passing tests and 602 assertions.
+- `rtk bun run verify` exited 0 with 318 passing tests, 1,897 assertions,
+  successful TypeScript checking, and a successful Bun build.
+- `rtk git diff --check` exited 0. The worktree still contains only the
+  runtime-owned `task_05.md` checkpoint metadata; no task-owned source files
+  were changed during this verification refresh.
+- The release-owner manual checks remain open: real-terminal single failure,
+  real-terminal batch failure, and immediate `--no-ui` completion. Temporary
+  run-lock directories from prior fixture/test processes remain outside the
+  repository and were not removed without explicit cleanup scope.
+- The report phase used this immediately preceding implementation handoff as
+  fresh evidence; no additional verification or implementation changes were
+  needed before report generation.
