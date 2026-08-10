@@ -738,6 +738,7 @@ interface CommandLifecycle {
   readonly noUi: boolean
   readonly startCockpit: (store: CockpitStore) => Promise<void>
   readonly waitForDismissal: (reviewableFailure: boolean) => Promise<void>
+  readonly waitForNoWork: () => Promise<void>
   readonly close: () => void
 }
 
@@ -794,6 +795,10 @@ function createCommandLifecycle(
       if (!reviewableFailure || noUi || controller.signal.aborted) return
       await cockpit?.waitForDismissal()
     },
+    waitForNoWork: async () => {
+      if (noUi || controller.signal.aborted) return
+      await cockpit?.waitForExit?.()
+    },
     close,
   }
 }
@@ -823,6 +828,7 @@ async function runSingleCommand(args: readonly string[], options: RunCommandOpti
       emit,
       interactivePermissions: !lifecycle.noUi,
     })
+    if (result.ok && result.outcome === "no_work") await lifecycle.waitForNoWork()
     await lifecycle.waitForDismissal(!result.ok)
     return result.ok ? 0 : 1
   } finally {
@@ -867,7 +873,13 @@ function createSingleConsoleListener(output: Writable): RunEventListener {
   return (event) => {
     if (event.type === "activity") output.write(`${event.taskId ? `${event.taskId}: ` : ""}${event.message.trim()}\n`)
     if (event.type === "task_status") output.write(`${event.taskId}: ${event.status}\n`)
-    if (event.type === "run_finished") output.write(`${event.ok ? "ok" : "failed"}: ${event.message}\n`)
+    if (event.type === "run_finished") {
+      if (event.ok && event.outcome === "no_work" && event.reason === "all_tasks_complete") {
+        output.write("ok: no executable tasks; all tasks are already complete\n")
+        return
+      }
+      output.write(`${event.ok ? "ok" : "failed"}: ${event.message}\n`)
+    }
   }
 }
 

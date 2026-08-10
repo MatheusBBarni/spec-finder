@@ -29,6 +29,13 @@
 - The real cockpit session exposes idempotent `waitForExit`/close behavior and
   App signals the exit wait before its existing Q/Ctrl+C cancel path; legacy
   injected command sessions may omit `waitForExit` for compatibility.
+- The singular command now formats a typed successful `no_work`/
+  `all_tasks_complete` terminal event as `ok: no executable tasks; all tasks
+  are already complete` in no-UI mode, while preserving legacy text for other
+  terminal events.
+- Interactive singular runs await the cockpit's optional `waitForExit` handle
+  only when the returned `RunResult` is successful with `outcome: "no_work"`;
+  normal, failed, cancelled, and thrown paths keep existing cleanup behavior.
 - The current worktree contains user-owned batch changes in event, store, App,
   command, and test surfaces. Preserve them and merge no-work changes
   additively; batch `already_complete` presentation is not direct scope.

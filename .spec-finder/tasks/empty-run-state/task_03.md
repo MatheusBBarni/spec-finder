@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Integrate Single-Run No-Work Command Lifecycle
 type: backend
 complexity: medium
