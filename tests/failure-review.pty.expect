@@ -3,8 +3,16 @@
 set timeout 20
 match_max 200000
 log_user 0
+set child_spawn_id ""
 
 proc fail {message} {
+    global child_spawn_id
+    if {$child_spawn_id ne ""} {
+        catch {send -i $child_spawn_id -- "\003"}
+        catch {close -i $child_spawn_id}
+        catch {wait -i $child_spawn_id}
+        set child_spawn_id ""
+    }
     puts stderr "test:pty failed: $message"
     exit 1
 }
@@ -20,8 +28,7 @@ proc literal_pattern {text} {
     set separator "(?:$ansi|\\r|\\n)*"
     set pattern $separator
     foreach character [split $text ""] {
-        set escaped $character
-        if {$character eq "."} { set escaped {\\.} }
+        set escaped [regsub -all {[][(){}.^$*+?|\\]} $character {\\&}]
         append pattern $escaped $separator
     }
     return $pattern
@@ -29,14 +36,17 @@ proc literal_pattern {text} {
 
 proc expect_text {text description} {
     set pattern [literal_pattern $text]
-    expect {
-        -re $pattern { return }
-        eof { fail "missing $description before the PTY closed" }
-        timeout { fail "timed out waiting for $description" }
+    expect -re $pattern {
+        return
+    } eof {
+        fail "missing $description before the PTY closed"
+    } timeout {
+        fail "timed out waiting for $description"
     }
 }
 
 spawn -noecho /usr/bin/script -q /dev/null bun run tests/fixtures/failure-review-cli.ts
+set child_spawn_id $spawn_id
 
 expect_text "RUN.FAILURES" "failure review label"
 expect_text "task_01" "failed task ID"
@@ -46,9 +56,10 @@ expect_text "PTY fixture failure: line three" "third surfaced error line"
 expect_text "Resolve the listed error, then rerun the task packet." "generic recovery hint"
 
 set timeout 0
-expect {
-    eof { fail "failure review exited before Esc dismissal" }
-    timeout { puts "test:pty: retained failure review observed before dismissal" }
+expect timeout {
+    puts "test:pty: retained failure review observed before dismissal"
+} eof {
+    fail "failure review exited before Esc dismissal"
 }
 set timeout 20
 

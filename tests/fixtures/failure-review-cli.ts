@@ -5,6 +5,9 @@ import { parseTask } from "../../src/tasks.ts"
 
 const slug = "failure-review-pty"
 const root = process.cwd()
+// Keep the fixture's command lock separate from a real run in the checkout.
+// The fake runner never reads or writes this synthetic workspace root.
+const runRoot = join(root, "tests", "fixtures", `.failure-review-pty-${process.pid}`)
 const taskSource = `---
 status: pending
 title: Deterministic PTY failure
@@ -20,7 +23,7 @@ The task is intentionally failed by the fake runner.
 const task = parseTask(join(root, "tests", "fixtures", "task_01.md"), taskSource)
 
 const result = await runCommand([slug], {
-  root,
+  root: runRoot,
   input: process.stdin,
   output: process.stdout,
   loadConfig: async () => DEFAULT_CONFIG,
