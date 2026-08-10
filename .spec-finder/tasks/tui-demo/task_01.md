@@ -1,5 +1,5 @@
 ---
-status: failed
+status: pending
 title: Exercise the Spec Finder cockpit
 type: chore
 complexity: low
