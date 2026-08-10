@@ -2,9 +2,9 @@
 
 ## Current State
 
-- The approved packet contains five pending tasks in canonical order: phased
-  ACP contract, engine reference issuance, transcript safety, cockpit state
-  projection, and final OpenTUI acceptance rendering.
+- Task 01 and task 02 are completed and reported; task 03 is the active
+  transcript-safety position, followed by cockpit projection and OpenTUI
+  acceptance rendering.
 
 ## Shared Decisions
 
@@ -29,6 +29,17 @@
   bounded, path-redacted, and control-safe.
 - Engine activity/no-UI emission remains unchanged; interactive cockpit activity
   is formatted safely before display.
+- Transcript projection keeps its existing `sessionId` argument and accepts the
+  optional `AcpTurnPhase` as the fifth argument. Report-phase session-info is
+  dropped; implementation or missing-phase session-info uses only the fixed
+  `Session metadata` label.
+- Explicit phase is preferred as the message/tool identity scope when present,
+  so reused provider session IDs cannot merge implementation and report turns;
+  legacy no-phase calls still use their session ID.
+- `formatDisplayText` is the narrow reusable cockpit formatter for task 04. It
+  deterministically orders structured values, removes `_meta`, redacts common
+  absolute paths, neutralizes terminal controls, and caps output at 1,024
+  characters with an ellipsis.
 
 ## Shared Learnings
 
@@ -57,3 +68,6 @@
   task_05.
 - Task 02 leaves cockpit projection unchanged; later tasks consume the
   optional completed-only event reference and retain the no-UI boundary.
+- Task 04 should pass each event's `sessionId` and optional phase to
+  `applySessionUpdate` and reuse `formatDisplayText` for interactive activity
+  reasons rather than duplicating display sanitization.

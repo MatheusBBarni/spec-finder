@@ -3,6 +3,7 @@ import type { SessionUpdate } from "@agentclientprotocol/sdk"
 import {
   appendTranscriptLines,
   applySessionUpdate,
+  formatDisplayText,
   transcriptPresentation,
   type TranscriptEntry,
 } from "../src/ui/transcript.ts"
@@ -58,6 +59,35 @@ describe("task transcript normalization", () => {
       status: "completed",
       rawOutput: { turn: "report" },
     }, 4, "report")
+
+    expect(entries.map((entry) => entry.id)).toEqual([
+      "agent:implementation:reused",
+      "agent:report:reused",
+      "tool:implementation:reused-tool",
+      "tool:report:reused-tool",
+    ])
+    expect(entries[0]?.text).toBe("Implementation")
+    expect(entries[1]?.text).toBe(" report")
+    expect(entries[2]?.label).toBe("Tool · Implementation tool")
+    expect(entries[3]?.text).toContain('"turn": "report"')
+  })
+
+  test("uses explicit phases when a provider reuses its session ID", () => {
+    let entries: readonly TranscriptEntry[] = []
+    entries = applySessionUpdate(entries, message("reused", "Implementation"), 1, "test-session", "implementation")
+    entries = applySessionUpdate(entries, message("reused", " report"), 2, "test-session", "report")
+    entries = applySessionUpdate(entries, {
+      sessionUpdate: "tool_call",
+      toolCallId: "reused-tool",
+      title: "Implementation tool",
+      status: "completed",
+    }, 3, "test-session", "implementation")
+    entries = applySessionUpdate(entries, {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "reused-tool",
+      status: "completed",
+      rawOutput: { turn: "report" },
+    }, 4, "test-session", "report")
 
     expect(entries.map((entry) => entry.id)).toEqual([
       "agent:implementation:reused",
@@ -201,6 +231,114 @@ describe("task transcript normalization", () => {
       "Provider status update",
     ])
     expect(entries.at(-1)?.text).toContain("Waiting for capacity")
+  })
+
+  test("drops report session metadata without exposing any provider payload", () => {
+    const update = {
+      sessionUpdate: "session_info_update",
+      title: `${"oversized report prompt ".repeat(80)} /Users/alice/spec-finder/report.md`,
+      updatedAt: "2026-08-09T12:00:00Z",
+      _meta: {
+        prompt: "final report prompt",
+        root: "/Users/alice/spec-finder",
+        controls: "\u001b[31mred\u001b[0m\u0000\u007f",
+      },
+    } satisfies SessionUpdate
+
+    expect(applySessionUpdate([], update, 1, "test-session", "report")).toEqual([])
+  })
+
+  test("renders implementation and phase-missing session metadata as a fixed label", () => {
+    const update = {
+      sessionUpdate: "session_info_update",
+      title: "provider title with /Users/alice/spec-finder",
+      updatedAt: "2026-08-09T12:00:00Z",
+      _meta: { prompt: "do not render this" },
+    } satisfies SessionUpdate
+
+    const implementation = applySessionUpdate([], update, 2, "test-session", "implementation")
+    const missingPhase = applySessionUpdate(implementation, update, 3, "test-session")
+
+    expect(implementation).toEqual([{
+      id: "session-info:2",
+      sequence: 2,
+      kind: "unknown",
+      label: "Session metadata",
+      text: "",
+    }])
+    expect(missingPhase.at(-1)).toEqual({
+      id: "session-info:3",
+      sequence: 3,
+      kind: "unknown",
+      label: "Session metadata",
+      text: "",
+    })
+    expect(JSON.stringify(missingPhase)).not.toContain("provider title")
+    expect(JSON.stringify(missingPhase)).not.toContain("/Users/alice")
+    expect(JSON.stringify(missingPhase)).not.toContain("do not render this")
+  })
+
+  test("keeps reused-session phase identity while suppressing only report metadata", () => {
+    const update = { sessionUpdate: "session_info_update", title: "provider metadata" } satisfies SessionUpdate
+    let entries: readonly TranscriptEntry[] = []
+    entries = applySessionUpdate(entries, update, 1, "test-session", "implementation")
+    entries = applySessionUpdate(entries, update, 2, "test-session", "report")
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.id).toBe("session-info:1")
+    expect(entries[0]?.label).toBe("Session metadata")
+    expect(entries[0]?.text).toBe("")
+  })
+
+  test("formats unrelated unknown updates deterministically and safely", () => {
+    const unknownPayload = {
+      sessionUpdate: "provider_status_update",
+      zeta: 2,
+      alpha: "POSIX /Users/alice/spec-finder/report.md",
+      detail: [
+        "drive C:\\Users\\alice\\report.md",
+        "UNC \\\\server\\share\\report.md",
+        "controls \u0000 \u001b[31mred\u001b[0m \u007f",
+        "x".repeat(1_400),
+      ].join(" "),
+      _meta: { secret: "do not render this" },
+    }
+    const unknown = unknownPayload as unknown as SessionUpdate
+
+    const reversed = {
+      sessionUpdate: "provider_status_update",
+      _meta: { secret: "do not render this" },
+      detail: unknownPayload.detail,
+      alpha: unknownPayload.alpha,
+      zeta: unknownPayload.zeta,
+    } as unknown as SessionUpdate
+    const first = applySessionUpdate([], unknown, 4)[0]
+    const second = applySessionUpdate([], reversed, 4)[0]
+    const text = first?.text ?? ""
+
+    expect(first?.label).toBe("Provider status update")
+    expect(second?.text).toBe(text)
+    expect(text).toContain("[path redacted]")
+    expect(text).not.toContain("/Users/alice")
+    expect(text).not.toContain("C:\\Users\\alice")
+    expect(text).not.toContain("\\\\server\\share")
+    expect(text).not.toContain("do not render this")
+    expect(text).not.toContain("\u0000")
+    expect(text).not.toContain("\u001b")
+    expect(text).not.toContain("\u007f")
+    expect(text).toEndWith("…")
+    expect(text.length).toBe(1024)
+  })
+
+  test("handles cyclic unknown values through the bounded display formatter", () => {
+    const cyclic: Record<string, unknown> = { detail: "diagnostic" }
+    cyclic.self = cyclic
+    const update = { sessionUpdate: "provider_status_update", cyclic } as unknown as SessionUpdate
+
+    const entry = applySessionUpdate([], update, 5)[0]
+
+    expect(formatDisplayText(cyclic)).toContain("[Circular]")
+    expect(entry?.text).toContain("[Circular]")
   })
 
   test("keeps ACP startup capabilities and configuration out of the task transcript", () => {

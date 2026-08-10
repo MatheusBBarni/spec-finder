@@ -3,6 +3,7 @@ import type {
   SessionUpdate,
   ToolCallContent,
 } from "@agentclientprotocol/sdk"
+import type { AcpTurnPhase } from "../events.ts"
 
 export type TranscriptKind =
   | "message"
@@ -33,6 +34,10 @@ export interface TranscriptPresentation {
 
 type TextTranscriptKind = Extract<TranscriptKind, "activity" | "error" | "outcome">
 
+const MAX_DISPLAY_CHARS = 1024
+const DISPLAY_TRUNCATION_MARKER = "…"
+const SESSION_METADATA_LABEL = "Session metadata"
+
 const TEXT_LABELS: Record<TextTranscriptKind, string> = {
   activity: "Activity",
   error: "Error",
@@ -44,17 +49,20 @@ export function applySessionUpdate(
   update: SessionUpdate,
   sequence: number,
   sessionId?: string,
+  phase?: AcpTurnPhase,
 ): readonly TranscriptEntry[] {
+  const identityScope = phase ?? sessionId
+
   switch (update.sessionUpdate) {
     case "user_message_chunk":
-      return mergeContentChunk(entries, update, sequence, "message", "User", "user", sessionId)
+      return mergeContentChunk(entries, update, sequence, "message", "User", "user", identityScope)
     case "agent_message_chunk":
-      return mergeContentChunk(entries, update, sequence, "message", "Agent", "agent", sessionId)
+      return mergeContentChunk(entries, update, sequence, "message", "Agent", "agent", identityScope)
     case "agent_thought_chunk":
-      return mergeContentChunk(entries, update, sequence, "thought", "Thought", "thought", sessionId)
+      return mergeContentChunk(entries, update, sequence, "thought", "Thought", "thought", identityScope)
     case "tool_call":
     case "tool_call_update":
-      return mergeToolUpdate(entries, update, sequence, sessionId)
+      return mergeToolUpdate(entries, update, sequence, identityScope)
     case "plan":
       return [
         ...entries,
@@ -78,9 +86,22 @@ export function applySessionUpdate(
       // compact activity, so rendering their full payload only buries useful
       // startup feedback beneath protocol metadata.
       return entries
+    case "session_info_update":
+      return appendSessionInfoUpdate(entries, sequence, phase)
     default:
       return appendUnknownUpdate(entries, update, sequence)
   }
+}
+
+/**
+ * Formats untrusted text for cockpit display without exposing raw controls,
+ * absolute paths, metadata extensions, or an unbounded payload.
+ */
+export function formatDisplayText(value: unknown): string {
+  const displayValue = typeof value === "string"
+    ? value
+    : stableStringify(normalizeDisplayValue(value))
+  return truncateDisplayText(sanitizeDisplayText(displayValue))
 }
 
 export function appendTranscriptLines(
@@ -341,15 +362,38 @@ function appendUnknownUpdate(
   const payload = Object.fromEntries(
     Object.entries(raw).filter(([key]) => key !== "sessionUpdate" && key !== "_meta"),
   )
+  const safeDiscriminator = formatDisplayText(discriminator).replace(/\n/gu, " ")
+  const text = Object.keys(payload).length === 0
+    ? "Update received"
+    : formatDisplayText(payload)
 
   return [
     ...entries,
     {
-      id: `unknown:${discriminator}:${sequence}`,
+      id: `unknown:${safeDiscriminator}:${sequence}`,
       sequence,
       kind: "unknown",
-      label: humanize(discriminator),
-      text: Object.keys(payload).length === 0 ? "Update received" : stableStringify(payload),
+      label: humanize(safeDiscriminator),
+      text,
+    },
+  ]
+}
+
+function appendSessionInfoUpdate(
+  entries: readonly TranscriptEntry[],
+  sequence: number,
+  phase: AcpTurnPhase | undefined,
+): readonly TranscriptEntry[] {
+  if (phase === "report") return entries
+
+  return [
+    ...entries,
+    {
+      id: `session-info:${sequence}`,
+      sequence,
+      kind: "unknown",
+      label: SESSION_METADATA_LABEL,
+      text: "",
     },
   ]
 }
@@ -396,6 +440,50 @@ function stableStringify(value: unknown): string {
   }
 
   return JSON.stringify(normalize(value), null, 2)
+}
+
+function normalizeDisplayValue(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (typeof value === "string") return sanitizeDisplayText(value)
+  if (value === undefined) return "[undefined]"
+  if (typeof value === "bigint") return value.toString()
+  if (typeof value === "function") return `[Function ${value.name || "anonymous"}]`
+  if (typeof value === "symbol") return value.toString()
+  if (value === null || typeof value !== "object") return value
+  if (seen.has(value)) return "[Circular]"
+
+  seen.add(value)
+  if (Array.isArray(value)) return value.map((item) => normalizeDisplayValue(item, seen))
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => key !== "_meta")
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nested]) => [sanitizeDisplayText(key), normalizeDisplayValue(nested, seen)]),
+  )
+}
+
+function sanitizeDisplayText(value: string): string {
+  return redactAbsolutePaths(neutralizeControls(value))
+}
+
+function neutralizeControls(value: string): string {
+  return value
+    .replace(/\u001B\][^\u0007]*(?:\u0007|\u001B\\)/gu, "�")
+    .replace(/\u001B(?:\[[0-?]*[ -/]*[@-~]|[ -/]*[@-~])/gu, "�")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu, "�")
+    .replace(/\r\n?/gu, "\n")
+}
+
+function redactAbsolutePaths(value: string): string {
+  return value
+    .replace(/(?<![\w])\\\\[A-Za-z0-9._~+@%=-]+(?:[\\/][A-Za-z0-9._~+@%=-]+)+/gu, "[path redacted]")
+    .replace(/(?<![\w])[A-Za-z]:[\\/](?:[A-Za-z0-9._~+@%=-]+[\\/]?)+/gu, "[path redacted]")
+    .replace(/(?<![\w])\/(?:[A-Za-z0-9._~+@%=-]+\/)*(?:[A-Za-z0-9._~+@%=-]+)(?:\/[A-Za-z0-9._~+@%=-]+)*/gu, "[path redacted]")
+}
+
+function truncateDisplayText(value: string): string {
+  if (value.length <= MAX_DISPLAY_CHARS) return value
+  return `${value.slice(0, MAX_DISPLAY_CHARS - DISPLAY_TRUNCATION_MARKER.length)}${DISPLAY_TRUNCATION_MARKER}`
 }
 
 function actionSubtitle(entry: TranscriptEntry): string {
