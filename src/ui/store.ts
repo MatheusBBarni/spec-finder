@@ -17,6 +17,14 @@ import {
   formatDisplayText,
   type TranscriptEntry,
 } from "./transcript.ts"
+import {
+  advanceTaskTimer,
+  beginTaskTimer,
+  finishTaskTimer,
+  systemNow,
+  type MonotonicNow,
+  type TaskTimer,
+} from "./timer.ts"
 
 export type CockpitPane = "tasks" | "transcript"
 export type RuntimeOptionName = Extract<RunEvent, { type: "runtime_option" }>["name"]
@@ -79,6 +87,7 @@ export interface CockpitState {
   readonly followingActiveTask: boolean
   readonly helpOpen: boolean
   readonly transcripts: Readonly<Record<string, readonly TranscriptEntry[]>>
+  readonly taskTimers: Readonly<Record<string, TaskTimer>>
   readonly taskReasons: Readonly<Record<string, string>>
   /** Complete surfaced task failures retained only for the current cockpit session. */
   readonly taskFailureDetails: Readonly<Record<string, string>>
@@ -109,6 +118,7 @@ function createInitialState(): CockpitState {
     followingActiveTask: true,
     helpOpen: false,
     transcripts: {},
+    taskTimers: {},
     taskReasons: {},
     taskFailureDetails: {},
     runActivity: [],
@@ -125,6 +135,8 @@ function createInitialState(): CockpitState {
 }
 
 export class CockpitStore {
+  constructor(private readonly now: MonotonicNow = systemNow) {}
+
   private state: CockpitState = createInitialState()
   private listeners = new Set<() => void>()
   private sequence = 0
@@ -274,6 +286,7 @@ export class CockpitStore {
       tasks,
       visibleTaskIds,
       checkpointOutcomes,
+      taskTimers: {},
       activeTaskId: null,
       selectedTaskId: visibleTaskIds[0] ?? null,
       transcripts,
@@ -335,6 +348,7 @@ export class CockpitStore {
         ...checkpointReasons(tasks, (task) => qualifiedTaskKey(slug, task.id)),
       },
       taskFailureDetails,
+      taskTimers: {},
       runtimeOptions: {},
       finished: null,
       batchStatus: "running",
@@ -457,6 +471,30 @@ export class CockpitStore {
     this.set({ ...this.state, helpOpen: !this.state.helpOpen })
   }
 
+  tick(nowMs?: number): void {
+    if (this.state.finished !== null) return
+
+    const runningTaskIds = new Set(
+      this.state.tasks
+        .filter((task) => task.status === "in_progress")
+        .map((task) => task.id),
+    )
+    const runningTimers = Object.entries(this.state.taskTimers)
+      .filter(([taskId, timer]) => runningTaskIds.has(taskId) && timer.kind === "running")
+    if (runningTimers.length === 0) return
+
+    const observedNow = nowMs ?? this.now()
+    let taskTimers: Record<string, TaskTimer> | null = null
+    for (const [taskId, timer] of runningTimers) {
+      const next = advanceTaskTimer(timer, observedNow)
+      if (next === timer) continue
+      if (taskTimers === null) taskTimers = { ...this.state.taskTimers }
+      taskTimers[taskId] = next
+    }
+
+    if (taskTimers !== null) this.set({ ...this.state, taskTimers })
+  }
+
   private consumeTaskStatus(taskId: string, status: TaskStatus, reportReference?: string): void {
     const localTaskId = this.localTaskId(taskId)
     if (!localTaskId) return
@@ -477,6 +515,7 @@ export class CockpitStore {
       : visibleTasks.some((task) => task.id === this.state.selectedTaskId)
         ? this.state.selectedTaskId
         : visibleTasks[0]?.id ?? null
+    const taskTimers = this.projectTaskTimer(localTaskId, status)
     let transcripts = this.state.transcripts
     let taskReasons = this.state.taskReasons
     const taskFailureDetails = withoutKey(this.state.taskFailureDetails, transcriptKey)
@@ -512,7 +551,37 @@ export class CockpitStore {
 
     taskReasons = refreshBlockedReasons(tasks, taskReasons, (id) => this.taskKey(id))
     taskReasons = refreshCheckpointReasons(tasks, taskReasons, (id) => this.taskKey(id))
-    this.set({ ...this.state, tasks, packetTasks, activeTaskId, selectedTaskId, transcripts, taskReasons, taskFailureDetails })
+    this.set({
+      ...this.state,
+      tasks,
+      packetTasks,
+      activeTaskId,
+      selectedTaskId,
+      transcripts,
+      taskTimers,
+      taskReasons,
+      taskFailureDetails,
+    })
+  }
+
+  private projectTaskTimer(taskId: string, status: TaskStatus): Readonly<Record<string, TaskTimer>> {
+    const previous = this.state.taskTimers[taskId]
+    if (status === "blocked") {
+      if (previous === undefined) return this.state.taskTimers
+      const { [taskId]: _removed, ...withoutTask } = this.state.taskTimers
+      return withoutTask
+    }
+
+    if (status === "in_progress") {
+      if (previous !== undefined) return this.state.taskTimers
+      const next = beginTaskTimer(previous, this.now())
+      return next === previous ? this.state.taskTimers : { ...this.state.taskTimers, [taskId]: next }
+    }
+
+    if (!isTimerTerminal(status)) return this.state.taskTimers
+    if (previous !== undefined && previous.kind !== "running") return this.state.taskTimers
+    const next = finishTaskTimer(previous, this.now())
+    return next === previous ? this.state.taskTimers : { ...this.state.taskTimers, [taskId]: next }
   }
 
   private consumeCheckpoint(
@@ -828,6 +897,10 @@ function firstMeaningfulLine(message: string | undefined): string | undefined {
 
 function isCompleted(status: TaskStatus): boolean {
   return status === "completed" || status === "done" || status === "finished"
+}
+
+function isTimerTerminal(status: TaskStatus): boolean {
+  return isCompleted(status) || status === "failed"
 }
 
 function unfinishedTasks(tasks: readonly CockpitTask[]): readonly CockpitTask[] {
