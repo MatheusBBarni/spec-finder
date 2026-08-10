@@ -6,13 +6,6 @@ complexity: medium
 dependencies:
   - task_03
   - task_04
-checkpoint:
-  base_head: c75cf97ec4314ea0c6a4dddf1bbc4ba57d9f4e20
-  baseline_digest: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-  paths:
-    - .spec-finder/tasks/visible-task-run-errors/task_05.md
-  state: blocked
-  error: "checkpoint blocked: Git HEAD changed since checkpoint baseline"
 ---
 
 # Task 05: Add Deterministic macOS PTY Release Evidence
