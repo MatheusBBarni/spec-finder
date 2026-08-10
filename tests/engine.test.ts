@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { chmod, mkdir, mkdtemp, readFile, symlink, unlink, writeFile } from "node:fs/promises"
+import { access, chmod, mkdir, mkdtemp, readFile, symlink, unlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DEFAULT_CONFIG, parseConfig } from "../src/config.ts"
@@ -9,6 +9,160 @@ import { runGit as runCheckpointGit } from "../src/checkpoints.ts"
 import type { CheckpointServiceContract } from "../src/checkpoints.ts"
 
 describe("task engine", () => {
+  test("returns a typed no-work result for a valid all-complete packet without launching a provider", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-engine-no-work-"))
+    const packet = join(root, ".spec-finder", "tasks", "demo")
+    await mkdir(packet, { recursive: true })
+    const statuses = ["completed", "done", "finished"] as const
+    const taskPaths = statuses.map((status, index) => {
+      const number = String(index + 1).padStart(2, "0")
+      return { path: join(packet, `task_${number}.md`), number, status }
+    })
+    await Promise.all(taskPaths.map(({ path, number, status }) => writeFile(path, `---
+status: ${status}
+title: Terminal task ${number}
+type: test
+complexity: low
+dependencies: []
+---
+
+# Task ${number}: Terminal task ${number}
+`)))
+    const events: RunEvent[] = []
+
+    const result = await runTaskPacket({
+      root,
+      slug: "demo",
+      config: parseConfig({ ...DEFAULT_CONFIG, auto_commit: false }),
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: "/provider-launch-must-not-run",
+        args: [],
+        env: {},
+        authMethod: null,
+      },
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      completed: 0,
+      failed: 0,
+      blocked: 0,
+      outcome: "no_work",
+      reason: "all_tasks_complete",
+    })
+    expect(events.map((event) => event.type)).toEqual(["run_started", "run_finished"])
+    expect(events).toContainEqual({
+      type: "run_finished",
+      ok: true,
+      message: "No executable tasks: all tasks are already complete",
+      outcome: "no_work",
+      reason: "all_tasks_complete",
+    })
+    expect(events.some((event) => ["task_status", "activity", "session_update", "permission_requested", "checkpoint"].includes(event.type))).toBeFalse()
+    for (const { path, status } of taskPaths) expect(await readFile(path, "utf8")).toContain(`status: ${status}`)
+    await expect(access(join(packet, "reports"))).rejects.toThrow()
+  })
+
+  test("keeps an aborted all-complete packet on the cancelled path", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-engine-no-work-cancelled-"))
+    const packet = join(root, ".spec-finder", "tasks", "demo")
+    await mkdir(packet, { recursive: true })
+    await writeFile(join(packet, "task_01.md"), `---
+status: completed
+title: Already complete
+type: test
+complexity: low
+dependencies: []
+---
+
+# Task 01: Already complete
+`)
+    const controller = new AbortController()
+    controller.abort()
+    const events: RunEvent[] = []
+
+    const result = await runTaskPacket({
+      root,
+      slug: "demo",
+      config: DEFAULT_CONFIG,
+      signal: controller.signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: "/cancelled-no-work-provider-must-not-run",
+        args: [],
+        env: {},
+        authMethod: null,
+      },
+    })
+
+    expect(result).toEqual({ ok: false, completed: 0, failed: 0, blocked: 0 })
+    expect(events).toContainEqual({ type: "run_finished", ok: false, message: "run cancelled" })
+    const finished = events.find((event) => event.type === "run_finished")
+    expect(finished && "outcome" in finished).toBeFalse()
+    expect(finished && "reason" in finished).toBeFalse()
+  })
+
+  test("keeps a taskless packet as an error without emitting a no-work event", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-engine-taskless-"))
+    const packet = join(root, ".spec-finder", "tasks", "demo")
+    await mkdir(packet, { recursive: true })
+    const events: RunEvent[] = []
+
+    await expect(runTaskPacket({
+      root,
+      slug: "demo",
+      config: DEFAULT_CONFIG,
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: "/taskless-provider-must-not-run",
+        args: [],
+        env: {},
+        authMethod: null,
+      },
+    })).rejects.toThrow("no task_XX.md files found")
+    expect(events).toEqual([])
+  })
+
+  test("keeps validation failures as errors without emitting a no-work event", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-engine-invalid-"))
+    const packet = join(root, ".spec-finder", "tasks", "demo")
+    await mkdir(packet, { recursive: true })
+    await writeFile(join(packet, "task_01.md"), `---
+status: completed
+title: Invalid task
+type: test
+complexity: low
+dependencies: []
+---
+
+# Task 01: Different title
+`)
+    const events: RunEvent[] = []
+
+    await expect(runTaskPacket({
+      root,
+      slug: "demo",
+      config: DEFAULT_CONFIG,
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: "/invalid-packet-provider-must-not-run",
+        args: [],
+        env: {},
+        authMethod: null,
+      },
+    })).rejects.toThrow("task packet is invalid")
+    expect(events).toEqual([])
+    await expect(access(join(packet, "memory"))).rejects.toThrow()
+  })
+
   test("requires a separate report turn before completing a task", async () => {
     const root = await mkdtemp(join(tmpdir(), "spec-finder-engine-"))
     const packet = join(root, ".spec-finder", "tasks", "demo")
@@ -63,6 +217,10 @@ dependencies: []
     })
 
     expect(result).toEqual({ ok: true, completed: 1, failed: 0, blocked: 0 })
+    expect(events).toContainEqual({ type: "run_finished", ok: true, message: "1 task completed" })
+    const finished = events.find((event) => event.type === "run_finished")
+    expect(finished && "outcome" in finished).toBeFalse()
+    expect(finished && "reason" in finished).toBeFalse()
     expect(await readFile(taskPath, "utf8")).toContain("status: completed")
     expect(await readFile(join(packet, "memory", "MEMORY.md"), "utf8")).toContain("## Shared Decisions")
     expect(await readFile(join(packet, "memory", "task_01.md"), "utf8")).toContain("- Build the mock")
@@ -216,6 +374,7 @@ dependencies: []
     )
     expect(activityMessages(events).filter((message) => message.includes("retrying attempt"))).toHaveLength(1)
     expect(activityMessages(events)).toContain("ACP process ended before the task handoff completed (exit 23)")
+    expect(events).toContainEqual({ type: "run_finished", ok: false, message: "1 failed · 0 blocked" })
   }, 2_000)
 
   test("retries only the report phase when the first report is incomplete", async () => {

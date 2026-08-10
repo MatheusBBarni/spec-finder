@@ -19,6 +19,10 @@
 
 - Taskless packets remain loader errors. An all-complete valid packet creates
   packet memory but does not enter ACP/report/task-status work.
+- The engine now returns and mirrors `outcome: "no_work"` with
+  `reason: "all_tasks_complete"` on `run_finished` only after a non-aborted
+  empty `executionOrder`; taskless and invalid packets still fail before
+  terminal events.
 - The current worktree contains user-owned batch changes in event, store, App,
   command, and test surfaces. Preserve them and merge no-work changes
   additively; batch `already_complete` presentation is not direct scope.
