@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Render and Verify Report Outcomes
 type: frontend
 complexity: medium

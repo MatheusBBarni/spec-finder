@@ -266,10 +266,11 @@ describe("read-only progress cockpit", () => {
     const slugs = Array.from({ length: 30 }, (_, index) => `packet-${String(index + 1).padStart(2, "0")}`)
     const activeIndex = 15
     const activeSlug = slugs[activeIndex]!
+    const reportReference = ".spec-finder/tasks/demo/reports/task_01.md"
     const store = startedBatchStore(slugs, activeIndex, [task(1, "Inspectable final task")])
     store.consume({ type: "task_status", taskId: `${activeSlug}/task_01`, status: "in_progress" })
     store.consume({ type: "activity", taskId: `${activeSlug}/task_01`, message: "RETAINED-FINAL-TRANSCRIPT" })
-    store.consume({ type: "task_status", taskId: `${activeSlug}/task_01`, status: "completed" })
+    store.consume({ type: "task_status", taskId: `${activeSlug}/task_01`, status: "completed", reportReference })
 
     const screen = await render(store, 80, 24)
     try {
@@ -302,6 +303,8 @@ describe("read-only progress cockpit", () => {
       frame = screen.captureCharFrame()
       expect(frame).toContain("RUN.STATUS · BATCH SEQUENCE")
       expect(frame).toContain("[ESC] BACK")
+      expect(frame).not.toContain("Report:")
+      expect(frame).not.toContain(reportReference)
       const batchScroll = renderable<ScrollBoxRenderable>(screen, "batch-run-scroll")
       expect(batchScroll.scrollHeight).toBeGreaterThan(8)
 
@@ -383,6 +386,136 @@ describe("read-only progress cockpit", () => {
       expect(frame).toContain("task_02")
     } finally {
       await destroy(reopenedScreen)
+    }
+  })
+
+  test("renders a text-labelled report outcome and safe reference in live and terminal frames", async () => {
+    const reference = ".spec-finder/tasks/demo/reports/task_01.md"
+    const maliciousPrompt = "Final report prompt: /Users/alice/spec-finder/report.md\u001b[31m"
+    const store = startedStore([task(1, "Report outcome")])
+    store.consume({
+      type: "activity",
+      taskId: "task_01",
+      message: "final report handoff starting in active ACP session",
+    })
+    store.consume({
+      type: "session_update",
+      taskId: "task_01",
+      sessionId: "test-session",
+      phase: "report",
+      update: {
+        sessionUpdate: "session_info_update",
+        title: maliciousPrompt,
+        _meta: { prompt: maliciousPrompt, reportPath: "/Users/alice/spec-finder/report.md", verdict: "blocked" },
+      } as unknown as SessionUpdate,
+    })
+    store.consume({ type: "task_status", taskId: "task_01", status: "completed", reportReference: reference })
+
+    const screen = await render(store, 120, 40)
+    try {
+      let frame = screen.captureCharFrame()
+      expect(frame).toContain("final report handoff starting")
+      expect(frame).toContain("Task completed")
+      expect(frame).toContain(`Report: ${reference}`)
+      expect(frame).not.toContain(maliciousPrompt)
+      expect(frame).not.toContain("/Users/alice/spec-finder")
+      expect(frame).not.toContain("blocked")
+      expect(frame).not.toContain("reference unavailable")
+
+      await mutate(screen, () => {
+        store.consume({ type: "run_finished", ok: true, message: "1 task completed" })
+      })
+      frame = screen.captureCharFrame()
+      expect(frame).toContain("RUN.REPORTS")
+      expect(frame).toContain(`Report: ${reference}`)
+      expect(frame).toContain("All Tasks Complete: 1/1 succeeded")
+      expect(frame).not.toContain(maliciousPrompt)
+      expect(frame).not.toContain("/Users/alice/spec-finder")
+      expect(frame).not.toContain("reference unavailable")
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+  test("renders completion without an unavailable-report placeholder", async () => {
+    const store = startedStore([task(1, "Completion without shortcut")])
+    store.consume({ type: "activity", taskId: "task_01", message: "final report handoff starting" })
+    store.consume({ type: "task_status", taskId: "task_01", status: "completed" })
+
+    const screen = await render(store, 120, 40)
+    try {
+      let frame = screen.captureCharFrame()
+      expect(frame).toContain("Task completed")
+      expect(frame).not.toContain("Report:")
+      expect(frame).not.toContain("reference unavailable")
+
+      await mutate(screen, () => {
+        store.consume({ type: "run_finished", ok: true, message: "1 task completed" })
+      })
+      frame = screen.captureCharFrame()
+      expect(frame).toContain("All Tasks Complete: 1/1 succeeded")
+      expect(frame).not.toContain("RUN.REPORTS")
+      expect(frame).not.toContain("Report:")
+      expect(frame).not.toContain("reference unavailable")
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+  test("renders report failure as a labelled recovery outcome without provider blocked metadata", async () => {
+    const store = startedStore([task(1, "Report failure")])
+    store.consume({
+      type: "session_update",
+      taskId: "task_01",
+      sessionId: "test-session",
+      phase: "report",
+      update: {
+        sessionUpdate: "session_info_update",
+        title: "provider says blocked /Users/alice/spec-finder/report.md",
+        _meta: { verdict: "blocked", path: "/Users/alice/spec-finder/report.md" },
+      } as unknown as SessionUpdate,
+    })
+    store.consume({ type: "task_status", taskId: "task_01", status: "failed" })
+    store.consume({
+      type: "activity",
+      taskId: "task_01",
+      message: "final report failed: report provider stopped; rerun the report phase",
+    })
+
+    const screen = await render(store, 120, 40)
+    try {
+      const frame = screen.captureCharFrame()
+      expect(frame).toContain("Task failed")
+      expect(frame).toContain("final report failed")
+      expect(frame).toContain("rerun the report phase")
+      expect(frame).not.toContain("Task completed")
+      expect(frame).not.toContain("Report:")
+      expect(frame).not.toContain("blocked")
+      expect(frame).not.toContain("/Users/alice/spec-finder")
+      expect(frame).not.toContain("reference unavailable")
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+  test("keeps report labels readable in reduced-color frames", async () => {
+    const reference = ".spec-finder/tasks/demo/reports/task_01.md"
+    const store = startedStore([task(1, "Reduced-color report")])
+    store.consume({ type: "activity", taskId: "task_01", message: "final report handoff starting" })
+    store.consume({ type: "task_status", taskId: "task_01", status: "completed", reportReference: reference })
+    const screen = await testRender(<App store={store} onCancel={() => {}} onDismiss={() => {}} />, { width: 80, height: 24, exitOnCtrlC: false })
+
+    try {
+      setRendererCapabilities(screen.renderer, { rgb: false, ansi256: false })
+      await screen.renderOnce()
+      const frame = screen.captureCharFrame()
+      expect(frame).toContain("Task completed")
+      expect(frame).toContain("Report: .spec-finder/tasks/demo/reports/")
+      expect(frame).toContain("task_01.md")
+      expect(screen.captureSpans().cols).toBe(80)
+      assertNoControls(frame)
+    } finally {
+      await destroy(screen)
     }
   })
 

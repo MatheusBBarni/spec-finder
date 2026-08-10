@@ -732,10 +732,18 @@ function TaskStatusStrip({ state, task }: { state: CockpitState; task: CockpitTa
   const checkpoint = task ? selectTaskCheckpoint(state, task.id) : undefined
   const detail = checkpoint?.state === "blocked" ? checkpointDisplayText(checkpoint) : reason ?? checkpointDisplayText(checkpoint)
   const detailColor = checkpoint ? checkpointColor(checkpoint) : reason ? colors.danger : colors.dim
+  const detailLines = [
+    detail ?? "Read-only progress; no workflow controls",
+    task?.reportReference === undefined ? undefined : `Report: ${task.reportReference}`,
+  ].filter((line): line is string => line !== undefined)
   return (
-    <box height={detail ? 5 : 4} borderStyle="single" borderColor={color} backgroundColor={colors.panel} paddingLeft={1} paddingRight={1}>
+    <box height={(detail ? 5 : 4) + (task?.reportReference === undefined ? 0 : 1)} borderStyle="single" borderColor={color} backgroundColor={colors.panel} paddingLeft={1} paddingRight={1}>
       <text fg={color} wrapMode="none"><strong>{task ? `${statusIcon(task.status)} ${label}` : "› Waiting for task"}</strong></text>
-      <text fg={detailColor} wrapMode="none">{fit(detail ?? "Read-only progress; no workflow controls", 120)}</text>
+      {detailLines.map((line, index) => (
+        <text key={`${task?.id ?? "waiting"}-status-detail-${index}`} fg={index === 0 ? detailColor : colors.textStrong} wrapMode="none">
+          {fit(line, 120)}
+        </text>
+      ))}
     </box>
   )
 }
@@ -763,6 +771,7 @@ function RunSummary({
   const checkpointCreated = checkpointTasks.filter((task) => task.checkpoint?.state === "created").length
   const delivered = completed - checkpointBlocked
   const failures = state.tasks.filter((task) => task.status === "failed" || task.status === "blocked" || task.checkpoint?.state === "blocked")
+  const reportTasks = state.tasks.filter((task) => isCompleted(task.status) && task.reportReference !== undefined)
   const panelWidth = Math.max(24, Math.min(width - 4, 86))
   const innerWidth = Math.max(panelWidth - 4, 16)
   const failedRun = state.finished?.ok === false || failed > 0 || blocked > 0 || checkpointBlocked > 0
@@ -789,6 +798,17 @@ function RunSummary({
           </text>
         ) : null}
       </box>
+
+      {reportTasks.length > 0 ? (
+        <box width={panelWidth} marginTop={1} borderStyle="single" borderColor={colors.accent} backgroundColor={colors.panel} paddingLeft={1} paddingRight={1}>
+          <text fg={colors.accentBright} wrapMode="none"><strong>RUN.REPORTS</strong></text>
+          {reportTasks.map((task) => (
+            <text key={`report-${task.id}`} fg={colors.textStrong} wrapMode="none">
+              {fit(`${task.id} · Report: ${task.reportReference}`, innerWidth)}
+            </text>
+          ))}
+        </box>
+      ) : null}
 
       {failures.length > 0 ? (
         <box width={panelWidth} marginTop={1} borderStyle="single" borderColor={colors.danger} backgroundColor={colors.panel} paddingLeft={1} paddingRight={1}>
@@ -1159,7 +1179,7 @@ function formatElapsed(milliseconds: number): string {
 }
 
 function taskStatusText(status: TaskStatus): string {
-  if (isCompleted(status)) return "Task complete"
+  if (isCompleted(status)) return "Task completed"
   if (status === "in_progress") return "Task running"
   if (status === "failed") return "Task failed"
   if (status === "blocked") return "Task blocked"

@@ -5,6 +5,8 @@
 - Tasks 01 through 03 are completed and reported; task 04's cockpit projection
   is implemented and its final report is in handoff. Task 04 lifecycle status
   remains runtime-owned; task 05 follows for OpenTUI acceptance rendering.
+- Task 05's cockpit presentation and captured-frame acceptance changes are
+  implemented; its lifecycle status and final report remain runtime-owned.
 
 ## Shared Decisions
 
@@ -40,6 +42,10 @@
   deterministically orders structured values, removes `_meta`, redacts common
   absolute paths, neutralizes terminal controls, and caps output at 1,024
   characters with an ellipsis.
+- The cockpit renders the stored reference in the task status strip and in a
+  single-packet `RUN.REPORTS` terminal-summary section. Batch terminal summaries
+  intentionally remain packet-level and do not aggregate per-task report
+  references.
 - `CockpitTask.reportReference` is ephemeral cockpit state: the store accepts it
   only with exact `completed` status after slash-separated relative/control
   validation, appends `Report: <reference>`, and clears it for invalid or
