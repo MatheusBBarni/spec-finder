@@ -101,15 +101,88 @@ describe("cockpit store", () => {
     expect(store.getSnapshot()).toMatchObject({ selectedTaskId: "task_02", followingActiveTask: true })
   })
 
+  test("retains only safe completed report references and appends labelled outcome detail", () => {
+    const store = startedStore([task(1, "Report task")])
+    const initial = store.getSnapshot()
+    const reference = ".spec-finder/tasks/demo/reports/task_01.md"
+
+    store.consume({ type: "task_status", taskId: "task_01", status: "completed", reportReference: reference })
+
+    expect(initial.tasks[0]?.reportReference).toBeUndefined()
+    expect(initial.transcripts.task_01).toEqual([])
+    expect(store.getSnapshot().tasks[0]).toMatchObject({ status: "completed", reportReference: reference })
+    expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).toEqual([
+      "Task completed",
+      `Report: ${reference}`,
+    ])
+  })
+
+  test("omits malformed or non-completed report references without changing lifecycle semantics", () => {
+    const invalidReferences = [
+      "",
+      " /reports/task_01.md",
+      "/reports/task_01.md",
+      "../reports/task_01.md",
+      "reports/../task_01.md",
+      "reports//task_01.md",
+      "reports/./task_01.md",
+      "C:\\reports\\task_01.md",
+      "C:reports/task_01.md",
+      "\\\\server\\share\\task_01.md",
+      "reports/task_01\n.md",
+      "reports\\task_01.md",
+    ]
+
+    for (const reportReference of invalidReferences) {
+      const store = startedStore([task(1, "Report task")])
+      store.consume({ type: "task_status", taskId: "task_01", status: "completed", reportReference })
+      const state = store.getSnapshot()
+      expect(state.tasks[0]?.reportReference).toBeUndefined()
+      expect(selectTaskTranscript(state, "task_01").map((entry) => entry.text)).toEqual(["Task completed"])
+    }
+
+    for (const status of ["failed", "blocked"] as const) {
+      const store = startedStore([task(1, "Report task")])
+      store.consume({ type: "task_status", taskId: "task_01", status, reportReference: "reports/task_01.md" })
+      const state = store.getSnapshot()
+      expect(state.tasks[0]).toMatchObject({ status })
+      expect(state.tasks[0]?.reportReference).toBeUndefined()
+      expect(selectTaskTranscript(state, "task_01").map((entry) => entry.text)).not.toContain("Report: reports/task_01.md")
+    }
+  })
+
   test("keeps task activity and streamed session updates isolated", () => {
     const store = startedStore([task(1, "First"), task(2, "Second")])
     store.consume({ type: "activity", taskId: "task_01", message: "Inspecting task one" })
+    store.consume({
+      type: "session_update",
+      taskId: "task_01",
+      sessionId: "reused-session",
+      phase: "implementation",
+      update: message("phase-message", "Implementation"),
+    })
+    store.consume({
+      type: "session_update",
+      taskId: "task_01",
+      sessionId: "reused-session",
+      phase: "implementation",
+      update: message("phase-message", " output"),
+    })
+    store.consume({
+      type: "session_update",
+      taskId: "task_01",
+      sessionId: "reused-session",
+      phase: "report",
+      update: message("phase-message", "Report output"),
+    })
     store.consume({ type: "session_update", taskId: "task_02", sessionId: "test-session", update: message("message-2", "Task two") })
     store.consume({ type: "session_update", taskId: "task_02", sessionId: "test-session", update: message("message-2", " output") })
     store.consume({ type: "activity", taskId: "task_02", message: "Finished task two fixture" })
 
     expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).toEqual([
       "Inspecting task one",
+      "Implementation output",
+      "Report output",
     ])
     expect(selectTaskTranscript(store.getSnapshot(), "task_02").map((entry) => entry.text)).toEqual([
       "Task two output",
@@ -164,6 +237,24 @@ describe("cockpit store", () => {
       kind: "error",
       text: "Blocked because dependency task_01 failed",
     })
+  })
+
+  test("formats interactive task activity before it becomes a failure reason", () => {
+    const store = startedStore([task(1, "Report failure")])
+    const unsafeActivity = "final report failed at /Users/alice/spec-finder/reports/task_01.md\u001B[31m\nadditional detail"
+    store.consume({ type: "task_status", taskId: "task_01", status: "failed" })
+    store.consume({ type: "activity", taskId: "task_01", message: unsafeActivity })
+
+    const state = store.getSnapshot()
+    const reason = selectTaskReason(state, "task_01")
+    const detail = selectTaskFailureDetail(state, "task_01")
+    const transcript = selectTaskTranscript(state, "task_01").map((entry) => entry.text).join("\n")
+
+    expect(reason).toContain("[path redacted]")
+    expect(detail).toContain("[path redacted]")
+    expect(transcript).not.toContain("/Users/alice/spec-finder")
+    expect(transcript).not.toContain("\u001B")
+    expect(state.tasks[0]?.status).toBe("failed")
   })
 
   test("clears exact failure details when a task resumes and when a new run starts", () => {
@@ -442,6 +533,13 @@ describe("cockpit store", () => {
     })
     store.consume({ type: "task_status", taskId: "alpha/task_01", status: "failed" })
     store.consume({ type: "activity", taskId: "alpha/task_01", message: "Alpha failure" })
+    store.consume({
+      type: "session_update",
+      taskId: "alpha/task_01",
+      sessionId: "reused-session",
+      phase: "implementation",
+      update: message("alpha-session", "Alpha session output"),
+    })
     const alphaSnapshot = store.getSnapshot()
 
     store.consume({ type: "batch_packet_finished", slug: "alpha", index: 0, outcome: "failed", detail: "stopped" })
@@ -454,6 +552,20 @@ describe("cockpit store", () => {
     })
     store.consume({ type: "task_status", taskId: "beta/task_01", status: "failed" })
     store.consume({ type: "activity", taskId: "beta/task_01", message: "Beta failure" })
+    store.consume({
+      type: "session_update",
+      taskId: "alpha/task_01",
+      sessionId: "reused-session",
+      phase: "report",
+      update: message("stale-session", "stale alpha session"),
+    })
+    store.consume({
+      type: "session_update",
+      taskId: "beta/task_01",
+      sessionId: "reused-session",
+      phase: "report",
+      update: message("beta-session", "Beta session output"),
+    })
     store.consume({ type: "activity", taskId: "task_01", message: "bare stale event" })
     store.consume({ type: "activity", taskId: "alpha/task_01", message: "stale alpha event" })
 
@@ -464,8 +576,10 @@ describe("cockpit store", () => {
     expect(selectTaskReason(store.getSnapshot(), "task_01")).toBe("Beta failure")
     expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBe("Beta failure")
     expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).toContain("Beta failure")
+    expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).toContain("Beta session output")
     expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).not.toContain("bare stale event")
     expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).not.toContain("stale alpha event")
+    expect(selectTaskTranscript(store.getSnapshot(), "task_01").map((entry) => entry.text)).not.toContain("stale alpha session")
   })
 
   test("projects preflighted tasks for a parent packet before that packet starts", () => {

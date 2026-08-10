@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { PassThrough } from "node:stream"
+import type { SessionUpdate } from "@agentclientprotocol/sdk"
 import { DEFAULT_CONFIG, parseConfig, type SpecFinderConfig } from "../src/config.ts"
 import type { CheckpointServiceContract } from "../src/checkpoints.ts"
 import { checkpointCommand, runCommand, resolveSetupOptions, setupCommand } from "../src/commands.ts"
@@ -579,6 +580,47 @@ describe("run command batch integration", () => {
     expect(singleCalls).toEqual(["single-packet"])
     expect(singleOutput.text()).toContain("task_01: single packet activity")
     expect(singleOutput.text()).toContain("ok: single packet complete")
+  })
+
+  test("keeps no-ui output free of session updates and report references", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-command-report-output-"))
+    const output = commandOutput()
+    try {
+      const result = await runCommand(["demo", "--no-ui"], {
+        root,
+        output: output.output,
+        loadConfig: async () => DEFAULT_CONFIG,
+        runTaskPacket: async (options) => {
+          const reportMetadata = {
+            sessionUpdate: "session_info_update",
+            title: "Final report prompt /Users/alice/spec-finder/reports/task_01.md",
+          } satisfies SessionUpdate
+          options.emit({
+            type: "session_update",
+            taskId: "task_01",
+            sessionId: "reused-session",
+            phase: "report",
+            update: reportMetadata,
+          })
+          options.emit({
+            type: "task_status",
+            taskId: "task_01",
+            status: "completed",
+            reportReference: ".spec-finder/tasks/demo/reports/task_01.md",
+          })
+          options.emit({ type: "run_finished", ok: true, message: "single packet complete" })
+          return { ok: true, completed: 1, failed: 0, blocked: 0 }
+        },
+      })
+
+      expect(result).toBe(0)
+      expect(output.text()).toBe("task_01: completed\nok: single packet complete\n")
+      expect(output.text()).not.toContain("Report:")
+      expect(output.text()).not.toContain("session_info_update")
+      expect(output.text()).not.toContain("/Users/alice/spec-finder")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   test("refuses a second run in the same workspace until the active run releases its lease", async () => {

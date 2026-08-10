@@ -2,9 +2,9 @@
 
 ## Current State
 
-- Task 01 and task 02 are completed and reported; task 03 is the active
-  transcript-safety position, followed by cockpit projection and OpenTUI
-  acceptance rendering.
+- Tasks 01 through 03 are completed and reported; task 04's cockpit projection
+  is implemented and its final report is in handoff. Task 04 lifecycle status
+  remains runtime-owned; task 05 follows for OpenTUI acceptance rendering.
 
 ## Shared Decisions
 
@@ -40,6 +40,11 @@
   deterministically orders structured values, removes `_meta`, redacts common
   absolute paths, neutralizes terminal controls, and caps output at 1,024
   characters with an ellipsis.
+- `CockpitTask.reportReference` is ephemeral cockpit state: the store accepts it
+  only with exact `completed` status after slash-separated relative/control
+  validation, appends `Report: <reference>`, and clears it for invalid or
+  non-completed status events. Batch-qualified task routing remains the
+  authority for which packet may receive the projection.
 
 ## Shared Learnings
 
@@ -71,3 +76,10 @@
 - Task 04 should pass each event's `sessionId` and optional phase to
   `applySessionUpdate` and reuse `formatDisplayText` for interactive activity
   reasons rather than duplicating display sanitization.
+- Task 04's store projection is implemented and verified. Task 05 can consume
+  the optional completed-task reference and the ordered `Task completed` plus
+  `Report: <relative reference>` transcript entries; no-UI remains a separate
+  console path with no reference presentation.
+- Task 04 final-report evidence is fresh: focused store/command tests passed,
+  the full 310-test verification/build gate passed, and diff checks passed;
+  report writing must not change task frontmatter status.

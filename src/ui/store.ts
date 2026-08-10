@@ -13,6 +13,7 @@ import type { CheckpointRecord, TaskFile, TaskStatus } from "../tasks.ts"
 import {
   appendTranscriptLines,
   applySessionUpdate,
+  formatDisplayText,
   type TranscriptEntry,
 } from "./transcript.ts"
 
@@ -30,6 +31,8 @@ export interface CockpitTask {
   readonly type: string
   readonly complexity: string
   readonly status: TaskStatus
+  /** Safe, workspace-relative report reference supplied only with completion. */
+  readonly reportReference?: string
   readonly dependencies: readonly string[]
   /** Checkpoint delivery is independent from the task lifecycle status. */
   readonly checkpoint: CockpitCheckpoint | null
@@ -171,7 +174,7 @@ export class CockpitStore {
         this.consumeBatchFinished(event)
         break
       case "task_status":
-        this.consumeTaskStatus(event.taskId, event.status)
+        this.consumeTaskStatus(event.taskId, event.status, event.reportReference)
         break
       case "checkpoint":
         this.consumeCheckpoint(event.taskId, event)
@@ -181,7 +184,7 @@ export class CockpitStore {
         else this.consumeRunActivity(event.message)
         break
       case "session_update":
-        this.consumeSessionUpdate(event.taskId, event.sessionId, event.update)
+        this.consumeSessionUpdate(event.taskId, event.sessionId, event.update, event.phase)
         break
       case "runtime_option": {
         const detail = event.detail === undefined ? {} : { detail: event.detail }
@@ -440,11 +443,14 @@ export class CockpitStore {
     this.set({ ...this.state, helpOpen: !this.state.helpOpen })
   }
 
-  private consumeTaskStatus(taskId: string, status: TaskStatus): void {
+  private consumeTaskStatus(taskId: string, status: TaskStatus, reportReference?: string): void {
     const localTaskId = this.localTaskId(taskId)
     if (!localTaskId) return
     const transcriptKey = this.taskKey(localTaskId)
-    const tasks = this.state.tasks.map((task) => task.id === localTaskId ? { ...task, status } : task)
+    const safeReportReference = status === "completed" ? validateReportReference(reportReference) : undefined
+    const tasks = this.state.tasks.map((task) => task.id === localTaskId
+      ? projectTaskStatus(task, status, safeReportReference)
+      : task)
     const packetTasks = this.state.activePacket
       ? { ...this.state.packetTasks, [this.state.activePacket.slug]: tasks }
       : this.state.packetTasks
@@ -463,6 +469,15 @@ export class CockpitStore {
 
     if (isCompleted(status)) {
       transcripts = appendTaskLines(transcripts, transcriptKey, "outcome", "Task completed", this.nextSequence())
+      if (safeReportReference !== undefined) {
+        transcripts = appendTaskLines(
+          transcripts,
+          transcriptKey,
+          "outcome",
+          `Report: ${safeReportReference}`,
+          this.nextSequence(),
+        )
+      }
       taskReasons = withoutKey(taskReasons, transcriptKey)
     } else if (status === "failed") {
       const reason = formatTaskReason(status, undefined, [])
@@ -532,7 +547,7 @@ export class CockpitStore {
     const localTaskId = this.localTaskId(taskId)
     if (!localTaskId) return
     const transcriptKey = this.taskKey(localTaskId)
-    const trimmed = message.trim()
+    const trimmed = formatDisplayText(message).trim()
     if (!trimmed || !(transcriptKey in this.state.transcripts)) return
     const status = this.state.tasks.find((task) => task.id === localTaskId)?.status
     const unsuccessful = status === "failed" || status === "blocked"
@@ -556,13 +571,18 @@ export class CockpitStore {
     })
   }
 
-  private consumeSessionUpdate(taskId: string, sessionId: string, update: Extract<RunEvent, { type: "session_update" }>["update"]): void {
+  private consumeSessionUpdate(
+    taskId: string,
+    sessionId: string,
+    update: Extract<RunEvent, { type: "session_update" }>["update"],
+    phase: Extract<RunEvent, { type: "session_update" }>["phase"],
+  ): void {
     const localTaskId = this.localTaskId(taskId)
     if (!localTaskId) return
     const transcriptKey = this.taskKey(localTaskId)
     const current = this.state.transcripts[transcriptKey]
     if (!current) return
-    const next = applySessionUpdate(current, update, this.nextSequence(), sessionId)
+    const next = applySessionUpdate(current, update, this.nextSequence(), sessionId, phase)
     this.set({
       ...this.state,
       transcripts: { ...this.state.transcripts, [transcriptKey]: next },
@@ -690,6 +710,27 @@ export function formatTaskReason(
   if (failedDependencyIds.length === 1) return `Blocked because dependency ${failedDependencyIds[0]} failed`
   const last = failedDependencyIds.at(-1)
   return `Blocked because dependencies ${failedDependencyIds.slice(0, -1).join(", ")} and ${last} failed`
+}
+
+function projectTaskStatus(
+  task: CockpitTask,
+  status: TaskStatus,
+  reportReference: string | undefined,
+): CockpitTask {
+  const { reportReference: _previousReference, ...withoutReference } = task
+  return reportReference === undefined
+    ? { ...withoutReference, status }
+    : { ...withoutReference, status, reportReference }
+}
+
+function validateReportReference(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value !== value.trim()) return undefined
+  if (value.startsWith("/") || value.includes("\\") || /[\u0000-\u001f\u007f]/u.test(value)) return undefined
+  if (/^[a-z]:/iu.test(value) || value.startsWith("\\\\")) return undefined
+
+  const segments = value.split("/")
+  if (segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")) return undefined
+  return value
 }
 
 function appendTaskLines(
