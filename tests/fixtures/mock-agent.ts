@@ -14,6 +14,7 @@ let cancelRequested = false
 let cancelWaiter: (() => void) | undefined
 let configOptions = readConfigOptions(process.env.SPEC_FINDER_TEST_CONFIG_OPTIONS)
 const configReplacements = readConfigOptionReplacements(process.env.SPEC_FINDER_TEST_CONFIG_REPLACEMENTS)
+const sessionId = process.env.SPEC_FINDER_TEST_SESSION_ID ?? "test-session"
 
 const stream = acp.ndJsonStream(
   Writable.toWeb(process.stdout) as WritableStream<Uint8Array>,
@@ -60,7 +61,7 @@ acp
   .onRequest(acp.methods.agent.session.new, async () => {
     await recordLifecycle("session/new")
     return {
-      sessionId: "test-session",
+      sessionId,
       ...(configOptions === undefined ? {} : { configOptions }),
     }
   })
@@ -125,6 +126,21 @@ acp
       await context.client.notify(acp.methods.client.session.update, update)
     })
     const reportPath = prompt.match(/Write the final report to (.+)\. The report MUST/)?.[1]
+    if (reportPath && process.env.SPEC_FINDER_TEST_EMIT_REPORT_SESSION_INFO === "1") {
+      await context.client.notify(acp.methods.client.session.update, {
+        sessionId: context.params.sessionId,
+        update: {
+          sessionUpdate: "session_info_update",
+          title: `Final report prompt: ${prompt}`,
+          updatedAt: "2026-08-09T00:00:00.000Z",
+          _meta: {
+            reportPath,
+            prompt,
+            control: "unsafe\u001b[31m",
+          },
+        },
+      })
+    }
     const exitFirstImplementation = process.env.SPEC_FINDER_TEST_EXIT_FIRST_IMPLEMENTATION
     if (!reportPath && exitFirstImplementation && await claimFirstAttempt(exitFirstImplementation)) process.exit(25)
     const failFirstImplementation = process.env.SPEC_FINDER_TEST_FAIL_FIRST_IMPLEMENTATION

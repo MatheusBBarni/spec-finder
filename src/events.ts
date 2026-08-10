@@ -68,7 +68,7 @@ export type CheckpointEvent =
 
 export type RunEvent =
   | { type: "run_started"; slug: string; config: SpecFinderConfig; tasks: TaskFile[] }
-  | { type: "task_status"; taskId: string; status: TaskStatus }
+  | { type: "task_status"; taskId: string; status: TaskStatus; reportReference?: string }
   | CheckpointEvent
   | { type: "activity"; taskId?: string; message: string }
   | { type: "session_update"; taskId: string; sessionId: string; phase?: AcpTurnPhase; update: SessionUpdate }

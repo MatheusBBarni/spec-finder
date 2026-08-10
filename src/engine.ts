@@ -2,6 +2,7 @@ import { access, mkdir, readFile } from "node:fs/promises"
 import { join, relative, sep } from "node:path"
 import type { SpecFinderConfig } from "./config.ts"
 import type { RunEventListener } from "./events.ts"
+import { resolveWorkspaceRelativeReference } from "./paths.ts"
 import type { ProviderLaunch } from "./providers.ts"
 import { AcpProcessExitError, withAcpSession } from "./acp-client.ts"
 import {
@@ -168,6 +169,8 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
     let phase: "implementation" | "report" = resumingReportHandoff ? "report" : "implementation"
     let implementationComplete = resumingReportHandoff
     const attempts: TaskPhaseAttempts = { implementation: 0, "final report": 0 }
+    const reportDirectory = join(packet.directory, REPORT_DIRECTORY)
+    const reportPath = join(reportDirectory, `${current.id}.md`)
     try {
       for (;;) {
         const attemptsBeforeSession = { ...attempts }
@@ -176,6 +179,7 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
             root: options.root,
             config: options.config,
             taskId: current.id,
+            phase,
             signal: options.signal,
             emit: options.emit,
             interactivePermissions: options.interactivePermissions,
@@ -191,6 +195,7 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
                 run: async (attempt) => {
                   const implementation = await session.runTurn(
                     implementationPrompt(options.root, packet.directory, current, attempt),
+                    "implementation",
                   )
                   assertSuccessfulStop("implementation", implementation.stopReason)
                 },
@@ -201,8 +206,6 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
             }
 
             phase = "report"
-            const reportDirectory = join(packet.directory, REPORT_DIRECTORY)
-            const reportPath = join(reportDirectory, `${current.id}.md`)
             await mkdir(reportDirectory, { recursive: true })
             options.emit({
               type: "activity",
@@ -227,6 +230,7 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
                     attempt,
                     resumingReportHandoff || attempts["final report"] > 1,
                   ),
+                  "report",
                 )
                 assertSuccessfulStop("report", report.stopReason)
                 await assertReport(reportPath)
@@ -244,10 +248,16 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
         }
       }
 
+      const reportReference = await resolveWorkspaceRelativeReference(options.root, reportPath)
       current = await clearTaskHandoff(current)
       current = await updateTaskStatus(current, "completed")
       completed += 1
-      options.emit({ type: "task_status", taskId: current.id, status: "completed" })
+      options.emit({
+        type: "task_status",
+        taskId: current.id,
+        status: "completed",
+        ...(reportReference === undefined ? {} : { reportReference }),
+      })
 
       if (checkpointEnabled && checkpointService !== undefined) {
         const completion = await callCheckpoint(checkpointService, "complete", checkpointInput(options, current))

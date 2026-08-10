@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Issue Validated Report References
 type: backend
 complexity: medium

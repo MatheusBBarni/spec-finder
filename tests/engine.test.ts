@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { chmod, mkdir, mkdtemp, readFile, unlink, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, symlink, unlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DEFAULT_CONFIG, parseConfig } from "../src/config.ts"
@@ -17,6 +17,7 @@ describe("task engine", () => {
     const promptLog = join(root, "prompts.log")
     const processLog = join(root, "processes.log")
     const lifecycleLog = join(root, "lifecycle.log")
+    const events: RunEvent[] = []
     await writeFile(taskPath, `---
 status: pending
 title: Build the mock
@@ -46,7 +47,7 @@ dependencies: []
       slug: "demo",
       config,
       signal: new AbortController().signal,
-      emit: () => {},
+      emit: (event) => events.push(event),
       interactivePermissions: false,
       providerLaunch: {
         command: process.execPath,
@@ -55,6 +56,7 @@ dependencies: []
           SPEC_FINDER_TEST_PROMPT_LOG: promptLog,
           SPEC_FINDER_TEST_PROCESS_LOG: processLog,
           SPEC_FINDER_TEST_LIFECYCLE_LOG: lifecycleLog,
+          SPEC_FINDER_TEST_EMIT_REPORT_SESSION_INFO: "1",
         },
         authMethod: null,
       },
@@ -75,6 +77,46 @@ dependencies: []
       "session/prompt",
       "session/prompt",
     ])
+    const updates = events.filter((event): event is Extract<RunEvent, { type: "session_update" }> => event.type === "session_update")
+    expect(updates.length).toBeGreaterThan(0)
+    expect(new Set(updates.map((event) => event.sessionId))).toEqual(new Set(["test-session"]))
+    expect(new Set(updates.map((event) => event.phase))).toEqual(new Set(["implementation", "report"]))
+    const reportMetadata = updates.find((event) => event.update.sessionUpdate === "session_info_update")
+    expect(reportMetadata?.phase).toBe("report")
+    expect(reportMetadata?.update).toMatchObject({ title: expect.stringContaining(root) })
+    expect(events).toContainEqual({
+      type: "task_status",
+      taskId: "task_01",
+      status: "completed",
+      reportReference: ".spec-finder/tasks/demo/reports/task_01.md",
+    })
+  })
+
+  test("omits a report reference when the accepted artifact resolves outside the workspace", async () => {
+    const fixture = await createRetryFixture("External report reference")
+    const externalReports = await mkdtemp(join(tmpdir(), "spec-finder-engine-external-report-"))
+    await symlink(externalReports, join(fixture.root, ".spec-finder", "tasks", "demo", "reports"), "dir")
+    const events: RunEvent[] = []
+
+    const result = await runTaskPacket({
+      root: fixture.root,
+      slug: "demo",
+      config: fixture.config,
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: process.execPath,
+        args: [fixture.agent],
+        env: { SPEC_FINDER_TEST_EMIT_REPORT_SESSION_INFO: "1" },
+        authMethod: null,
+      },
+    })
+
+    expect(result).toEqual({ ok: true, completed: 1, failed: 0, blocked: 0 })
+    expect(await readFile(join(externalReports, "task_01.md"), "utf8")).toContain("Final verdict: completed")
+    expect(events).toContainEqual({ type: "task_status", taskId: "task_01", status: "completed" })
+    expect(events.some((event) => event.type === "task_status" && event.reportReference !== undefined)).toBeFalse()
   })
 
   test("retries a failed implementation once before continuing to the report phase", async () => {
@@ -278,6 +320,8 @@ dependencies: []
     expect(activityMessages(firstEvents)).toContain(
       "final report handoff blocked: report stopped: refusal; rerun retries the report without rerunning implementation",
     )
+    expect(firstEvents.some((event) => event.type === "task_status" && event.status === "completed")).toBeFalse()
+    expect(firstEvents.some((event) => event.type === "task_status" && event.reportReference !== undefined)).toBeFalse()
 
     const resumedEvents: RunEvent[] = []
     const resumed = await runTaskPacket({
@@ -455,6 +499,7 @@ dependencies: []
       event.type === "activity" && event.message.includes("cockpit is read-only")
     )).toHaveLength(2)
     expect(events.some((event) => event.type === "permission_requested")).toBe(false)
+    expect(events.some((event) => event.type === "task_status" && event.reportReference !== undefined)).toBeFalse()
   })
 
   test("branches on auto_commit and orders begin before in_progress and complete after completed", async () => {
