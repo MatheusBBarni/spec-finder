@@ -2,7 +2,7 @@
   "version": 2,
   "provider": "grok",
   "model": "auto",
-  "reasoning": "high",
+  "reasoning": "auto",
   "speed": "normal",
   "permissions": "prompt",
   "auto_commit": true
