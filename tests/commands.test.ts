@@ -284,6 +284,8 @@ describe("run command batch integration", () => {
     const stored = parseConfig({
       ...DEFAULT_CONFIG,
       provider: "codex",
+      model: "gpt-5.6-luna",
+      reasoning: "high",
       setup: { status: "configured", scope: "local", destination: ".agents/skills" },
     })
     let received: SpecFinderConfig | undefined
@@ -301,7 +303,33 @@ describe("run command batch integration", () => {
 
       expect(exitCode).toBe(0)
       expect(received?.provider).toBe("grok")
+      expect(received?.model).toBe("auto")
+      expect(received?.reasoning).toBe("auto")
       expect(received?.setup).toBe(stored.setup)
+
+      let explicitReceived: SpecFinderConfig | undefined
+      const explicitExitCode = await runCommand([
+        "demo",
+        "--no-ui",
+        "--provider",
+        "grok",
+        "--model",
+        "grok-4.5",
+        "--reasoning",
+        "low",
+      ], {
+        root,
+        output: commandOutput().output,
+        loadConfig: async () => stored,
+        runTaskPacket: async (options) => {
+          explicitReceived = options.config
+          return { ok: true, completed: 1, failed: 0, blocked: 0 }
+        },
+      })
+
+      expect(explicitExitCode).toBe(0)
+      expect(explicitReceived?.model).toBe("grok-4.5")
+      expect(explicitReceived?.reasoning).toBe("low")
     } finally {
       await rm(root, { recursive: true, force: true })
     }

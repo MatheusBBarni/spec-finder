@@ -100,6 +100,23 @@ describe("provider launch", () => {
     expect(JSON.stringify(options)).not.toContain("x.ai/sessionConfig")
   })
 
+  test("preserves standard ACP options while adding Grok metadata choices", () => {
+    const standardSpeed = {
+      type: "boolean" as const,
+      id: "speed",
+      name: "Fast mode",
+      currentValue: false,
+      category: "_speed",
+    }
+    const options = normalizeGrokSessionConfigOptions({
+      configOptions: [standardSpeed],
+      metadata: GROK_BUILD_1_0_SESSION_CONFIG_METADATA,
+    })
+
+    expect(options.map((option) => option.id)).toEqual(["speed", "model", "mode"])
+    expect(options[0]).toBe(standardSpeed)
+  })
+
   test("keeps packet launch resolution independent from exec certification", () => {
     for (const provider of ["claude", "codex", "cursor", "grok"] as const) {
       expect(() => resolvePacketProviderLaunch({ ...DEFAULT_CONFIG, provider })).not.toThrow()

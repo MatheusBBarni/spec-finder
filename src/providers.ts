@@ -190,11 +190,11 @@ export function createGrokAuthMethodPreference(hasXaiApiKey: boolean): AuthMetho
 export function normalizeGrokSessionConfigOptions(
   advertisement: SessionConfigAdvertisement,
 ): readonly SessionConfigOption[] {
-  if ((advertisement.configOptions?.length ?? 0) > 0) return advertisement.configOptions ?? []
+  const standardOptions = [...(advertisement.configOptions ?? [])]
   const metadata = asRecord(advertisement.metadata)
   const sessionConfig = asRecord(metadata?.["x.ai/sessionConfig"])
   const rawOptions = sessionConfig?.options
-  if (!Array.isArray(rawOptions)) return []
+  if (!Array.isArray(rawOptions)) return standardOptions
   const choicesByCategory = new Map<string, GrokSessionConfigChoice[]>()
   for (const rawOption of rawOptions) {
     const choice = normalizeGrokSessionConfigChoice(rawOption)
@@ -203,9 +203,16 @@ export function normalizeGrokSessionConfigOptions(
     choices.push(choice)
     choicesByCategory.set(choice.category, choices)
   }
-  return [...choicesByCategory.entries()].flatMap(([category, choices]) =>
+  const metadataOptions = [...choicesByCategory.entries()].flatMap(([category, choices]) =>
     normalizeGrokSessionConfigChoiceGroup(category, choices),
   )
+  return [
+    ...standardOptions,
+    ...metadataOptions.filter((candidate) => !standardOptions.some((option) =>
+      option.id === candidate.id
+      || (option.category !== undefined && option.category === candidate.category),
+    )),
+  ]
 }
 
 interface GrokSessionConfigChoice {

@@ -989,10 +989,15 @@ function applyRunOverrides(config: SpecFinderConfig, args: readonly string[]): S
   const model = valueFor(args, "--model")
   const reasoning = valueFor(args, "--reasoning")
   const speed = valueFor(args, "--speed")
+  const switchesToGrok = provider === "grok" && config.provider !== "grok"
+  const selectedModel = model ?? (switchesToGrok ? "auto" : undefined)
+  const selectedReasoning = reasoning ?? (switchesToGrok ? "auto" : undefined)
   return applyRuntimeConfigOverrides(config, {
     ...(provider ? { provider: provider as SpecFinderConfig["provider"] } : {}),
-    ...(model ? { model } : {}),
-    ...(reasoning ? { reasoning: reasoning as SpecFinderConfig["reasoning"] } : {}),
+    ...(selectedModel === undefined ? {} : { model: selectedModel }),
+    ...(selectedReasoning === undefined
+      ? {}
+      : { reasoning: selectedReasoning as SpecFinderConfig["reasoning"] }),
     ...(speed ? { speed: speed as SpecFinderConfig["speed"] } : {}),
   })
 }

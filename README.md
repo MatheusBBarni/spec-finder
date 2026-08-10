@@ -237,7 +237,7 @@ spec-finder run my-feature \
 
 Key behavior:
 
-- `provider`: `claude`, `codex`, `cursor`, or `grok`. Grok is supported by packet `run`; it is not currently certified for one-turn `exec`.
+- `provider`: `claude`, `codex`, `cursor`, or `grok`. Grok is supported by packet `run`; it is not currently certified for one-turn `exec`. Switching an existing packet run to Grok defaults omitted model and reasoning overrides to `auto`, so values saved for another provider are not sent to Grok; explicit `--model` and `--reasoning` values still win.
 - `model`: `auto` or a provider model ID. Claude uses `ANTHROPIC_MODEL`; Cursor receives `--model`; Codex uses advertised ACP session options. Grok Build leaves `auto` to provider defaults and applies an explicit model through an advertised ACP session option or fails clearly.
 - `reasoning`: `auto`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`. Grok Build leaves `auto` to provider defaults and applies an explicit choice through an advertised ACP session option or fails clearly; other providers apply it only when advertised.
 - `speed`: `auto`, `normal`, or `fast`. Unsupported providers continue with a truthful `unsupported` cockpit outcome.

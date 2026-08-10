@@ -124,6 +124,31 @@ describe("neutral ACP v1 turn core", () => {
     expect(await lifecycleSteps(lifecycleLog)).toEqual(["initialize", "authenticate:xai.api_key"])
   })
 
+  test("emits one redacted activity while draining repeated provider diagnostics", async () => {
+    const { root, lifecycleLog } = await fixtureContext()
+    const events: import("../src/acp-turn.ts").AcpTurnEvent[] = []
+    const request = makeRequest(root, lifecycleLog, {}, {
+      stderrPolicy: "redact",
+    }, {
+      supervisor: chunkedStderrSupervisor([
+        "XAI_API_KEY=FIRST_SENTINEL",
+        "cached_token=SECOND_SENTINEL",
+        "third diagnostic",
+      ]),
+      emit: (event) => events.push(event),
+    })
+
+    const result = await runAcpTurn(request)
+    const diagnostics = events.filter((event) => event.type === "provider_stderr")
+
+    expect(result.stopReason).toBe("end_turn")
+    expect(diagnostics).toEqual([{
+      type: "provider_stderr",
+      text: "Provider emitted diagnostic output; details redacted.",
+    }])
+    expect(JSON.stringify(events)).not.toContain("SENTINEL")
+  })
+
   test("replaces complete config-option state after every response and update", async () => {
     const { root, lifecycleLog } = await fixtureContext()
     const initialOptions = [
@@ -342,6 +367,24 @@ function countingCleanupSupervisor(): ProcessSupervisor & { cancelCalls(): numbe
           calls += 1
           return process.cancelTree(deadlineMs)
         },
+      }
+    },
+  }
+}
+
+function chunkedStderrSupervisor(chunks: readonly string[]): ProcessSupervisor {
+  const supervisor = createProcessSupervisor()
+  return {
+    async spawn(spec) {
+      const process = await supervisor.spawn(spec)
+      return {
+        ...process,
+        stderr: new ReadableStream<Uint8Array>({
+          start(controller) {
+            for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk))
+            controller.close()
+          },
+        }),
       }
     },
   }

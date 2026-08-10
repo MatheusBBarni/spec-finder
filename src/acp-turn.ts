@@ -417,11 +417,15 @@ export async function withAcpTurnSession<T>(
       process = await request.supervisor.spawn(request.launch)
       if (cancellation.forceRequested) onForceAbort()
       if (process.stderr !== undefined) {
+        let redactedDiagnosticEmitted = false
         void consumeProviderStderr(process.stderr, (text) => {
-          const safeText = request.launch.stderrPolicy === "redact"
-            ? "Provider emitted diagnostic output; details redacted."
-            : text
-          emit({ type: "provider_stderr", text: safeText })
+          if (request.launch.stderrPolicy !== "redact") {
+            emit({ type: "provider_stderr", text })
+            return
+          }
+          if (redactedDiagnosticEmitted) return
+          redactedDiagnosticEmitted = true
+          emit({ type: "provider_stderr", text: "Provider emitted diagnostic output; details redacted." })
         })
       }
       if (process.stdin === undefined || process.stdout === undefined) {
