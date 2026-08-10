@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: completed
 title: Add Phased ACP Event Contracts
 type: backend
 complexity: medium

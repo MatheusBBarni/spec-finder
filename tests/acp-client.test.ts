@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { runAcpTurn } from "../src/acp-client.ts"
 import { DEFAULT_CONFIG, parseConfig } from "../src/config.ts"
-import type { RunEvent } from "../src/events.ts"
+import type { AcpTurnPhase, RunEvent } from "../src/events.ts"
 
 describe("ACP client", () => {
   test("completes a framed turn and selects an allow option for approve-all", async () => {
@@ -26,6 +26,7 @@ describe("ACP client", () => {
       config,
       prompt: "Run the mock turn",
       taskId: "task_01",
+      phase: "implementation",
       signal: new AbortController().signal,
       emit: (event) => events.push(event),
       interactivePermissions: false,
@@ -82,10 +83,15 @@ describe("ACP client", () => {
         content: { type: "text", text: "permission response: allow" },
       }),
     }))
+    const updates = sessionUpdates(events)
+    expect(updates.length).toBeGreaterThan(0)
+    expect(updates.every((event) => event.phase === "implementation")).toBeTrue()
+    expect(updates.every((event) => event.sessionId === "test-session")).toBeTrue()
   })
 
   test("selects a reject option for deny", async () => {
     const { events, result } = await runPermissionTurn({
+      phase: "report",
       permissions: "deny",
       interactivePermissions: false,
       expectedPermission: "reject",
@@ -98,10 +104,14 @@ describe("ACP client", () => {
         content: { type: "text", text: "permission response: reject" },
       }),
     }))
+    const updates = sessionUpdates(events)
+    expect(updates.length).toBeGreaterThan(0)
+    expect(updates.every((event) => event.phase === "report")).toBeTrue()
   })
 
   test("cancels prompt permission requests in the TUI without emitting an interactive event", async () => {
     const { events, result } = await runPermissionTurn({
+      phase: "report",
       permissions: "prompt",
       interactivePermissions: true,
     })
@@ -123,6 +133,7 @@ describe("ACP client", () => {
 
   test("preserves non-UI prompt cancellation when stdin is not interactive", async () => {
     const { events, result } = await runPermissionTurn({
+      phase: "report",
       permissions: "prompt",
       interactivePermissions: false,
       expectedPermission: "cancelled",
@@ -153,6 +164,7 @@ describe("ACP client", () => {
       config,
       prompt: "This prompt must not hang",
       taskId: "task_01",
+      phase: "implementation",
       signal: new AbortController().signal,
       emit: () => {},
       interactivePermissions: false,
@@ -183,6 +195,7 @@ describe("ACP client", () => {
       config,
       prompt: "Complete and clean up the process tree",
       taskId: "task_01",
+      phase: "implementation",
       signal: new AbortController().signal,
       emit: () => {},
       interactivePermissions: false,
@@ -214,6 +227,7 @@ async function processExited(pid: number): Promise<boolean> {
 }
 
 async function runPermissionTurn(options: {
+  phase: AcpTurnPhase
   permissions: "prompt" | "approve-all" | "deny"
   interactivePermissions: boolean
   expectedPermission?: "allow" | "reject" | "cancelled"
@@ -237,6 +251,7 @@ async function runPermissionTurn(options: {
     config,
     prompt: "Run the mock permission turn",
     taskId: "task_01",
+    phase: options.phase,
     signal: new AbortController().signal,
     emit: (event) => events.push(event),
     interactivePermissions: options.interactivePermissions,
@@ -244,4 +259,8 @@ async function runPermissionTurn(options: {
   })
 
   return { events, result }
+}
+
+function sessionUpdates(events: readonly RunEvent[]): Array<Extract<RunEvent, { type: "session_update" }>> {
+  return events.filter((event): event is Extract<RunEvent, { type: "session_update" }> => event.type === "session_update")
 }

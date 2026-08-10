@@ -17,7 +17,7 @@ import {
   type WorkspaceAccess,
 } from "./acp-turn.ts"
 import type { SpecFinderConfig } from "./config.ts"
-import type { RunEventListener } from "./events.ts"
+import type { AcpTurnPhase, RunEventListener } from "./events.ts"
 import { assertInsideWorkspace } from "./paths.ts"
 import { resolveProviderLaunch, type ProviderLaunch } from "./providers.ts"
 
@@ -26,6 +26,7 @@ export interface AcpTurnOptions {
   config: SpecFinderConfig
   prompt: string
   taskId: string
+  phase: AcpTurnPhase
   signal: AbortSignal
   emit: RunEventListener
   interactivePermissions: boolean
@@ -36,10 +37,15 @@ export interface AcpTurnResult {
   stopReason: string
 }
 
-export type AcpSessionOptions = Omit<AcpTurnOptions, "prompt">
+/**
+ * Session compatibility options retain the existing multi-turn adapter shape.
+ * A turn can provide its phase when it starts; one-turn callers use the
+ * required AcpTurnOptions.phase below.
+ */
+export type AcpSessionOptions = Omit<AcpTurnOptions, "prompt" | "phase"> & { phase?: AcpTurnPhase }
 
 export interface AcpSessionHandle {
-  runTurn(prompt: string): Promise<AcpTurnResult>
+  runTurn(prompt: string, phase?: AcpTurnPhase): Promise<AcpTurnResult>
 }
 
 export class AcpProcessExitError extends Error {
@@ -52,7 +58,7 @@ export class AcpProcessExitError extends Error {
 /** Packet compatibility adapter over the task-neutral ACP v1 lifecycle. */
 export async function runAcpTurn(options: AcpTurnOptions): Promise<AcpTurnResult> {
   if (options.signal.aborted) return { stopReason: "cancelled" }
-  return withAcpSession(options, (session) => session.runTurn(options.prompt))
+  return withAcpSession(options, (session) => session.runTurn(options.prompt, options.phase))
 }
 
 /**
@@ -64,6 +70,7 @@ export async function withAcpSession<T>(
   use: (session: AcpSessionHandle) => Promise<T>,
 ): Promise<T> {
   const launch = options.providerLaunch ?? resolveProviderLaunch(options.config)
+  let activePhase = options.phase
   const request: AcpSessionRequest = {
     workspace: options.root,
     runtime: {
@@ -84,13 +91,14 @@ export async function withAcpSession<T>(
       reasoning: "optional",
       speed: "optional",
     },
-    emit: (event) => emitPacketEvent(event, options),
+    emit: (event) => emitPacketEvent(event, options, activePhase),
   }
 
   try {
     return await withAcpTurnSession(request, async (neutralSession) => {
       const packetSession: AcpSessionHandle = {
-        runTurn: async (prompt) => {
+        runTurn: async (prompt, phase) => {
+          if (phase !== undefined) activePhase = phase
           try {
             const result = await neutralSession.runTurn(prompt)
             if (result.cleanup === "failed") {
@@ -123,7 +131,7 @@ function toNeutralLaunch(root: string, launch: ProviderLaunch): NeutralProviderL
   }
 }
 
-function emitPacketEvent(event: AcpTurnEvent, options: AcpSessionOptions): void {
+function emitPacketEvent(event: AcpTurnEvent, options: AcpSessionOptions, phase?: AcpTurnPhase): void {
   switch (event.type) {
     case "initialized":
       options.emit({
@@ -146,6 +154,7 @@ function emitPacketEvent(event: AcpTurnEvent, options: AcpSessionOptions): void 
         type: "session_update",
         taskId: options.taskId,
         sessionId: event.sessionId,
+        ...(phase === undefined ? {} : { phase }),
         update: event.update,
       })
       return

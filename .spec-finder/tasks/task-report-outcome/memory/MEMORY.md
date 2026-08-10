@@ -12,6 +12,10 @@
   report prose cannot determine completed, failed, or blocked state.
 - `session_update.phase` and completed-only `task_status.reportReference` are
   additive local event fields. `AcpTurnOptions.phase` is required.
+- The packet ACP adapter keeps its existing multi-turn session seam: callers
+  may provide an explicit phase per `runTurn` while legacy session options
+  remain source-compatible. Engine task 02 must pass `implementation` and
+  `report` explicitly for its two turns.
 - Report references require canonical workspace containment and are omitted
   when unsafe. The cockpit performs only defense-in-depth display validation.
 - Report session-info is not transcript content. Other unknown updates remain
