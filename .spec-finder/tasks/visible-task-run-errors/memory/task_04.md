@@ -18,7 +18,22 @@
 
 ## Errors / Corrections
 
-- None recorded.
+- The implementation handoff did not include exact terminal results in task
+  memory, so the two task-mandated gates were rerun during the report phase.
+
+## Verification
+
+- `rtk bun test tests/cockpit.test.tsx` exited 0: 34 tests passed, 0 failed,
+  and 313 `expect()` calls across one file.
+- `rtk bun run verify` exited 0: TypeScript check passed, 318 tests passed
+  with 0 failures and 1,897 `expect()` calls across 29 files, and the Bun
+  build bundled 28 modules into `dist/cli.js` (0.34 MB).
+- `rtk git diff --check` exited 0.
+
+## Report Handoff
+
+- The final report is ready; task status and report lifecycle remain
+  Spec-Finder-owned. Task 05 still owns macOS PTY/manual release evidence.
 
 ## Ready for Next Run
 

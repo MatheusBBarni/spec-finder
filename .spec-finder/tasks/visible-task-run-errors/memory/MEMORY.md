@@ -26,6 +26,10 @@
   synthetic diagnostic. Existing checkpoint-delivery blockers continue to use
   the selector for their surfaced checkpoint reason, while blocked task
   activity does not populate task failure detail.
+- Task 04's retained failure review is covered by cockpit frame and mock-input
+  evidence for exact scrolling, missing-detail notice, settled keyboard
+  dismissal, batch stopping context, compact/reduced-color rendering, and the
+  absence of workflow controls.
 
 ## Open Risks
 
@@ -38,3 +42,5 @@
 - Task 04 can consume exact multiline detail through `selectTaskFailureDetail`;
   it must preserve the explicit missing-detail state and the existing
   checkpoint-delivery review behavior.
+- Task 04's implementation and report handoff have fresh focused and full-gate
+  evidence; task 05 owns the remaining macOS PTY/manual release evidence.
