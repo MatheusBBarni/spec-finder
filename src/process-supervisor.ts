@@ -116,13 +116,20 @@ export class NodeProcessSupervisor implements ProcessSupervisorContract {
         stdio: ["pipe", "pipe", "pipe"],
       })
     } catch (error) {
-      throw new ProcessSupervisorError("spawn", `unable to spawn provider ${spec.command}`, error)
+      throw new ProcessSupervisorError(
+        "spawn",
+        `unable to spawn provider ${spec.command}; verify it is installed and available on PATH`,
+        error,
+      )
     }
 
     const pid = child.pid
     if (pid === undefined || pid <= 0) {
       suppressChildError(child)
-      throw new ProcessSupervisorError("spawn", "provider did not expose a valid process id")
+      throw new ProcessSupervisorError(
+        "spawn",
+        `unable to start provider ${spec.command}; verify it is installed and available on PATH`,
+      )
     }
 
     let streams: ChildStreams
@@ -133,7 +140,7 @@ export class NodeProcessSupervisor implements ProcessSupervisorContract {
       terminateAfterSetupFailure(child, this.platform)
       throw error
     }
-    const lifecycle = observeLifecycle(child, streams)
+    const lifecycle = observeLifecycle(child, streams, spec.command)
     const processHandle = new ManagedProcessHandle({
       child: child as ChildProcessWithoutNullStreams,
       pid,
@@ -431,7 +438,7 @@ function suppressChildError(child: ChildProcess): void {
   child.once("error", () => {})
 }
 
-function observeLifecycle(child: ChildProcess, streams: ChildStreams): ChildLifecycle {
+function observeLifecycle(child: ChildProcess, streams: ChildStreams, command: string): ChildLifecycle {
   let closed = false
   let fullyClosed = false
   let pipeFailure: string | undefined
@@ -450,7 +457,13 @@ function observeLifecycle(child: ChildProcess, streams: ChildStreams): ChildLife
     }
     child.once("spawn", () => spawnedResolve())
     child.once("error", (error) => {
-      if (!closed) spawnedReject(new ProcessSupervisorError("spawn", "provider process emitted an error", error))
+      if (!closed) {
+        spawnedReject(new ProcessSupervisorError(
+          "spawn",
+          `unable to start provider ${command}; verify it is installed and available on PATH`,
+          error,
+        ))
+      }
       processFailure ??= new ProcessSupervisorError("process", "provider process emitted an error", error)
       settle({ code: null, signal: null, error: formatFailure("process", "provider process error", error) })
     })

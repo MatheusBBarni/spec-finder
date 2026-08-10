@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { access, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { DEFAULT_CONFIG, loadConfig } from "../src/config.ts"
+import { DEFAULT_CONFIG, PROVIDERS, loadConfig } from "../src/config.ts"
 import {
   SPEC_FINDER_SKILLS,
   SetupTransactionError,
@@ -34,7 +34,7 @@ async function tempRoot(prefix = "spec-finder-setup-"): Promise<string> {
 
 describe("setup", () => {
   test("installs exactly nine managed skills at every provider-derived local/global destination", async () => {
-    for (const provider of ["claude", "codex", "cursor"] as const) {
+    for (const provider of PROVIDERS) {
       for (const scope of ["local", "global"] as const) {
         const root = await tempRoot()
         const home = await tempRoot("spec-finder-home-")
@@ -66,6 +66,34 @@ describe("setup", () => {
     expect(result.legacyCursor).toBe("absent")
     expect(raw.setup).toEqual({ status: "configured", scope: "local", destination: ".agents/skills" })
     expect(DEFAULT_CONFIG.reasoning).toBe("high")
+  })
+
+  test("uses auto reasoning for fresh and changed-to-Grok setup without overwriting saved Grok intent", async () => {
+    const freshRoot = await tempRoot("spec-finder-grok-fresh-")
+    await setupWorkspace(freshRoot, request("grok"))
+    expect((await loadConfig(freshRoot)).reasoning).toBe("auto")
+
+    const changedRoot = await tempRoot("spec-finder-grok-changed-")
+    await mkdir(join(changedRoot, ".spec-finder"), { recursive: true })
+    await writeFile(join(changedRoot, ".spec-finder", "config.json"), JSON.stringify({
+      ...DEFAULT_CONFIG,
+      provider: "codex",
+      reasoning: "high",
+      setup: { status: "configured", scope: "local", destination: ".agents/skills" },
+    }))
+    await setupWorkspace(changedRoot, request("grok"))
+    expect((await loadConfig(changedRoot)).reasoning).toBe("auto")
+
+    const savedRoot = await tempRoot("spec-finder-grok-saved-")
+    await mkdir(join(savedRoot, ".spec-finder"), { recursive: true })
+    await writeFile(join(savedRoot, ".spec-finder", "config.json"), JSON.stringify({
+      ...DEFAULT_CONFIG,
+      provider: "grok",
+      reasoning: "low",
+      setup: { status: "configured", scope: "local", destination: ".agents/skills" },
+    }))
+    await setupWorkspace(savedRoot, request("grok"))
+    expect((await loadConfig(savedRoot)).reasoning).toBe("low")
   })
 
   test("preserves legacy Cursor content and unrelated selected-root skills byte-for-byte", async () => {

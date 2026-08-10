@@ -35,6 +35,13 @@ const PROFILE_BY_PROVIDER: Readonly<Record<ProviderName, SetupProviderProfile>> 
     models: Object.freeze([]),
     defaultModel: "auto",
   }),
+  grok: Object.freeze({
+    provider: "grok",
+    label: "Grok Build",
+    destination: ".agents/skills",
+    models: Object.freeze([]),
+    defaultModel: "auto",
+  }),
 })
 
 /** Alias kept explicit for consumers that want to inspect the whole policy. */

@@ -7,6 +7,7 @@ import { runTaskPacket } from "../src/engine.ts"
 import type { RunEvent } from "../src/events.ts"
 import { runGit as runCheckpointGit } from "../src/checkpoints.ts"
 import type { CheckpointServiceContract } from "../src/checkpoints.ts"
+import { createGrokAuthMethodPreference } from "../src/providers.ts"
 
 describe("task engine", () => {
   test("returns a typed no-work result for a valid all-complete packet without launching a provider", async () => {
@@ -163,7 +164,7 @@ dependencies: []
     await expect(access(join(packet, "memory"))).rejects.toThrow()
   })
 
-  test("requires a separate report turn before completing a task", async () => {
+  test("keeps Grok implementation and report turns in one fresh authenticated ACP session", async () => {
     const root = await mkdtemp(join(tmpdir(), "spec-finder-engine-"))
     const packet = join(root, ".spec-finder", "tasks", "demo")
     await mkdir(packet, { recursive: true })
@@ -189,7 +190,7 @@ dependencies: []
     const fixture = join(import.meta.dir, "fixtures", "mock-agent.ts")
     const config = parseConfig({
       ...DEFAULT_CONFIG,
-      provider: "cursor",
+      provider: "grok",
       model: "auto",
       reasoning: "auto",
       speed: "auto",
@@ -207,12 +208,17 @@ dependencies: []
         command: process.execPath,
         args: [fixture],
         env: {
+          SPEC_FINDER_TEST_AUTH_METHODS: "cached_token",
+          SPEC_FINDER_TEST_EXPECT_AUTH_METHOD: "cached_token",
+          SPEC_FINDER_TEST_ADVERTISE_CLOSE: "1",
+          SPEC_FINDER_TEST_REQUEST_PERMISSION: "1",
           SPEC_FINDER_TEST_PROMPT_LOG: promptLog,
           SPEC_FINDER_TEST_PROCESS_LOG: processLog,
           SPEC_FINDER_TEST_LIFECYCLE_LOG: lifecycleLog,
           SPEC_FINDER_TEST_EMIT_REPORT_SESSION_INFO: "1",
         },
         authMethod: null,
+        authPreference: createGrokAuthMethodPreference(false),
       },
     })
 
@@ -231,14 +237,19 @@ dependencies: []
     expect(new Set(processIds).size).toBe(1)
     expect((await readFile(lifecycleLog, "utf8")).trim().split("\n")).toEqual([
       "initialize",
+      "authenticate:cached_token",
       "session/new",
       "session/prompt",
       "session/prompt",
+      "session/close",
     ])
     const updates = events.filter((event): event is Extract<RunEvent, { type: "session_update" }> => event.type === "session_update")
     expect(updates.length).toBeGreaterThan(0)
     expect(new Set(updates.map((event) => event.sessionId))).toEqual(new Set(["test-session"]))
     expect(new Set(updates.map((event) => event.phase))).toEqual(new Set(["implementation", "report"]))
+    expect(updates.some((event) => event.update.sessionUpdate === "agent_message_chunk"
+      && event.update.content.type === "text"
+      && event.update.content.text === "permission response: allow")).toBeTrue()
     const reportMetadata = updates.find((event) => event.update.sessionUpdate === "session_info_update")
     expect(reportMetadata?.phase).toBe("report")
     expect(reportMetadata?.update).toMatchObject({ title: expect.stringContaining(root) })
@@ -248,6 +259,45 @@ dependencies: []
       status: "completed",
       reportReference: ".spec-finder/tasks/demo/reports/task_01.md",
     })
+  })
+
+  test("keeps Cursor implementation and report turns in one fresh ACP session", async () => {
+    const fixture = await createRetryFixture("Cursor session compatibility")
+    const processLog = join(fixture.root, "cursor-processes.log")
+    const lifecycleLog = join(fixture.root, "cursor-lifecycle.log")
+    const events: RunEvent[] = []
+
+    const result = await runTaskPacket({
+      root: fixture.root,
+      slug: "demo",
+      config: fixture.config,
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: process.execPath,
+        args: [fixture.agent],
+        env: {
+          SPEC_FINDER_TEST_PROCESS_LOG: processLog,
+          SPEC_FINDER_TEST_LIFECYCLE_LOG: lifecycleLog,
+        },
+        authMethod: null,
+      },
+    })
+
+    expect(result).toEqual({ ok: true, completed: 1, failed: 0, blocked: 0 })
+    const processIds = (await readFile(processLog, "utf8")).trim().split("\n")
+    expect(processIds).toHaveLength(2)
+    expect(new Set(processIds).size).toBe(1)
+    expect((await readFile(lifecycleLog, "utf8")).trim().split("\n")).toEqual([
+      "initialize",
+      "session/new",
+      "session/prompt",
+      "session/prompt",
+    ])
+    const updates = events.filter((event): event is Extract<RunEvent, { type: "session_update" }> => event.type === "session_update")
+    expect(new Set(updates.map((event) => event.sessionId))).toEqual(new Set(["test-session"]))
+    expect(new Set(updates.map((event) => event.phase))).toEqual(new Set(["implementation", "report"]))
   })
 
   test("omits a report reference when the accepted artifact resolves outside the workspace", async () => {

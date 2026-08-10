@@ -21,6 +21,7 @@ export const SKILL_TARGETS = {
   claude: getSetupProfile("claude").destination,
   codex: getSetupProfile("codex").destination,
   cursor: getSetupProfile("cursor").destination,
+  grok: getSetupProfile("grok").destination,
 } as const
 
 export type SkillTarget = keyof typeof SKILL_TARGETS
@@ -134,7 +135,7 @@ interface TransactionState {
 }
 
 export function isSkillTarget(value: string): value is SkillTarget {
-  return value === "claude" || value === "codex" || value === "cursor"
+  return Object.hasOwn(SKILL_TARGETS, value)
 }
 
 export function skillTargetPath(
@@ -226,11 +227,15 @@ function createConfigCandidate(
   request: SetupRequest,
   destination: SetupDestination,
 ): SpecFinderConfig {
+  const reasoning = request.provider === "grok" && previous.provider !== "grok"
+    ? "auto"
+    : previous.reasoning
   return {
     ...previous,
     version: 3,
     provider: request.provider,
     model: request.model,
+    reasoning,
     speed: request.speed,
     setup: {
       status: "configured",

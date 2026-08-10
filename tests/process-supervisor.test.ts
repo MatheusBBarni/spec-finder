@@ -43,11 +43,14 @@ describe("process supervisor", () => {
   test("returns a typed spawn failure without an unhandled process event", async () => {
     const root = await temporaryRoot("spawn-failure")
     const supervisor = createProcessSupervisor()
+    const failure = await supervisor.spawn({ ...launch(root, "hold"), command: join(root, "does-not-exist") })
+      .catch((error: unknown) => error)
 
-    await expect(supervisor.spawn({ ...launch(root, "hold"), command: join(root, "does-not-exist") })).rejects.toMatchObject({
+    expect(failure).toMatchObject({
       name: "ProcessSupervisorError",
       stage: "spawn",
     })
+    expect((failure as Error).message).toContain("verify it is installed and available on PATH")
   }, 2_000)
 
   test("exposes a process-stage failure when the provider exits unsuccessfully", async () => {

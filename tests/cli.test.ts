@@ -24,7 +24,7 @@ async function captureHelp(): Promise<string> {
 describe("CLI help", () => {
   test("publishes the singular setup contract in help and README", async () => {
     const help = await captureHelp()
-    const setupUsage = "spec-finder setup [--agent claude|codex|cursor] [--model auto|CURATED] [--speed auto|normal|fast] [--local|--global] [--copy]"
+    const setupUsage = "spec-finder setup [--agent claude|codex|cursor|grok] [--model auto|CURATED] [--speed auto|normal|fast] [--local|--global] [--copy]"
 
     for (const text of [help, README]) {
       expect(text).toContain(setupUsage)
@@ -42,6 +42,7 @@ describe("CLI help", () => {
         "requested speed",
         ".agents/skills",
         ".claude/skills",
+        "Grok Build",
         "not migrated",
       ]) {
         expect(text).toContain(phrase)
@@ -60,7 +61,7 @@ describe("CLI help", () => {
     expect(README).not.toContain("those seven")
     expect(README).not.toContain("[--copy|--symlink]")
     expect(README).not.toContain("| Cursor | `.cursor/skills` | `~/.cursor/skills` |")
-    expect(help).not.toContain("[--agent claude|codex|cursor]...")
+    expect(help).not.toContain("[--agent claude|codex|cursor|grok]...")
   })
 
   test("keeps the single-slug usage and exposes the opt-in batch grammar", async () => {
@@ -94,7 +95,7 @@ describe("CLI help", () => {
 
     expect(help).toContain('spec-finder exec "<prompt>"')
     expect(help).toContain("exactly one non-empty positional prompt")
-    expect(help).toContain("--provider is one of claude, codex, or cursor")
+    expect(help).toContain("--provider is one of claude, codex, cursor, or grok")
     expect(help).toContain("--model is non-empty")
     expect(help).toContain("--reasoning is auto|low|medium|high|xhigh|max|ultra")
     expect(help).toContain("--speed is auto|normal|fast")

@@ -8,10 +8,13 @@ import {
   type AcpTurn,
   type AcpTurnRequest,
   type AcpTurnResult,
+  type AuthMethodPreference,
   type ExecOutcome,
   type PermissionBroker,
   type ProcessSupervisor,
+  type ProviderStderrPolicy,
   type ProviderLaunch as NeutralProviderLaunch,
+  type SessionConfigNormalizer,
   type WorkspaceAccess,
 } from "./acp-turn.ts"
 import {
@@ -45,6 +48,9 @@ export interface ExecFixtureLaunch {
   args: readonly string[]
   env: Readonly<Record<string, string>>
   authMethod?: string | null
+  authPreference?: AuthMethodPreference
+  sessionConfigNormalizer?: SessionConfigNormalizer
+  stderrPolicy?: ProviderStderrPolicy
   /** Accepted for embedding compatibility; the canonical workspace wins. */
   cwd?: string
 }
@@ -244,6 +250,16 @@ function toNeutralLaunch(workspace: string, launch: ExecFixtureLaunch): NeutralP
     cwd: workspace,
     env: { ...launch.env },
     authMethod: launch.authMethod ?? null,
+    ...(launch.authPreference === undefined
+      ? {}
+      : {
+          authPreference: {
+            methodIds: [...launch.authPreference.methodIds],
+            unavailableMessage: launch.authPreference.unavailableMessage,
+          },
+        }),
+    ...(launch.sessionConfigNormalizer === undefined ? {} : { sessionConfigNormalizer: launch.sessionConfigNormalizer }),
+    ...(launch.stderrPolicy === undefined ? {} : { stderrPolicy: launch.stderrPolicy }),
   }
 }
 
@@ -254,6 +270,16 @@ function toProviderFixture(fixture: ExecFixtureLaunch): Parameters<typeof resolv
     args: [...fixture.args],
     env: { ...fixture.env },
     authMethod: fixture.authMethod ?? null,
+    ...(fixture.authPreference === undefined
+      ? {}
+      : {
+          authPreference: {
+            methodIds: [...fixture.authPreference.methodIds],
+            unavailableMessage: fixture.authPreference.unavailableMessage,
+          },
+        }),
+    ...(fixture.sessionConfigNormalizer === undefined ? {} : { sessionConfigNormalizer: fixture.sessionConfigNormalizer }),
+    ...(fixture.stderrPolicy === undefined ? {} : { stderrPolicy: fixture.stderrPolicy }),
   }
 }
 
