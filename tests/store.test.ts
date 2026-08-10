@@ -427,7 +427,7 @@ describe("cockpit store", () => {
     expect(selectTaskReason(store.getSnapshot(), "task_01")).toBe("Task failed; see latest activity")
   })
 
-  test("captures failure activity only for failed tasks and clears it on lifecycle resets", () => {
+  test("captures unsuccessful activity and clears it on lifecycle resets", () => {
     const store = startedStore([task(1, "Retryable")])
     store.consume({ type: "task_status", taskId: "task_01", status: "failed" })
     expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBeUndefined()
@@ -447,7 +447,7 @@ describe("cockpit store", () => {
       taskId: "task_01",
       message: "final report handoff blocked: provider detail",
     })
-    expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBeUndefined()
+    expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBe("final report handoff blocked: provider detail")
 
     store.consume({ type: "task_status", taskId: "task_01", status: "failed" })
     store.consume({ type: "activity", taskId: "task_01", message: "Later failure" })
@@ -492,6 +492,9 @@ describe("cockpit store", () => {
     })
 
     expect(selectTaskReason(store.getSnapshot(), "task_01")).toBe(
+      "final report handoff blocked: ACP turn aborted; rerun retries the report without rerunning implementation",
+    )
+    expect(selectTaskFailureDetail(store.getSnapshot(), "task_01")).toBe(
       "final report handoff blocked: ACP turn aborted; rerun retries the report without rerunning implementation",
     )
     expect(selectTaskTranscript(store.getSnapshot(), "task_01").at(-1)).toMatchObject({

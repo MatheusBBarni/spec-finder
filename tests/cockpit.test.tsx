@@ -896,13 +896,16 @@ describe("read-only progress cockpit", () => {
       taskId: "task_01",
       message: "final report handoff blocked: ACP turn aborted; rerun retries the report without rerunning implementation",
     })
+    store.consume({ type: "run_finished", ok: false, message: "0 failed · 1 blocked" })
     const screen = await render(store, 120, 40)
 
     try {
       const frame = screen.captureCharFrame()
-      expect(frame).toContain("! task_01")
+      expect(frame).toContain("RUN.FAILURES")
+      expect(frame).toContain("BLOCKED task_01")
       expect(frame).toContain("final report handoff blocked")
       expect(frame).toContain("rerun retries the report")
+      expect(frame).not.toContain("No surfaced task error was provided.")
       expect(frame).not.toContain("Task failed; see latest activity")
     } finally {
       await destroy(screen)

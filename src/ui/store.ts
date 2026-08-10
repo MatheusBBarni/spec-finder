@@ -620,8 +620,8 @@ export class CockpitStore {
     const transcripts = appendTaskLines(this.state.transcripts, transcriptKey, "error", detail, this.nextSequence())
     const taskReasons = { ...this.state.taskReasons, [transcriptKey]: checkpoint.reason }
     // Checkpoint delivery is a separate surfaced failure source used by the
-    // retained delivery review; task activity still captures exact detail only
-    // after a task enters the failed state.
+    // retained delivery review; unsuccessful task activity can also retain
+    // exact failure or blocked-handoff detail.
     const exactReason = event.state === "blocked" ? event.reason.trim() : ""
     const taskFailureDetails = exactReason
       ? { ...this.state.taskFailureDetails, [transcriptKey]: exactReason }
@@ -645,7 +645,7 @@ export class CockpitStore {
     const taskReasons = unsuccessful
       ? { ...this.state.taskReasons, [transcriptKey]: formatTaskReason(status, displayMessage, []) ?? displayMessage }
       : this.state.taskReasons
-    const taskFailureDetails = status === "failed"
+    const taskFailureDetails = unsuccessful
       ? { ...this.state.taskFailureDetails, [transcriptKey]: exactDetail }
       : this.state.taskFailureDetails
     this.set({ ...this.state, transcripts, taskReasons, taskFailureDetails })

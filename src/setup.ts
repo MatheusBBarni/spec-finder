@@ -148,15 +148,9 @@ export function skillTargetPath(
   return join(base, SKILL_TARGETS[target])
 }
 
-/** Stable lock location for a selected provider-derived root. */
-export function setupLockPath(
-  root: string,
-  provider: ProviderName,
-  scope: SetupScope,
-  homeDirectory = homedir(),
-): string {
-  const targetRoot = skillTargetPath(root, provider, scope, homeDirectory)
-  return join(dirname(targetRoot), ".spec-finder-setup.lock")
+/** Stable workspace lock shared by every setup provider and scope. */
+export function setupLockPath(root: string): string {
+  return join(resolve(root), SPEC_DIR, ".setup.lock")
 }
 
 export async function setupWorkspace(
@@ -377,7 +371,7 @@ class SetupTransaction {
       configPath,
       configStagePath: `${configPath}.sf-stage-${this.id}`,
       configBackupPath: `${configPath}.sf-backup-${this.id}`,
-      lockPath: join(dirname(targetRoot), ".spec-finder-setup.lock"),
+      lockPath: setupLockPath(input.workspace),
     }
     this.failure = input.options.failure
       ?? (input.options.failAt ? { phase: input.options.failAt } : undefined)

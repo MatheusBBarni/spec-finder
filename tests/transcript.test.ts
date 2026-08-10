@@ -72,6 +72,37 @@ describe("task transcript normalization", () => {
     expect(entries[3]?.text).toContain('"turn": "report"')
   })
 
+  test("keeps reused identities distinct across sessions in the same phase", () => {
+    let entries: readonly TranscriptEntry[] = []
+    entries = applySessionUpdate(entries, message("reused", "First attempt"), 1, "session-one", "implementation")
+    entries = applySessionUpdate(entries, message("reused", "Second attempt"), 2, "session-two", "implementation")
+    entries = applySessionUpdate(entries, {
+      sessionUpdate: "tool_call",
+      toolCallId: "reused-tool",
+      title: "First attempt tool",
+      status: "completed",
+    }, 3, "session-one", "implementation")
+    entries = applySessionUpdate(entries, {
+      sessionUpdate: "tool_call",
+      toolCallId: "reused-tool",
+      title: "Second attempt tool",
+      status: "completed",
+    }, 4, "session-two", "implementation")
+
+    expect(entries.map((entry) => entry.id)).toEqual([
+      "agent:session-one:implementation:reused",
+      "agent:session-two:implementation:reused",
+      "tool:session-one:implementation:reused-tool",
+      "tool:session-two:implementation:reused-tool",
+    ])
+    expect(entries.map((entry) => entry.text)).toEqual([
+      "First attempt",
+      "Second attempt",
+      "Tool call reused-tool",
+      "Tool call reused-tool",
+    ])
+  })
+
   test("uses explicit phases when a provider reuses its session ID", () => {
     let entries: readonly TranscriptEntry[] = []
     entries = applySessionUpdate(entries, message("reused", "Implementation"), 1, "test-session", "implementation")
@@ -90,10 +121,10 @@ describe("task transcript normalization", () => {
     }, 4, "test-session", "report")
 
     expect(entries.map((entry) => entry.id)).toEqual([
-      "agent:implementation:reused",
-      "agent:report:reused",
-      "tool:implementation:reused-tool",
-      "tool:report:reused-tool",
+      "agent:test-session:implementation:reused",
+      "agent:test-session:report:reused",
+      "tool:test-session:implementation:reused-tool",
+      "tool:test-session:report:reused-tool",
     ])
     expect(entries[0]?.text).toBe("Implementation")
     expect(entries[1]?.text).toBe(" report")

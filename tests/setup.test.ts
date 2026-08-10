@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { access, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { DEFAULT_CONFIG, PROVIDERS, loadConfig } from "../src/config.ts"
 import {
   SPEC_FINDER_SKILLS,
@@ -169,14 +169,17 @@ describe("setup", () => {
     await expect(access(join(globalOutside, "sf-create-prd"))).rejects.toThrow()
   })
 
-  test("fails closed on an existing selected-root transaction lock", async () => {
+  test("serializes every provider and scope through one workspace transaction lock", async () => {
     const root = await tempRoot()
-    const lockPath = setupLockPath(root, "codex", "local")
-    await mkdir(join(root, ".agents"), { recursive: true })
+    const home = await tempRoot("spec-finder-home-")
+    const lockPath = setupLockPath(root)
+    await mkdir(dirname(lockPath), { recursive: true })
     await writeFile(lockPath, "active")
 
     await expect(setupWorkspace(root, request("codex"))).rejects.toThrow("already locked")
+    await expect(setupWorkspace(root, request("claude", "global"), { homeDirectory: home })).rejects.toThrow("already locked")
     await expect(access(join(root, ".agents", "skills", "sf-task-report"))).rejects.toThrow()
+    await expect(access(join(home, ".claude", "skills", "sf-task-report"))).rejects.toThrow()
     await expect(access(join(root, ".spec-finder", "config.json"))).rejects.toThrow()
   })
 

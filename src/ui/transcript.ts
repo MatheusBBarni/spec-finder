@@ -51,7 +51,7 @@ export function applySessionUpdate(
   sessionId?: string,
   phase?: AcpTurnPhase,
 ): readonly TranscriptEntry[] {
-  const identityScope = phase ?? sessionId
+  const identityScope = transcriptIdentityScope(sessionId, phase)
 
   switch (update.sessionUpdate) {
     case "user_message_chunk":
@@ -91,6 +91,11 @@ export function applySessionUpdate(
     default:
       return appendUnknownUpdate(entries, update, sequence)
   }
+}
+
+function transcriptIdentityScope(sessionId?: string, phase?: AcpTurnPhase): string | undefined {
+  if (sessionId && phase) return `${sessionId}:${phase}`
+  return sessionId ?? phase
 }
 
 /**

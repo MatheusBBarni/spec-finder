@@ -237,7 +237,10 @@ function FailureReview({ state, width, height }: { state: CockpitState; width: n
     task.status === "failed" || task.status === "blocked" || task.checkpoint?.state === "blocked"
   ))
   const detail = failedTask ? selectTaskFailureDetail(taskState, failedTask.id) : undefined
-  const surfacedError = detail ?? "No surfaced task error was provided."
+  const reason = failedTask && (failedTask.status === "blocked" || failedTask.checkpoint?.state === "blocked")
+    ? selectTaskReason(taskState, failedTask.id)
+    : undefined
+  const surfacedError = detail ?? reason ?? "No surfaced task error was provided."
   const completed = taskState.tasks.filter((task) => isCompleted(task.status)).length
   const failed = taskState.tasks.filter((task) => task.status === "failed").length
   const blocked = taskState.tasks.filter((task) => task.status === "blocked").length
