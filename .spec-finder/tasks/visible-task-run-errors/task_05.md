@@ -1,5 +1,5 @@
 ---
-status: pending
+status: in_progress
 title: Add Deterministic macOS PTY Release Evidence
 type: infra
 complexity: medium
