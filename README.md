@@ -30,23 +30,32 @@ spec-finder setup
 └── tasks/
 ```
 
-In an interactive terminal, `setup` opens keyboard pickers for providers, installation scope, and copy or symlink mode. Use `↑`/`↓` to move, `Space` to toggle providers, `Enter` to confirm, and `Esc` to cancel. All providers start selected; local scope and copied skills are the defaults. Supply any choice as a flag to skip only its corresponding picker. Non-interactive setup defaults to all providers, local scope, and copied skills.
+In an interactive terminal, `setup` resolves exactly one provider and asks for its installation scope, model, and speed. Use `↑`/`↓` to move, `Enter` to confirm, and `Esc` to cancel; the provider and every other choice are single-select. Supplying a flag skips only that choice's picker. `--copy` remains accepted for compatibility and is the only installation mode.
 
-Limit setup to one or more targets when needed; repeat `--agent` to select more than one:
+The automation grammar is:
 
-```bash
-spec-finder setup --agent codex --agent cursor --global --symlink
+```text
+spec-finder setup [--agent claude|codex|cursor] [--model auto|CURATED] \
+  [--speed auto|normal|fast] [--local|--global] [--copy]
 ```
 
-The `.spec-finder/config.json` and `.spec-finder/tasks/` scaffolding always remain in the current project. Skill destinations depend on scope:
+Each `--agent`, `--model`, and `--speed` option is optional and accepts at most one value. `--model` accepts the universal `auto` value or a curated model for the selected provider. `--speed` accepts auto, normal, or fast. `--local` and `--global` are independent scope flags; supply at most one. Repeated or duplicate setup options, conflicting scopes, and `--symlink` are rejected before any writes; the error directs users to `--copy`.
 
-| Provider | Local | Global |
-|---|---|---|
-| Claude | `.claude/skills` | `~/.claude/skills` |
-| Codex | `.agents/skills` | `~/.agents/skills` |
-| Cursor | `.cursor/skills` | `~/.cursor/skills` |
+Fresh setup defaults to Codex, `gpt-5.6-luna`, `normal` speed, and local scope. A valid configured v3 rerun reuses omitted provider, model, speed, and scope values, including a saved custom model. Selecting a different provider uses that provider's newest catalogue model while an omitted speed still reuses the saved speed. `auto` remains available for every provider.
 
-`--copy` copies the seven bundled `sf-*` skills into every selected provider. `--symlink` copies them once to a canonical provider—Codex when selected, otherwise the first selected provider—and creates a per-skill symlink for every other selected provider. Rerunning setup replaces only those seven `sf-*` entries; unrelated skills in the target directories are preserved.
+The `.spec-finder/config.json` and `.spec-finder/tasks/` scaffolding always remain in the current project. Skill destinations are derived from the selected provider and scope:
+
+| Provider | Curated setup models | Default model | Local skills | Global skills |
+|---|---|---|---|---|
+| Claude | `auto`, `fable`, `opus`, `sonnet`, `haiku` | `fable` | `.claude/skills` | `~/.claude/skills` |
+| Codex | `auto`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` | `gpt-5.6-luna` | `.agents/skills` | `~/.agents/skills` |
+| Cursor | `auto` | `auto` | `.agents/skills` | `~/.agents/skills` |
+
+Existing v1 and v2 configuration files are read through an in-memory migration and are not rewritten until setup succeeds. Their historic installation scope is unknown: an interactive first setup requires an explicit scope choice, while a non-interactive first setup must include `--local` or `--global`; Spec Finder never guesses the old scope. A fresh workspace keeps the local default. Successful setup writes version 3 metadata with the provider-derived logical destination and selected scope.
+
+Cursor always installs managed skills in `.agents/skills` (or `~/.agents/skills` for global scope). Existing `.cursor/skills` content is legacy user content and is preserved untouched: setup performs no automatic migration, cleanup, merger, or deletion. When that path exists, the completion line says `legacy Cursor skills: preserved (not migrated)`; otherwise it reports that the path was absent and not migrated. Unrelated skills in the selected destination are preserved as well.
+
+Setup does not launch a provider or perform live capability discovery. Completion lines intentionally say `requested model` and `requested speed`; those values describe setup intent, not a guarantee that an account or client can apply them. Runtime ACP feedback is authoritative and may report a capability as applied, defaulted, or unsupported after a session starts.
 
 ## Stable npm releases (maintainers)
 
@@ -200,13 +209,18 @@ spec-finder run my-feature \
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "provider": "codex",
-  "model": "auto",
+  "model": "gpt-5.6-luna",
   "reasoning": "high",
   "speed": "normal",
   "permissions": "prompt",
-  "auto_commit": false
+  "auto_commit": false,
+  "setup": {
+    "status": "configured",
+    "scope": "local",
+    "destination": ".agents/skills"
+  }
 }
 ```
 
@@ -319,7 +333,7 @@ M-01 and M-02 are external, manual measurements; they add no product instrumenta
 
 Do not add telemetry, counters, trust persistence, history, or a Spec Finder-owned measurement file to satisfy these handoffs.
 
-Version 1 configuration files are accepted for migration. Rerun `spec-finder setup` to rewrite an existing verbose file to the compact version 2 format.
+Version 1 and version 2 configuration files are accepted for migration. They are read in memory as version 3 with an `unconfigured` setup state; rerun `spec-finder setup` and choose `--local` or `--global` (or make the interactive scope choice) to write configured version 3 metadata. Historic scope is never guessed.
 
 Validate and inspect the effective file:
 
@@ -330,7 +344,7 @@ spec-finder config
 ## CLI
 
 ```text
-spec-finder setup [--agent claude|codex|cursor]... [--local|--global] [--copy|--symlink]
+spec-finder setup [--agent claude|codex|cursor] [--model auto|CURATED] [--speed auto|normal|fast] [--local|--global] [--copy]
 spec-finder upgrade
 spec-finder run <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
 spec-finder run --multiple <slug1,slug2,...> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]

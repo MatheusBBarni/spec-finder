@@ -13,7 +13,7 @@ import {
 const HELP = `spec-finder — skill-driven specifications with an ACP cockpit
 
 Usage:
-  spec-finder setup [--agent claude|codex|cursor]... [--local|--global] [--copy|--symlink]
+  spec-finder setup [--agent claude|codex|cursor] [--model auto|CURATED] [--speed auto|normal|fast] [--local|--global] [--copy]
   spec-finder upgrade
   spec-finder run <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
   spec-finder run --multiple <slug1,slug2,...> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
@@ -22,6 +22,21 @@ Usage:
   spec-finder checkpoint complete <task_slug> <task_id>
   spec-finder config
   spec-finder version
+
+Setup mode:
+  setup resolves exactly one provider. Omit --agent to reuse a valid configured provider or default
+  a fresh workspace to Codex. --model accepts auto or one curated model for that provider, and
+  --speed accepts auto, normal, or fast. Fresh setup defaults to Codex, gpt-5.6-luna, normal speed,
+  and local scope; a changed provider uses its newest catalogue model.
+  --local and --global independently choose the installation scope; supply at most one. --copy is
+  retained compatibility syntax and is the only installation mode. Repeated or duplicate setup
+  options, conflicting scopes, and --symlink are rejected before any writes.
+  Destinations are .claude/skills for Claude and .agents/skills for Codex or Cursor. A valid v3
+  rerun preserves omitted provider, model, speed, and scope values, including a saved custom model.
+  Migrated v1/v2 configurations require an explicit first --local or --global choice because their
+  historic scope is unknown. Setup summaries say requested model and requested speed; runtime ACP feedback remains
+  authoritative for applied, defaulted, or unsupported capabilities. Legacy Cursor .cursor/skills
+  content is preserved and not migrated.
 
 Batch mode:
   --multiple is opt-in, serial, and fail-fast. Supply exactly one ordered comma-separated slug list.

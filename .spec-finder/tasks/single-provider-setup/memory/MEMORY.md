@@ -3,6 +3,7 @@
 ## Current State
 
 - Approved task packet contains `task_01` through `task_03`; task_01 implementation establishes the config/profile contract for the installer consumer.
+- Task 03 implementation and verification are complete; its report handoff is active while lifecycle status remains runtime-owned.
 
 ## Shared Decisions
 
@@ -19,6 +20,8 @@
 - Task 02 finalizes the setup contract at one provider-derived root: Claude uses `.claude/skills`, Codex/Cursor use `.agents/skills`, and legacy `.cursor/skills` is preserved and reported as not migrated.
 - Setup writes are an ordered, lock-scoped transaction across the selected skills root and workspace config; stage/backup artifacts are private and retained on rollback or cleanup failure rather than treated as success.
 - Setup never launches ACP/provider discovery; model and speed in setup summaries are requested values, with runtime capability outcomes remaining the ACP authority.
+- Public setup guidance now uses one `--agent`, curated `--model`, `--speed auto|normal|fast`, independent scope, and compatibility `--copy`; `--symlink` is documented as rejected. README examples intentionally avoid a bundled-skill count.
+- README and help document v3 migration without guessed historic scope, provider-derived destinations, valid-rerun preservation, and Cursor `.agents/skills` with legacy `.cursor/skills` left untouched and not migrated.
 
 ## Open Risks
 
@@ -29,5 +32,5 @@
 ## Handoffs
 
 - `task_01` establishes the config/profile and runtime-override contracts consumed by `task_02`; the installer should serialize configured v3 metadata with the profile destination and explicit scope.
-- `task_03` may start only after `task_02` finalizes actual setup output and errors.
-- `task_03` should document singular flags, explicit v2 scope selection, `--copy` compatibility/`--symlink` rejection, provider-derived destinations, requested-value wording, and no automatic Cursor migration.
+- `task_03` consumed task_02's finalized parser, summary, destination, and error wording; its focused and full verification gates passed.
+- The report phase uses the captured focused/full gates; task_03 status remains under the Spec Finder lifecycle owner.

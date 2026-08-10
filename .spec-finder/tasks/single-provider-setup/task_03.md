@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Publish the Single-Provider Setup Contract
 type: docs
 complexity: medium
