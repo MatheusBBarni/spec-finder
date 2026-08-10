@@ -3,12 +3,16 @@ import { DEFAULT_CONFIG } from "../src/config.ts"
 import {
   EXEC_PROVIDER_CERTIFICATION,
   ProviderCertificationError,
+  createGrokAuthMethodPreference,
   getProviderCertification,
   isExecProviderCertified,
+  normalizeGrokSessionConfigOptions,
+  providerLabel,
   resolveExecProviderLaunch,
   resolvePacketProviderLaunch,
   resolveProviderLaunch,
 } from "../src/providers.ts"
+import { GROK_BUILD_1_0_SESSION_CONFIG_METADATA } from "./fixtures/grok-session-config.ts"
 
 describe("provider launch", () => {
   test("pins Claude models through ANTHROPIC_MODEL", () => {
@@ -26,8 +30,78 @@ describe("provider launch", () => {
     expect(JSON.parse(launch.env.CODEX_CONFIG!).developer_instructions).toContain("Spec Finder")
   })
 
+  test("launches Grok Build through its source-owned no-update ACP recipe", () => {
+    const launch = resolveProviderLaunch({ ...DEFAULT_CONFIG, provider: "grok", model: "custom-model" })
+
+    expect(launch.command).toBe("grok")
+    expect(launch.args).toEqual(["--no-auto-update", "agent", "stdio"])
+    expect(launch.env).toEqual({})
+    expect(launch.authMethod).toBeNull()
+    expect(launch.authPreference?.methodIds).toContain("cached_token")
+    expect(launch.sessionConfigNormalizer).toBe(normalizeGrokSessionConfigOptions)
+    expect(launch.stderrPolicy).toBe("redact")
+  })
+
+  test("chooses Grok authentication methods without copying an API key", () => {
+    expect(createGrokAuthMethodPreference(true)).toEqual({
+      methodIds: ["xai.api_key", "cached_token"],
+      unavailableMessage: "Grok authentication unavailable. Run `grok login` or set XAI_API_KEY, then rerun.",
+    })
+    expect(createGrokAuthMethodPreference(false)).toEqual({
+      methodIds: ["cached_token"],
+      unavailableMessage: "Grok authentication unavailable. Run `grok login` or set XAI_API_KEY, then rerun.",
+    })
+  })
+
+  test("derives Grok authentication preference from key presence without copying the environment", () => {
+    const absent = withXaiApiKey(undefined, () =>
+      resolveProviderLaunch({ ...DEFAULT_CONFIG, provider: "grok" }),
+    )
+    const present = withXaiApiKey("", () =>
+      resolveProviderLaunch({ ...DEFAULT_CONFIG, provider: "grok" }),
+    )
+
+    expect(absent.authPreference?.methodIds).toEqual(["cached_token"])
+    expect(present.authPreference?.methodIds).toEqual(["xai.api_key", "cached_token"])
+    expect(absent.env).toEqual({})
+    expect(present.env).toEqual({})
+    expect(Object.hasOwn(absent.env, "XAI_API_KEY")).toBeFalse()
+    expect(Object.hasOwn(present.env, "XAI_API_KEY")).toBeFalse()
+  })
+
+  test("normalizes Grok Build 1.0.0 session metadata without exposing raw metadata", () => {
+    const options = normalizeGrokSessionConfigOptions({
+      configOptions: [],
+      metadata: GROK_BUILD_1_0_SESSION_CONFIG_METADATA,
+    })
+
+    expect(options).toEqual([
+      {
+        type: "select",
+        id: "model",
+        name: "Model",
+        currentValue: "grok-4.5",
+        options: [{ value: "grok-4.5", name: "Grok 4.5" }],
+        category: "model",
+      },
+      {
+        type: "select",
+        id: "mode",
+        name: "Reasoning",
+        currentValue: "high",
+        options: [
+          { value: "high", name: "High" },
+          { value: "medium", name: "Medium" },
+          { value: "low", name: "Low" },
+        ],
+        category: "thought_level",
+      },
+    ])
+    expect(JSON.stringify(options)).not.toContain("x.ai/sessionConfig")
+  })
+
   test("keeps packet launch resolution independent from exec certification", () => {
-    for (const provider of ["claude", "codex", "cursor"] as const) {
+    for (const provider of ["claude", "codex", "cursor", "grok"] as const) {
       expect(() => resolvePacketProviderLaunch({ ...DEFAULT_CONFIG, provider })).not.toThrow()
       expect(isExecProviderCertified(provider)).toBeFalse()
       expect(getProviderCertification(provider)).toEqual({ exec: false })
@@ -36,11 +110,12 @@ describe("provider launch", () => {
       claude: { exec: false },
       codex: { exec: false },
       cursor: { exec: false },
+      grok: { exec: false },
     })
   })
 
   test("rejects every uncertified real provider before an exec launch", () => {
-    for (const provider of ["claude", "codex", "cursor"] as const) {
+    for (const provider of ["claude", "codex", "cursor", "grok"] as const) {
       expect(() => resolveExecProviderLaunch({ ...DEFAULT_CONFIG, provider }))
         .toThrow(ProviderCertificationError)
     }
@@ -77,4 +152,23 @@ describe("provider launch", () => {
     const launch = resolveProviderLaunch({ ...DEFAULT_CONFIG, provider: "codex" }, "exec")
     expect(launch.env.CODEX_CONFIG).toBeUndefined()
   })
+
+  test("labels every supported provider", () => {
+    expect(providerLabel("claude")).toBe("Claude")
+    expect(providerLabel("codex")).toBe("Codex")
+    expect(providerLabel("cursor")).toBe("Cursor")
+    expect(providerLabel("grok")).toBe("Grok Build")
+  })
 })
+
+function withXaiApiKey<T>(value: string | undefined, use: () => T): T {
+  const prior = process.env.XAI_API_KEY
+  try {
+    if (value === undefined) delete process.env.XAI_API_KEY
+    else process.env.XAI_API_KEY = value
+    return use()
+  } finally {
+    if (prior === undefined) delete process.env.XAI_API_KEY
+    else process.env.XAI_API_KEY = prior
+  }
+}

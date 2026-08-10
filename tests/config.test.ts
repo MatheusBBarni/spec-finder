@@ -110,6 +110,27 @@ describe("config", () => {
     })
   })
 
+  test("migrates a Grok version 2 runtime profile without adding setup state", () => {
+    expect(parseConfig({
+      version: 2,
+      provider: "grok",
+      model: "auto",
+      reasoning: "auto",
+      speed: "normal",
+      permissions: "prompt",
+      auto_commit: false,
+    })).toEqual({
+      version: 3,
+      provider: "grok",
+      model: "auto",
+      reasoning: "auto",
+      speed: "normal",
+      permissions: "prompt",
+      auto_commit: false,
+      setup: { status: "unconfigured" },
+    })
+  })
+
   test("accepts configured setup metadata only for the provider-derived destination", () => {
     const config = parseConfig({
       ...DEFAULT_CONFIG,
@@ -130,6 +151,13 @@ describe("config", () => {
     } catch (error) {
       expect((error as ConfigError).issues.join("\n")).toContain("setup.destination")
     }
+
+    const grok = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "grok",
+      setup: { status: "configured", scope: "local", destination: ".agents/skills" },
+    })
+    expect(grok.setup).toEqual({ status: "configured", scope: "local", destination: ".agents/skills" })
   })
 
   test("rejects unknown setup keys and invalid setup states", () => {
@@ -177,6 +205,7 @@ describe("config", () => {
     expect(overridden.provider).toBe("claude")
     expect(overridden.model).toBe("custom")
     expect(overridden.setup).toBe(configured.setup)
+    expect(applyRuntimeConfigOverrides(configured, { provider: "grok", model: "auto" }).provider).toBe("grok")
     expect(() => applyRuntimeConfigOverrides(configured, { provider: "not-a-provider" as never })).toThrow(ConfigError)
   })
 })

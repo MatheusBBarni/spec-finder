@@ -88,7 +88,7 @@ export async function withAcpSession<T>(
       model: options.config.provider === "claude" || options.config.provider === "cursor"
         ? "launch-time"
         : "required",
-      reasoning: "optional",
+      reasoning: options.config.provider === "grok" ? "required" : "optional",
       speed: "optional",
     },
     emit: (event) => emitPacketEvent(event, options, activePhase),
@@ -128,6 +128,16 @@ function toNeutralLaunch(root: string, launch: ProviderLaunch): NeutralProviderL
     cwd: root,
     env: launch.env,
     authMethod: launch.authMethod,
+    ...(launch.authPreference === undefined
+      ? {}
+      : {
+          authPreference: {
+            methodIds: [...launch.authPreference.methodIds],
+            unavailableMessage: launch.authPreference.unavailableMessage,
+          },
+        }),
+    ...(launch.sessionConfigNormalizer === undefined ? {} : { sessionConfigNormalizer: launch.sessionConfigNormalizer }),
+    ...(launch.stderrPolicy === undefined ? {} : { stderrPolicy: launch.stderrPolicy }),
   }
 }
 

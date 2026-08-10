@@ -84,6 +84,23 @@ describe("setup command options", () => {
     }
   })
 
+  test("accepts Grok Build setup with its provider-directed model default", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-grok-setup-"))
+    try {
+      await expect(resolveSetupOptions(["--agent", "grok"], { interactive: false, root })).resolves.toEqual({
+        provider: "grok",
+        model: "auto",
+        speed: "normal",
+        scope: "local",
+        origin: { provider: "flag", model: "default", speed: "default" },
+      })
+      await expect(resolveSetupOptions(["--agent", "grok", "--model", "volatile-model"], { interactive: false, root }))
+        .rejects.toThrow("unsupported setup model for grok")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test("reuses configured provider/model/speed/scope and preserves a same-provider custom model", async () => {
     const configured = parseConfig({
       ...DEFAULT_CONFIG,
@@ -101,6 +118,28 @@ describe("setup command options", () => {
       model: "team-custom-model",
       speed: "fast",
       scope: "global",
+      origin: { provider: "saved", model: "saved", speed: "saved" },
+    })
+  })
+
+  test("reuses a saved Grok provider and its provider-directed model", async () => {
+    const configured = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "grok",
+      model: "auto",
+      speed: "fast",
+      setup: { status: "configured", scope: "local", destination: ".agents/skills" },
+    })
+
+    await expect(resolveSetupOptions([], {
+      interactive: false,
+      root: "/tmp/spec-finder-saved-grok-setup",
+      loadConfig: async () => configured,
+    })).resolves.toEqual({
+      provider: "grok",
+      model: "auto",
+      speed: "fast",
+      scope: "local",
       origin: { provider: "saved", model: "saved", speed: "saved" },
     })
   })
@@ -240,6 +279,34 @@ describe("setup command options", () => {
 })
 
 describe("run command batch integration", () => {
+  test("accepts a Grok runtime override without changing saved setup metadata", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-grok-runtime-override-"))
+    const stored = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "codex",
+      setup: { status: "configured", scope: "local", destination: ".agents/skills" },
+    })
+    let received: SpecFinderConfig | undefined
+
+    try {
+      const exitCode = await runCommand(["demo", "--no-ui", "--provider", "grok"], {
+        root,
+        output: commandOutput().output,
+        loadConfig: async () => stored,
+        runTaskPacket: async (options) => {
+          received = options.config
+          return { ok: true, completed: 1, failed: 0, blocked: 0 }
+        },
+      })
+
+      expect(exitCode).toBe(0)
+      expect(received?.provider).toBe("grok")
+      expect(received?.setup).toBe(stored.setup)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test("layers a provider override over configured v3 metadata without changing its destination", async () => {
     const root = await mkdtemp(join(tmpdir(), "spec-finder-configured-override-"))
     const stored = parseConfig({

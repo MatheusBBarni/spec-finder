@@ -15,7 +15,15 @@ describe("setup provider policy", () => {
     for (const provider of PROVIDERS) {
       const profile = getSetupProfile(provider)
       expect(profile.provider).toBe(provider)
-      expect(profile.label).toBe(provider === "claude" ? "Claude" : provider === "codex" ? "Codex" : "Cursor")
+      expect(profile.label).toBe(
+        provider === "claude"
+          ? "Claude"
+          : provider === "codex"
+            ? "Codex"
+            : provider === "cursor"
+              ? "Cursor"
+              : "Grok Build",
+      )
       expect(isSetupDestination(profile.destination)).toBeTrue()
       expect(["auto", ...profile.models]).toContain(profile.defaultModel)
       expect(isCuratedSetupModel(provider, "auto")).toBeTrue()
@@ -38,6 +46,12 @@ describe("setup provider policy", () => {
     })
     expect(getSetupProfile("cursor")).toMatchObject({
       label: "Cursor",
+      destination: ".agents/skills",
+      models: [],
+      defaultModel: "auto",
+    })
+    expect(getSetupProfile("grok")).toMatchObject({
+      label: "Grok Build",
       destination: ".agents/skills",
       models: [],
       defaultModel: "auto",

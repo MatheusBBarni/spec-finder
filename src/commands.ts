@@ -494,6 +494,7 @@ async function promptForProvider(
       { label: "Claude", value: "claude", hint: "skills in .claude/skills" },
       { label: "Codex", value: "codex", hint: "skills in .agents/skills" },
       { label: "Cursor", value: "cursor", hint: "skills in .agents/skills" },
+      { label: "Grok Build", value: "grok", hint: "skills in .agents/skills" },
     ],
     initialValue,
     required: true,
