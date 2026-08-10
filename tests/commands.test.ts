@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { PassThrough } from "node:stream"
 import { DEFAULT_CONFIG, parseConfig, type SpecFinderConfig } from "../src/config.ts"
 import type { CheckpointServiceContract } from "../src/checkpoints.ts"
-import { checkpointCommand, runCommand, resolveSetupOptions } from "../src/commands.ts"
+import { checkpointCommand, runCommand, resolveSetupOptions, setupCommand } from "../src/commands.ts"
 import type { BatchResult } from "../src/batch.ts"
 import { parseTask, type TaskFile } from "../src/tasks.ts"
 import type { SetupPickerInput } from "../src/ui/setup-picker.ts"
@@ -52,46 +52,104 @@ async function waitForText(text: () => string, expected: string): Promise<void> 
 }
 
 describe("setup command options", () => {
-  test("keeps every repeated --agent selection and accepts explicit non-interactive choices", async () => {
-    await expect(resolveSetupOptions([
-      "--agent", "claude",
-      "--agent", "cursor",
-      "--agent", "claude",
-      "--global",
-      "--symlink",
-    ], { interactive: false })).resolves.toEqual({
-      targets: ["claude", "cursor", "claude"],
+  test("rejects repeated providers, duplicate values, conflicting scope, symlink, and invalid curated models", async () => {
+    await expect(resolveSetupOptions(["--agent", "claude", "--agent", "claude"], { interactive: false }))
+      .rejects.toThrow("repeated --agent")
+    await expect(resolveSetupOptions(["--model", "auto", "--model", "fable"], { interactive: false }))
+      .rejects.toThrow("duplicate setup option: --model")
+    await expect(resolveSetupOptions(["--speed", "normal", "--speed", "fast"], { interactive: false }))
+      .rejects.toThrow("duplicate setup option: --speed")
+    await expect(resolveSetupOptions(["--global", "--local"], { interactive: false }))
+      .rejects.toThrow("either --global or --local")
+    await expect(resolveSetupOptions(["--symlink"], { interactive: false }))
+      .rejects.toThrow("no longer supports --symlink")
+    await expect(resolveSetupOptions(["--agent", "claude", "--model", "gpt-5.6-luna", "--local"], { interactive: false }))
+      .rejects.toThrow("unsupported setup model")
+    await expect(resolveSetupOptions(["--copy", "--local"], { interactive: false })).resolves.toMatchObject({ provider: "codex" })
+  })
+
+  test("uses Codex, its catalogue default, normal speed, and local scope for a fresh non-interactive workspace", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-fresh-"))
+    try {
+      await expect(resolveSetupOptions([], { interactive: false, root })).resolves.toEqual({
+        provider: "codex",
+        model: "gpt-5.6-luna",
+        speed: "normal",
+        scope: "local",
+        origin: { provider: "default", model: "default", speed: "default" },
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("reuses configured provider/model/speed/scope and preserves a same-provider custom model", async () => {
+    const configured = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "claude",
+      model: "team-custom-model",
+      speed: "fast",
+      setup: { status: "configured", scope: "global", destination: ".claude/skills" },
+    })
+    await expect(resolveSetupOptions([], {
+      interactive: false,
+      root: "/tmp/spec-finder-saved-setup",
+      loadConfig: async () => configured,
+    })).resolves.toEqual({
+      provider: "claude",
+      model: "team-custom-model",
+      speed: "fast",
       scope: "global",
-      mode: "symlink",
+      origin: { provider: "saved", model: "saved", speed: "saved" },
     })
   })
 
-  test("uses all, local, and copy defaults without a terminal", async () => {
-    await expect(resolveSetupOptions([], { interactive: false })).resolves.toEqual({
-      targets: ["claude", "codex", "cursor"],
+  test("defaults a changed provider to its newest model while retaining saved speed", async () => {
+    const configured = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "codex",
+      model: "gpt-5.6-sol",
+      speed: "fast",
+      setup: { status: "configured", scope: "local", destination: ".agents/skills" },
+    })
+    await expect(resolveSetupOptions(["--agent", "claude"], {
+      interactive: false,
+      loadConfig: async () => configured,
+    })).resolves.toEqual({
+      provider: "claude",
+      model: "fable",
+      speed: "fast",
       scope: "local",
-      mode: "copy",
+      origin: { provider: "flag", model: "default", speed: "saved" },
     })
   })
 
-  test("prompts only for setup choices omitted from flags", async () => {
-    const terminal = terminalHarness()
-    const resolution = resolveSetupOptions(["--agent", "codex", "--local"], {
-      interactive: true,
-      input: terminal.input,
-      output: terminal.output,
-    })
-    await waitForText(terminal.text, "Choose skill installation mode")
-    terminal.input.write("\u001B[B")
-    terminal.input.write("\r")
-    const options = await resolution
-
-    expect(options).toEqual({ targets: ["codex"], scope: "local", mode: "symlink" })
-    expect(terminal.text()).not.toContain("Select providers")
-    expect(terminal.text()).not.toContain("Choose installation scope")
+  test("requires an explicit scope after v2 migration and then preserves its runtime intent", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-v2-"))
+    try {
+      await mkdir(join(root, ".spec-finder"), { recursive: true })
+      await writeFile(join(root, ".spec-finder", "config.json"), JSON.stringify({
+        version: 2,
+        provider: "codex",
+        model: "old-custom",
+        reasoning: "high",
+        speed: "fast",
+        permissions: "prompt",
+        auto_commit: false,
+      }))
+      await expect(resolveSetupOptions([], { interactive: false, root })).rejects.toThrow("has no saved scope")
+      await expect(resolveSetupOptions(["--global"], { interactive: false, root })).resolves.toMatchObject({
+        provider: "codex",
+        model: "old-custom",
+        speed: "fast",
+        scope: "global",
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
-  test("uses arrows, Space, and Enter across all interactive setup choices", async () => {
+  test("uses one keyboard-selectable value per interactive step and ignores Space in single-select mode", async () => {
     const terminal = terminalHarness()
     const resolution = resolveSetupOptions([], {
       interactive: true,
@@ -99,57 +157,84 @@ describe("setup command options", () => {
       output: terminal.output,
     })
 
-    await waitForText(terminal.text, "Select providers")
-    terminal.input.write("\u001B[B\u001B[B")
+    await waitForText(terminal.text, "Choose provider")
     terminal.input.write(" ")
     terminal.input.write("\r")
-
     await waitForText(terminal.text, "Choose installation scope")
-    terminal.input.write("\u001B[B")
+    terminal.input.write("\u001B[B\r")
+    await waitForText(terminal.text, "Choose model")
+    terminal.input.write("\r")
+    await waitForText(terminal.text, "Choose speed")
     terminal.input.write("\r")
 
-    await waitForText(terminal.text, "Choose skill installation mode")
-    terminal.input.write("\u001B[B")
-    terminal.input.write("\r")
-
-    await expect(resolution).resolves.toEqual({
-      targets: ["claude", "codex"],
-      scope: "global",
-      mode: "symlink",
-    })
-    expect(terminal.input.rawModes).toEqual([true, false, true, false, true, false])
-    expect(terminal.input.isPaused()).toBe(true)
-    expect(terminal.text()).toContain("↑/↓ move · Space toggle · Enter confirm · Esc cancel")
-  })
-
-  test("requires one provider and restores raw mode after cancellation", async () => {
-    const terminal = terminalHarness()
-    const resolution = resolveSetupOptions(["--local", "--copy"], {
-      interactive: true,
-      input: terminal.input,
-      output: terminal.output,
-    })
-
-    await waitForText(terminal.text, "Select providers")
-    terminal.input.write(" ")
-    terminal.input.write("\u001B[B ")
-    terminal.input.write("\u001B[B ")
-    terminal.input.write("\r")
-    await waitForText(terminal.text, "Select at least one provider before continuing")
-    terminal.input.write("\u001B")
-
-    await expect(resolution).rejects.toThrow("setup cancelled")
-    expect(terminal.input.rawModes).toEqual([true, false])
+    await expect(resolution).resolves.toMatchObject({ provider: "codex", scope: "global", model: "gpt-5.6-luna", speed: "normal" })
+    expect(terminal.text()).not.toContain("Space toggle")
+    expect(terminal.input.rawModes).toEqual([true, false, true, false, true, false, true, false])
     expect(terminal.input.isPaused()).toBe(true)
   })
 
-  test("rejects conflicting flags and missing providers", async () => {
-    await expect(resolveSetupOptions(["--global", "--local"], { interactive: false }))
-      .rejects.toThrow("setup accepts either --global or --local, not both")
-    await expect(resolveSetupOptions(["--symlink", "--copy"], { interactive: false }))
-      .rejects.toThrow("setup accepts either --symlink or --copy, not both")
-    await expect(resolveSetupOptions(["--agent"], { interactive: false }))
-      .rejects.toThrow("setup requires a provider after --agent")
+  test("requires an explicit migrated scope selection and reports cancellation without success", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-v2-picker-"))
+    try {
+      await mkdir(join(root, ".spec-finder"), { recursive: true })
+      await writeFile(join(root, ".spec-finder", "config.json"), JSON.stringify({
+        version: 2,
+        provider: "codex",
+        model: "auto",
+        reasoning: "high",
+        speed: "normal",
+        permissions: "prompt",
+        auto_commit: false,
+      }))
+      const terminal = terminalHarness()
+      const resolution = resolveSetupOptions([], {
+        root,
+        interactive: true,
+        input: terminal.input,
+        output: terminal.output,
+      })
+      await waitForText(terminal.text, "Choose provider")
+      terminal.input.write("\r")
+      await waitForText(terminal.text, "Choose installation scope")
+      terminal.input.write("\r")
+      await waitForText(terminal.text, "Choose a scope before continuing")
+      terminal.input.write("\u001B[B\r")
+      await waitForText(terminal.text, "Choose model")
+      terminal.input.write("\u001B")
+      await expect(resolution).rejects.toThrow("setup cancelled")
+      expect(terminal.input.rawModes.at(-1)).toBe(false)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("summarizes requested setup values and explicit legacy preservation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-summary-"))
+    const terminal = commandOutput()
+    try {
+      const code = await setupCommand(["--agent", "cursor", "--model", "auto", "--speed", "fast", "--global"], {
+        root,
+        output: terminal.output,
+        loadConfig: async () => DEFAULT_CONFIG,
+        setupWorkspace: async (_root, request) => ({
+          configPath: join(root, ".spec-finder", "config.json"),
+          provider: request.provider,
+          model: request.model,
+          speed: request.speed,
+          destination: ".agents/skills",
+          scope: request.scope,
+          installed: [".agents/skills/sf-task-report"],
+          legacyCursor: "preserved",
+        }),
+      })
+      expect(code).toBe(0)
+      expect(terminal.text()).toContain("requested model: auto")
+      expect(terminal.text()).toContain("requested speed: fast")
+      expect(terminal.text()).toContain("destination: .agents/skills")
+      expect(terminal.text()).toContain("legacy Cursor skills: preserved (not migrated)")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })
 

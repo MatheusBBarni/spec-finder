@@ -16,6 +16,9 @@
 ## Shared Learnings
 
 - Active ordered-batch edits overlap command, help, README, and test files; setup executors must preserve those changes.
+- Task 02 finalizes the setup contract at one provider-derived root: Claude uses `.claude/skills`, Codex/Cursor use `.agents/skills`, and legacy `.cursor/skills` is preserved and reported as not migrated.
+- Setup writes are an ordered, lock-scoped transaction across the selected skills root and workspace config; stage/backup artifacts are private and retained on rollback or cleanup failure rather than treated as success.
+- Setup never launches ACP/provider discovery; model and speed in setup summaries are requested values, with runtime capability outcomes remaining the ACP authority.
 
 ## Open Risks
 
@@ -27,3 +30,4 @@
 
 - `task_01` establishes the config/profile and runtime-override contracts consumed by `task_02`; the installer should serialize configured v3 metadata with the profile destination and explicit scope.
 - `task_03` may start only after `task_02` finalizes actual setup output and errors.
+- `task_03` should document singular flags, explicit v2 scope selection, `--copy` compatibility/`--symlink` rejection, provider-derived destinations, requested-value wording, and no automatic Cursor migration.

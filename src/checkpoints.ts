@@ -86,6 +86,7 @@ interface Baseline extends Snapshot {
 
 interface RepositoryContext {
   root: string
+  slug: string
   taskPath: string
   taskRelativePath: string
   key: string
@@ -220,9 +221,17 @@ export function digestStatusEntries(entries: readonly PorcelainStatusEntry[]): s
 
 export const computeBaselineDigest = digestStatusEntries
 
-export function checkpointCommitMessage(taskId: string): string {
-  if (!TASK_ID_PATTERN.test(taskId)) throw new Error(`invalid task ID: ${taskId}`)
-  return `chore(spec-finder): checkpoint ${taskId}`
+export function checkpointCommitMessage(slug: string, taskName: string, taskType: string): string {
+  if (!isValidTaskSlug(slug)) throw new Error(`invalid task slug: ${slug}`)
+  const normalizedTaskName = taskName.trim().replace(/\s+/g, " ")
+  if (!normalizedTaskName) throw new Error("task name must not be empty")
+  const normalizedTaskType = taskType.trim().toLowerCase()
+  const commitType = normalizedTaskType === "fix"
+    ? "fix"
+    : normalizedTaskType === "docs"
+      ? "chore"
+      : "feat"
+  return `${commitType}: ${slug} ${normalizedTaskName}`
 }
 
 export const deterministicCommitMessage = checkpointCommitMessage
@@ -438,7 +447,11 @@ export class CheckpointService implements CheckpointServiceContract {
     if (cachedEntries.some((entry) => entry.ambiguous)) throw new CheckpointFailure("cached diff contains an ambiguous path or status")
     assertSamePathSet(flattenCachedPaths(cachedEntries), plan.candidatePaths, "cached paths differ from the temporal candidate set")
 
-    const commit = await this.invoke(plan.context.root, ["commit", "-m", checkpointCommitMessage(plan.task.id)])
+    const commit = await this.invoke(plan.context.root, [
+      "commit",
+      "-m",
+      checkpointCommitMessage(plan.context.slug, plan.task.frontmatter.title, plan.task.frontmatter.type),
+    ])
     if (commit.exitCode !== 0) throw new CheckpointFailure(this.gitFailure("Git commit was refused", commit))
   }
 
@@ -489,6 +502,7 @@ export class CheckpointService implements CheckpointServiceContract {
     const taskRelativePath = toSafeRelativePath(requestedRoot, taskPath)
     return {
       root: requestedRoot,
+      slug: input.slug,
       taskPath,
       taskRelativePath,
       key: `${requestedRoot}:${input.slug}:${input.task.id}`,
