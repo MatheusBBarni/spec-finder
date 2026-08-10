@@ -733,6 +733,71 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+interface CommandLifecycle {
+  readonly controller: AbortController
+  readonly noUi: boolean
+  readonly startCockpit: (store: CockpitStore) => Promise<void>
+  readonly waitForDismissal: (reviewableFailure: boolean) => Promise<void>
+  readonly close: () => void
+}
+
+function isInteractiveRun(
+  args: readonly string[],
+  input: { isTTY?: boolean },
+  output: { isTTY?: boolean },
+  noUi?: boolean,
+): boolean {
+  return noUi !== true
+    && !args.includes("--no-ui")
+    && input.isTTY === true
+    && output.isTTY === true
+}
+
+function createCommandLifecycle(
+  args: readonly string[],
+  options: RunCommandOptions,
+  input: { isTTY?: boolean },
+  output: { isTTY?: boolean },
+): CommandLifecycle {
+  const noUi = !isInteractiveRun(args, input, output, options.noUi)
+  const controller = new AbortController()
+  const start = options.startCockpit ?? startCockpit
+  let cockpit: CockpitSession | null = null
+  let closeRequested = false
+
+  const close = () => {
+    closeRequested = true
+    const session = cockpit
+    if (session === null) return
+    cockpit = null
+    session.close()
+  }
+
+  const cancel = () => {
+    if (!controller.signal.aborted) controller.abort()
+    close()
+  }
+
+  return {
+    controller,
+    noUi,
+    startCockpit: async (store) => {
+      if (noUi) return
+      const session = await start(store, cancel)
+      cockpit = session
+      if (closeRequested) {
+        cockpit = null
+        session.close()
+      }
+    },
+    waitForDismissal: async (reviewableFailure) => {
+      if (!reviewableFailure || noUi || controller.signal.aborted) return
+      await cockpit?.waitForDismissal()
+    },
+    close,
+  }
+}
+
 async function runSingleCommand(args: readonly string[], options: RunCommandOptions): Promise<number> {
   const slug = args.find((arg) => !arg.startsWith("-"))
   if (!slug) throw new Error("usage: spec-finder run <task_slug> [--no-ui]")
@@ -741,33 +806,27 @@ async function runSingleCommand(args: readonly string[], options: RunCommandOpti
   const root = options.root ?? await findWorkspaceRoot()
   const lease = await acquireRunLock(root)
   const load = options.loadConfig ?? loadConfig
-  let cockpit: CockpitSession | null = null
+  const lifecycle = createCommandLifecycle(args, options, input, output)
   try {
     let config = await load(root)
     config = applyRunOverrides(config, args)
-    const noUi = options.noUi === true
-      || args.includes("--no-ui")
-      || input.isTTY !== true
-      || output.isTTY !== true
-    const controller = new AbortController()
     const store = new CockpitStore()
     const consoleListener = createSingleConsoleListener(output)
-    const emit: RunEventListener = noUi ? consoleListener : store.listener
-    const start = options.startCockpit ?? startCockpit
-    if (!noUi) cockpit = await start(store, () => controller.abort())
+    const emit: RunEventListener = lifecycle.noUi ? consoleListener : store.listener
+    await lifecycle.startCockpit(store)
     const run = options.runTaskPacket ?? runTaskPacket
     const result = await run({
       root,
       slug,
       config,
-      signal: controller.signal,
+      signal: lifecycle.controller.signal,
       emit,
-      interactivePermissions: !noUi,
+      interactivePermissions: !lifecycle.noUi,
     })
-    if (!result.ok && !controller.signal.aborted) await cockpit?.waitForDismissal()
+    await lifecycle.waitForDismissal(!result.ok)
     return result.ok ? 0 : 1
   } finally {
-    cockpit?.close()
+    lifecycle.close()
     await lease.release()
   }
 }
@@ -778,34 +837,28 @@ async function runBatchCommand(args: BatchArguments, options: RunCommandOptions)
   const root = options.root ?? await findWorkspaceRoot()
   const lease = await acquireRunLock(root)
   const load = options.loadConfig ?? loadConfig
-  let cockpit: CockpitSession | null = null
+  const lifecycle = createCommandLifecycle(args.runtimeArgs, options, input, output)
 
   try {
     let config = await load(root)
     config = applyRunOverrides(config, args.runtimeArgs)
-    const noUi = options.noUi === true
-      || args.runtimeArgs.includes("--no-ui")
-      || input.isTTY !== true
-      || output.isTTY !== true
-    const controller = new AbortController()
     const store = new CockpitStore()
     const consoleListener = createBatchConsoleListener(output)
-    const emit: RunEventListener = noUi ? consoleListener : store.listener
-    const start = options.startCockpit ?? startCockpit
-    if (!noUi) cockpit = await start(store, () => controller.abort())
+    const emit: RunEventListener = lifecycle.noUi ? consoleListener : store.listener
+    await lifecycle.startCockpit(store)
     const coordinate = options.runBatch ?? runBatch
     const result = await coordinate({
       root,
       slugs: args.slugs,
       config,
-      signal: controller.signal,
+      signal: lifecycle.controller.signal,
       onEvent: emit,
-      interactivePermissions: !noUi,
+      interactivePermissions: !lifecycle.noUi,
     })
-    if (result.status === "failed" && !controller.signal.aborted) await cockpit?.waitForDismissal()
+    await lifecycle.waitForDismissal(result.status === "failed")
     return batchExitCode(result)
   } finally {
-    cockpit?.close()
+    lifecycle.close()
     await lease.release()
   }
 }

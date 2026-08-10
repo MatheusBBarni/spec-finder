@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Enforce Outcome-Aware Command Failure Review
 type: backend
 complexity: high

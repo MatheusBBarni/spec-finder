@@ -330,25 +330,42 @@ describe("run command batch integration", () => {
     }
   })
 
-  test("requires both terminal streams before starting the cockpit", async () => {
-    const root = await mkdtemp(join(tmpdir(), "spec-finder-non-tty-review-"))
-    let starts = 0
-    try {
-      const result = await runCommand(["alpha"], {
-        root,
-        input: { isTTY: false },
-        output: commandOutput(true).output,
-        loadConfig: async () => DEFAULT_CONFIG,
-        startCockpit: async () => {
-          starts += 1
-          return { close: () => undefined, waitForDismissal: async () => undefined }
-        },
-        runTaskPacket: async () => ({ ok: false, completed: 0, failed: 1, blocked: 0 }),
-      })
-      expect(result).toBe(1)
-      expect(starts).toBe(0)
-    } finally {
-      await rm(root, { recursive: true, force: true })
+  test("requires both terminal streams and preserves console failure behavior before starting the cockpit", async () => {
+    const scenarios = [
+      { name: "stdin", args: ["alpha"], inputTTY: false, outputTTY: true },
+      { name: "stdout", args: ["alpha"], inputTTY: true, outputTTY: false },
+      { name: "flag", args: ["alpha", "--no-ui"], inputTTY: true, outputTTY: true },
+    ] as const
+
+    for (const scenario of scenarios) {
+      const root = await mkdtemp(join(tmpdir(), `spec-finder-non-tty-review-${scenario.name}-`))
+      const terminal = commandOutput(scenario.outputTTY)
+      let starts = 0
+      try {
+        const result = await runCommand([...scenario.args], {
+          root,
+          input: { isTTY: scenario.inputTTY },
+          output: terminal.output,
+          loadConfig: async () => DEFAULT_CONFIG,
+          startCockpit: async () => {
+            starts += 1
+            return { close: () => undefined, waitForDismissal: async () => undefined }
+          },
+          runTaskPacket: async (options) => {
+            options.emit({ type: "task_status", taskId: "task_01", status: "failed" })
+            options.emit({ type: "activity", taskId: "task_01", message: "console failure detail" })
+            options.emit({ type: "run_finished", ok: false, message: "console failure" })
+            return { ok: false, completed: 0, failed: 1, blocked: 0 }
+          },
+        })
+        expect(result).toBe(1)
+        expect(starts).toBe(0)
+        expect(terminal.text()).toContain("task_01: failed")
+        expect(terminal.text()).toContain("task_01: console failure detail")
+        expect(terminal.text()).toContain("failed: console failure")
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
     }
   })
 
@@ -384,6 +401,73 @@ describe("run command batch integration", () => {
             })
 
         expect(result).toBe(scenario === "success" ? 0 : 1)
+        expect(waitCalls).toBe(0)
+        expect(closeCalls).toBe(1)
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    }
+  })
+
+  test("closes immediately on active cancellation and never re-enters failure review", async () => {
+    for (const mode of ["single", "batch"] as const) {
+      const root = await mkdtemp(join(tmpdir(), `spec-finder-${mode}-cancel-review-`))
+      const terminal = commandOutput(true)
+      let cancel: (() => void) | undefined
+      let releaseRunner: (() => void) | undefined
+      let markStarted: (() => void) | undefined
+      let waitCalls = 0
+      let closeCalls = 0
+      const started = new Promise<void>((resolve) => { markStarted = resolve })
+      const runnerRelease = new Promise<void>((resolve) => { releaseRunner = resolve })
+      const session = {
+        waitForDismissal: async () => { waitCalls += 1 },
+        close: () => { closeCalls += 1 },
+      }
+
+      try {
+        const command = mode === "single"
+          ? runCommand(["alpha"], {
+              root,
+              input: { isTTY: true },
+              output: terminal.output,
+              loadConfig: async () => DEFAULT_CONFIG,
+              startCockpit: async (_store, onCancel) => {
+                cancel = onCancel
+                return session
+              },
+              runTaskPacket: async () => {
+                markStarted?.()
+                await runnerRelease
+                return { ok: false, completed: 0, failed: 1, blocked: 0 }
+              },
+            })
+          : runCommand(["--multiple", "alpha"], {
+              root,
+              input: { isTTY: true },
+              output: terminal.output,
+              loadConfig: async () => DEFAULT_CONFIG,
+              startCockpit: async (_store, onCancel) => {
+                cancel = onCancel
+                return session
+              },
+              runBatch: async () => {
+                markStarted?.()
+                await runnerRelease
+                return {
+                  ok: false,
+                  status: "failed",
+                  stoppingSlug: "alpha",
+                  packets: [{ slug: "alpha", outcome: "failed", detail: "stopped" }],
+                }
+              },
+            })
+
+        await started
+        cancel?.()
+        expect(closeCalls).toBe(1)
+        releaseRunner?.()
+        expect(await command).toBe(1)
         expect(waitCalls).toBe(0)
         expect(closeCalls).toBe(1)
       } finally {
@@ -580,6 +664,25 @@ describe("run command batch integration", () => {
     expect(singleCalls).toEqual(["single-packet"])
     expect(singleOutput.text()).toContain("task_01: single packet activity")
     expect(singleOutput.text()).toContain("ok: single packet complete")
+  })
+
+  test("closes one renderer after a thrown single-runner error and propagates it", async () => {
+    const output = commandOutput(true)
+    let closeCalls = 0
+
+    await expect(runCommand(["alpha"], {
+      root: "/tmp/spec-finder-command-test",
+      output: output.output,
+      input: { isTTY: true },
+      loadConfig: async () => DEFAULT_CONFIG,
+      startCockpit: async () => ({
+        close: () => { closeCalls += 1 },
+        waitForDismissal: async () => undefined,
+      }),
+      runTaskPacket: async () => { throw new Error("runner exploded") },
+    })).rejects.toThrow("runner exploded")
+
+    expect(closeCalls).toBe(1)
   })
 
   test("keeps no-ui output free of session updates and report references", async () => {

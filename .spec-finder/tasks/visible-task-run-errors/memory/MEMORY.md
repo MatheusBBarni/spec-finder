@@ -17,6 +17,7 @@
 - The repository gate is `rtk bun run verify`; the macOS release gate to create is `rtk bun run test:pty` using `/usr/bin/script` and `/usr/bin/expect`.
 - Ordered-multiple task 03–05 source integration is present in the current ancestry; the cockpit/session boundary is available for downstream command and review work without changing `src/events.ts`.
 - `CockpitSession` is the renderer-owned seam exposed by `src/ui/cockpit.tsx`: `close()` is idempotent, `waitForDismissal()` resolves on dismissal or close, and `App` receives cancellation and dismissal callbacks separately.
+- Command execution now uses one shared lifecycle policy for single and batch runs: interactive mode requires explicit no-UI opt-out to be absent plus both stdin and stdout TTYs; only non-aborted single failures and batch `status: "failed"` wait for dismissal; cancellation aborts and closes immediately through a guarded command-owned path.
 - `CockpitStore.taskFailureDetails` keeps the raw trimmed task activity message
   only after a task enters `failed`; compact reasons and transcript lines still
   use the bounded display formatter. `selectTaskFailureDetail` uses the same
