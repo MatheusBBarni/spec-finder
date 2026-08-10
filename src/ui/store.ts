@@ -536,6 +536,9 @@ export class CockpitStore {
     const detail = `Checkpoint blocked: ${checkpoint.reason}`
     const transcripts = appendTaskLines(this.state.transcripts, transcriptKey, "error", detail, this.nextSequence())
     const taskReasons = { ...this.state.taskReasons, [transcriptKey]: checkpoint.reason }
+    // Checkpoint delivery is a separate surfaced failure source used by the
+    // retained delivery review; task activity still captures exact detail only
+    // after a task enters the failed state.
     const exactReason = event.state === "blocked" ? event.reason.trim() : ""
     const taskFailureDetails = exactReason
       ? { ...this.state.taskFailureDetails, [transcriptKey]: exactReason }
@@ -547,17 +550,20 @@ export class CockpitStore {
     const localTaskId = this.localTaskId(taskId)
     if (!localTaskId) return
     const transcriptKey = this.taskKey(localTaskId)
-    const trimmed = formatDisplayText(message).trim()
-    if (!trimmed || !(transcriptKey in this.state.transcripts)) return
+    const exactDetail = message.trim()
+    if (!exactDetail || !(transcriptKey in this.state.transcripts)) return
+    const displayMessage = formatDisplayText(message).trim()
     const status = this.state.tasks.find((task) => task.id === localTaskId)?.status
     const unsuccessful = status === "failed" || status === "blocked"
     const kind = unsuccessful ? "error" : "activity"
-    const transcripts = appendTaskLines(this.state.transcripts, transcriptKey, kind, trimmed, this.nextSequence())
+    const transcripts = displayMessage
+      ? appendTaskLines(this.state.transcripts, transcriptKey, kind, displayMessage, this.nextSequence())
+      : this.state.transcripts
     const taskReasons = unsuccessful
-      ? { ...this.state.taskReasons, [transcriptKey]: formatTaskReason(status, trimmed, []) ?? trimmed }
+      ? { ...this.state.taskReasons, [transcriptKey]: formatTaskReason(status, displayMessage, []) ?? displayMessage }
       : this.state.taskReasons
-    const taskFailureDetails = unsuccessful
-      ? { ...this.state.taskFailureDetails, [transcriptKey]: trimmed }
+    const taskFailureDetails = status === "failed"
+      ? { ...this.state.taskFailureDetails, [transcriptKey]: exactDetail }
       : this.state.taskFailureDetails
     this.set({ ...this.state, transcripts, taskReasons, taskFailureDetails })
   }
