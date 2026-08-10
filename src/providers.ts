@@ -160,7 +160,7 @@ export function resolveProviderLaunch(
     env.CODEX_CONFIG = JSON.stringify({ developer_instructions: "Follow the active Spec Finder task and its report contract.", ...existing })
   }
   const authPreference = provider === "grok"
-    ? createGrokAuthMethodPreference(process.env.XAI_API_KEY !== undefined)
+    ? createGrokAuthMethodPreference(hasNonblankXaiApiKey(process.env.XAI_API_KEY))
     : entry.authPreference
   return {
     mode,
@@ -172,6 +172,10 @@ export function resolveProviderLaunch(
     ...(entry.sessionConfigNormalizer === undefined ? {} : { sessionConfigNormalizer: entry.sessionConfigNormalizer }),
     ...(entry.stderrPolicy === undefined ? {} : { stderrPolicy: entry.stderrPolicy }),
   }
+}
+
+function hasNonblankXaiApiKey(value: string | undefined): boolean {
+  return value !== undefined && /\S/u.test(value)
 }
 
 /** Grok chooses only advertised methods; the key itself remains inherited. */

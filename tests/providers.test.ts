@@ -53,19 +53,31 @@ describe("provider launch", () => {
     })
   })
 
-  test("derives Grok authentication preference from key presence without copying the environment", () => {
+  test("derives Grok authentication preference from a nonblank key without copying the environment", () => {
     const absent = withXaiApiKey(undefined, () =>
       resolveProviderLaunch({ ...DEFAULT_CONFIG, provider: "grok" }),
     )
-    const present = withXaiApiKey("", () =>
+    const empty = withXaiApiKey("", () =>
+      resolveProviderLaunch({ ...DEFAULT_CONFIG, provider: "grok" }),
+    )
+    const whitespace = withXaiApiKey("  \t", () =>
+      resolveProviderLaunch({ ...DEFAULT_CONFIG, provider: "grok" }),
+    )
+    const present = withXaiApiKey("configured", () =>
       resolveProviderLaunch({ ...DEFAULT_CONFIG, provider: "grok" }),
     )
 
     expect(absent.authPreference?.methodIds).toEqual(["cached_token"])
+    expect(empty.authPreference?.methodIds).toEqual(["cached_token"])
+    expect(whitespace.authPreference?.methodIds).toEqual(["cached_token"])
     expect(present.authPreference?.methodIds).toEqual(["xai.api_key", "cached_token"])
     expect(absent.env).toEqual({})
+    expect(empty.env).toEqual({})
+    expect(whitespace.env).toEqual({})
     expect(present.env).toEqual({})
     expect(Object.hasOwn(absent.env, "XAI_API_KEY")).toBeFalse()
+    expect(Object.hasOwn(empty.env, "XAI_API_KEY")).toBeFalse()
+    expect(Object.hasOwn(whitespace.env, "XAI_API_KEY")).toBeFalse()
     expect(Object.hasOwn(present.env, "XAI_API_KEY")).toBeFalse()
   })
 

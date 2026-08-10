@@ -22,7 +22,7 @@ Grok Build is currently packet-only in source. [Issue #9's redacted validation e
 Before selecting Grok Build in `setup` or running a packet with `--provider grok`:
 
 - Confirm that `grok` is available on `PATH` and run `grok --version`. If the binary is missing, install or repair Grok Build using xAI's documented method, put the resulting executable on `PATH`, start a fresh shell if needed, and repeat the version check. Spec Finder does not install, replace, or update the binary.
-- Authenticate outside Spec Finder with `grok login`. An existing cached login is sufficient. In a headless or non-browser environment, `XAI_API_KEY` is an alternative: when it is present and the ACP agent advertises `xai.api_key`, Spec Finder selects that method; otherwise it uses advertised cached-token authentication. The API-key selection path has redacted fixture coverage; no live API key is required. Keep credentials out of configuration files, task packets, logs, and this repository; Spec Finder never stores or prints a key value.
+- Authenticate outside Spec Finder with `grok login`. An existing cached login is sufficient. In a headless or non-browser environment, a nonblank `XAI_API_KEY` is an alternative: when it is set and the ACP agent advertises `xai.api_key`, Spec Finder selects that method; blank values are treated as absent, and otherwise it uses advertised cached-token authentication. The API-key selection path has redacted fixture coverage; no live API key is required. Keep credentials out of configuration files, task packets, logs, and this repository; Spec Finder never stores or prints a key value.
 
 ## Install
 
