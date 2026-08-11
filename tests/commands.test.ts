@@ -54,19 +54,26 @@ async function waitForText(text: () => string, expected: string): Promise<void> 
 
 describe("setup command options", () => {
   test("rejects repeated providers, duplicate values, conflicting scope, symlink, and invalid curated models", async () => {
-    await expect(resolveSetupOptions(["--agent", "claude", "--agent", "claude"], { interactive: false }))
-      .rejects.toThrow("repeated --agent")
-    await expect(resolveSetupOptions(["--model", "auto", "--model", "fable"], { interactive: false }))
-      .rejects.toThrow("duplicate setup option: --model")
-    await expect(resolveSetupOptions(["--speed", "normal", "--speed", "fast"], { interactive: false }))
-      .rejects.toThrow("duplicate setup option: --speed")
-    await expect(resolveSetupOptions(["--global", "--local"], { interactive: false }))
-      .rejects.toThrow("either --global or --local")
-    await expect(resolveSetupOptions(["--symlink"], { interactive: false }))
-      .rejects.toThrow("no longer supports --symlink")
-    await expect(resolveSetupOptions(["--agent", "claude", "--model", "gpt-5.6-luna", "--local"], { interactive: false }))
-      .rejects.toThrow("unsupported setup model")
-    await expect(resolveSetupOptions(["--copy", "--local"], { interactive: false })).resolves.toMatchObject({ provider: "codex" })
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-opts-"))
+    try {
+      await expect(resolveSetupOptions(["--agent", "claude", "--agent", "claude"], { interactive: false, root }))
+        .rejects.toThrow("repeated --agent")
+      await expect(resolveSetupOptions(["--model", "auto", "--model", "fable"], { interactive: false, root }))
+        .rejects.toThrow("duplicate setup option: --model")
+      await expect(resolveSetupOptions(["--speed", "normal", "--speed", "fast"], { interactive: false, root }))
+        .rejects.toThrow("duplicate setup option: --speed")
+      await expect(resolveSetupOptions(["--global", "--local"], { interactive: false, root }))
+        .rejects.toThrow("either --global or --local")
+      await expect(resolveSetupOptions(["--symlink"], { interactive: false, root }))
+        .rejects.toThrow("no longer supports --symlink")
+      await expect(resolveSetupOptions(["--agent", "claude", "--model", "gpt-5.6-luna", "--local"], { interactive: false, root }))
+        .rejects.toThrow("unsupported setup model")
+      await expect(resolveSetupOptions(["--copy", "--local"], { interactive: false, root })).resolves.toMatchObject({
+        provider: "codex",
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   test("uses Codex, its catalogue default, normal speed, and local scope for a fresh non-interactive workspace", async () => {
@@ -190,27 +197,38 @@ describe("setup command options", () => {
   })
 
   test("uses one keyboard-selectable value per interactive step and ignores Space in single-select mode", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-picker-"))
     const terminal = terminalHarness()
-    const resolution = resolveSetupOptions([], {
-      interactive: true,
-      input: terminal.input,
-      output: terminal.output,
-    })
+    try {
+      const resolution = resolveSetupOptions([], {
+        interactive: true,
+        root,
+        input: terminal.input,
+        output: terminal.output,
+      })
 
-    await waitForText(terminal.text, "Choose provider")
-    terminal.input.write(" ")
-    terminal.input.write("\r")
-    await waitForText(terminal.text, "Choose installation scope")
-    terminal.input.write("\u001B[B\r")
-    await waitForText(terminal.text, "Choose model")
-    terminal.input.write("\r")
-    await waitForText(terminal.text, "Choose speed")
-    terminal.input.write("\r")
+      await waitForText(terminal.text, "Choose provider")
+      terminal.input.write(" ")
+      terminal.input.write("\r")
+      await waitForText(terminal.text, "Choose installation scope")
+      terminal.input.write("\u001B[B\r")
+      await waitForText(terminal.text, "Choose model")
+      terminal.input.write("\r")
+      await waitForText(terminal.text, "Choose speed")
+      terminal.input.write("\r")
 
-    await expect(resolution).resolves.toMatchObject({ provider: "codex", scope: "global", model: "gpt-5.6-luna", speed: "normal" })
-    expect(terminal.text()).not.toContain("Space toggle")
-    expect(terminal.input.rawModes).toEqual([true, false, true, false, true, false, true, false])
-    expect(terminal.input.isPaused()).toBe(true)
+      await expect(resolution).resolves.toMatchObject({
+        provider: "codex",
+        scope: "global",
+        model: "gpt-5.6-luna",
+        speed: "normal",
+      })
+      expect(terminal.text()).not.toContain("Space toggle")
+      expect(terminal.input.rawModes).toEqual([true, false, true, false, true, false, true, false])
+      expect(terminal.input.isPaused()).toBe(true)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   test("requires an explicit migrated scope selection and reports cancellation without success", async () => {
