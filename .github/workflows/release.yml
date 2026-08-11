@@ -559,10 +559,19 @@ jobs:
           } > "${npm_userconfig}"
           export NPM_CONFIG_USERCONFIG="${npm_userconfig}"
           npm publish --access public --provenance
-          observed_json="$(npm view "${PACKAGE_NAME}@${VERSION}" version --json)"
-          observed_version="${observed_json//\"/}"
+          # Fresh first publishes can lag the public registry view briefly.
+          observed_version=""
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if observed_json="$(npm view "${PACKAGE_NAME}@${VERSION}" version --json 2>/dev/null)"; then
+              observed_version="${observed_json//\"/}"
+              if [[ "${observed_version}" == "${VERSION}" ]]; then
+                break
+              fi
+            fi
+            sleep 3
+          done
           if [[ "${observed_version}" != "${VERSION}" ]]; then
-            echo "::error::published npm identity does not match the reviewed version" >&2
+            echo "::error::published npm identity does not match the reviewed version after retries" >&2
             exit 1
           fi
           package_url="https://www.npmjs.com/package/${PACKAGE_NAME}/v/${VERSION}"

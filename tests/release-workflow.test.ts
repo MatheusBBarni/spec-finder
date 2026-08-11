@@ -292,6 +292,7 @@ describe("stable release workflow policy", () => {
     expect(publishText).toContain("npm publish --access public")
     expect(publishText).toContain("--provenance")
     expect(publishText).toContain("npm view")
+    expect(publishText).toContain("after retries")
     expect(publishText).toContain("published-package.json")
   })
 
