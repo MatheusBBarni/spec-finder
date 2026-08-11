@@ -527,10 +527,13 @@ jobs:
             }
           '
 
-      - name: Publish exact stable package through OIDC
+      - name: Publish exact stable package
         id: publish
         env:
           NPM_CONFIG_CACHE: ${{ runner.temp }}/spec-finder-release-npm-cache
+          # Publish auth uses the repository secret. Provenance still uses the
+          # job-level id-token OIDC grant when npm accepts it on this runner.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           PACKAGE_NAME: spec-finder
           SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
           SOURCE_REF: ${{ needs.preflight.outputs.source_ref }}
@@ -543,6 +546,18 @@ jobs:
             echo "::error::npm publish is reachable only in release mode" >&2
             exit 1
           fi
+          if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
+            echo "::error::NPM_TOKEN repository secret is required for npm publish" >&2
+            exit 1
+          fi
+          # Isolate credentials from the runner home so only this step authenticates.
+          npm_userconfig="${RUNNER_TEMP}/spec-finder-release.npmrc"
+          {
+            printf 'registry=https://registry.npmjs.org/\n'
+            printf '//registry.npmjs.org/:_authToken=%s\n' "${NODE_AUTH_TOKEN}"
+            printf 'always-auth=true\n'
+          } > "${npm_userconfig}"
+          export NPM_CONFIG_USERCONFIG="${npm_userconfig}"
           npm publish --access public --provenance
           observed_json="$(npm view "${PACKAGE_NAME}@${VERSION}" version --json)"
           observed_version="${observed_json//\"/}"
@@ -567,6 +582,7 @@ jobs:
             }
             await Bun.write("published-package.json", `${JSON.stringify(record, null, 2)}\n`)
           '
+          rm -f "${npm_userconfig}"
 
       - name: Upload exact published package identity
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

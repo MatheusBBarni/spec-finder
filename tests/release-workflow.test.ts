@@ -155,7 +155,12 @@ describe("stable release workflow policy", () => {
     for (const [jobId, job] of Object.entries(jobs)) {
       if (jobId !== "publish") expect(job.permissions?.["id-token"]).toBeUndefined()
     }
-    expect(source).not.toMatch(/(?:NPM_TOKEN|NODE_AUTH_TOKEN|secrets\.NPM)/i)
+    expect(source).toContain("secrets.NPM_TOKEN")
+    expect(source).toContain("NODE_AUTH_TOKEN")
+    for (const [jobId, job] of Object.entries(jobs)) {
+      if (jobId === "publish") continue
+      expect(jobRunText(job)).not.toMatch(/(?:NPM_TOKEN|NODE_AUTH_TOKEN|secrets\.NPM)/i)
+    }
   })
 
   test("runs both local gates before accepted handoff and refreshes remote state", async () => {
@@ -272,17 +277,22 @@ describe("stable release workflow policy", () => {
   test("gates npm publication on an accepted absent-version release state", async () => {
     const { document } = await readWorkflow()
     const publish = document.jobs?.publish ?? {}
-    const publishStep = namedStep(publish, "Publish exact stable package through OIDC")
+    const publishStep = namedStep(publish, "Publish exact stable package")
+    const publishText = runText(publishStep)
 
     expect(publish.if).toContain("inputs.mode == 'release'")
     expect(publish.if).toContain("needs.remote_state.outputs.action == 'publish'")
     expect(publish.needs).toEqual(["preflight", "remote_state"])
     expect(publish.permissions).toEqual({ contents: "read", "id-token": "write" })
     expect(runText(namedStep(publish, "Recheck accepted candidate before publish"))).toContain("bun run release:check")
-    expect(runText(publishStep)).toContain("npm publish --access public")
-    expect(runText(publishStep)).toContain("--provenance")
-    expect(runText(publishStep)).toContain("npm view")
-    expect(runText(publishStep)).toContain("published-package.json")
+    expect(publishStep.env?.NODE_AUTH_TOKEN).toBe("${{ secrets.NPM_TOKEN }}")
+    expect(publishText).toContain("NODE_AUTH_TOKEN")
+    expect(publishText).toContain("NPM_TOKEN repository secret is required")
+    expect(publishText).toContain("NPM_CONFIG_USERCONFIG")
+    expect(publishText).toContain("npm publish --access public")
+    expect(publishText).toContain("--provenance")
+    expect(publishText).toContain("npm view")
+    expect(publishText).toContain("published-package.json")
   })
 
   test("proves published npm state before reconcile and has no reconcile publish path", async () => {

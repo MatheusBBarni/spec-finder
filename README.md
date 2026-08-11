@@ -80,8 +80,8 @@ Before the first live release, confirm all of the following:
 
 - You have permission to run Actions and write repository contents, and the intended version is merged on `main` as a stable SemVer.
 - The repository has authority over the public `spec-finder` npm package name. A `release` run requires the exact `spec-finder@<version>` to be absent; a `reconcile` run requires that exact version to already be published.
-- npm trusted publishing is registered for `MatheusBBarni/spec-finder` and the exact `.github/workflows/release.yml` filename. The package must allow the GitHub-hosted Actions workflow to publish with OIDC and provenance.
-- The workflow neither requires nor reads a long-lived npm publishing token. If OIDC is unavailable, the run stops; it never falls back to `NPM_TOKEN`, `NODE_AUTH_TOKEN`, or another token.
+- The repository secret `NPM_TOKEN` is set to an npm automation or granular access token that can publish `spec-finder`. The publish job authenticates with that secret via a step-local `.npmrc`.
+- The publish job also keeps `id-token: write` so `npm publish --provenance` can attach OIDC provenance when npm accepts it on GitHub Actions. Provenance is additive; publication still requires `NPM_TOKEN`.
 
 The workflow runs `bun run release:check`, `bun run verify`, and the packed-file allowlist checks before any release-mode publication. These local gates do not prove npm ownership, OIDC exchange, GitHub API writes, or native Windows behavior; the first live release and Windows evidence happen in GitHub Actions.
 
@@ -92,11 +92,11 @@ The workflow runs `bun run release:check`, `bun run verify`, and the packed-file
 
    | Mode | Use it when | What it may do |
    |---|---|---|
-   | `release` | npm, the tag, and the GitHub Release are all absent for this version. | Publish the package through npm trusted publishing, then create or verify the exact tag and generated GitHub Release. |
+   | `release` | npm, the tag, and the GitHub Release are all absent for this version. | Publish the package with `NPM_TOKEN` (and provenance when available), then create or verify the exact tag and generated GitHub Release. |
    | `reconcile` | The exact npm version is already published and matching metadata or smoke evidence is incomplete. | Create or verify only missing matching metadata and rerun smoke; it never runs `npm publish`. |
 
 3. Wait for candidate preflight and remote-state refresh. A candidate is not mutation-eligible until the local gates and the retained `release-candidate` and `release-state` handoffs pass.
-4. In `release` mode, the workflow publishes through OIDC, verifies the package, creates the annotated tag before the GitHub Release, appends the fixed installer footer, and runs the Ubuntu/Windows matrix. In `reconcile` mode, it rechecks the published npm version and performs no npm publication.
+4. In `release` mode, the workflow publishes with `NPM_TOKEN`, verifies the package, creates the annotated tag before the GitHub Release, appends the fixed installer footer, and runs the Ubuntu/Windows matrix. In `reconcile` mode, it rechecks the published npm version and performs no npm publication.
 5. Read the **Stable release outcome summary** in the run. Retained run artifacts include `release-candidate`, `release-state`, `published-package` (release mode), `release-metadata`, and `smoke-ubuntu`/`smoke-windows` when the matrix runs.
 
 Each smoke runner uses an isolated temporary workspace, home/profile, npm cache and global prefix, and executable path. It installs `spec-finder@<version>` and runs the installed `spec-finder version`, `spec-finder setup`, and `spec-finder upgrade` commands. Upgrade evidence is counted only when `npm view spec-finder@latest` is the candidate version; `upgrade` is not proof for an older version after a newer stable release exists.
