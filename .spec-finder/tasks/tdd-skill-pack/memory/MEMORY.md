@@ -2,7 +2,7 @@
 
 ## Current State
 
-- Packet `tdd-skill-pack` implementation started. `task_01` authored `skills/sf-tdd-plan/` with doctrine and plan template.
+- Packet `tdd-skill-pack` implementation in progress. `task_01` delivered `sf-tdd-plan`. `task_02` authored `skills/sf-tdd-execute/` with a byte-equivalent doctrine copy.
 
 ## Shared Decisions
 
@@ -22,4 +22,4 @@
 
 ## Handoffs
 
-- Next implementation: `task_02` execute skill and `task_03` report skill, both copying the `task_01` doctrine file.
+- Next implementation: `task_03` report skill, copying `skills/sf-tdd-plan/references/tdd-doctrine.md`.
