@@ -6,7 +6,7 @@ The numeric ID is the canonical execution position. Every dependency points to a
 
 | ID | Title | Type | Complexity | Status | Dependencies | Parallelization |
 |---|---|---|---|---|---|---|
-| task_01 | Author TDD doctrine and plan skill | docs | medium | pending | [] | root |
+| task_01 | Author TDD doctrine and plan skill | docs | medium | completed | [] | root |
 | task_02 | Author TDD execute skill | docs | medium | pending | task_01 | parallelizable with task_03 |
 | task_03 | Author TDD report skill | docs | medium | pending | task_01 | parallelizable with task_02 |
 | task_04 | Author TDD batch skill | docs | medium | pending | task_02, task_03 | after both invoke targets |

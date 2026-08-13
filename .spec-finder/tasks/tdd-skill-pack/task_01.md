@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Author TDD doctrine and plan skill
 type: docs
 complexity: medium
@@ -46,11 +46,11 @@ Create the first standalone TDD skill tree so operators can add or update an add
 
 ## Subtasks
 
-- [ ] 01.1 Slim doctrine exists and names `/tdd` as origin while remaining usable without that path.
-- [ ] 01.2 Plan skill can add or update `## TDD Plan` on an existing implementation task.
-- [ ] 01.3 Not-applicable tasks can be recorded with exactly one reason line and no fake slices.
-- [ ] 01.4 Vague slice names without observable behavior are rejected during planning.
-- [ ] 01.5 Repository verification stays green with no TypeScript or core-skill role changes.
+- [x] 01.1 Slim doctrine exists and names `/tdd` as origin while remaining usable without that path.
+- [x] 01.2 Plan skill can add or update `## TDD Plan` on an existing implementation task.
+- [x] 01.3 Not-applicable tasks can be recorded with exactly one reason line and no fake slices.
+- [x] 01.4 Vague slice names without observable behavior are rejected during planning.
+- [x] 01.5 Repository verification stays green with no TypeScript or core-skill role changes.
 
 ## Implementation Details
 
