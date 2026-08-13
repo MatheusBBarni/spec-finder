@@ -221,6 +221,42 @@ export function digestStatusEntries(entries: readonly PorcelainStatusEntry[]): s
 
 export const computeBaselineDigest = digestStatusEntries
 
+const MAX_BASELINE_RECONSTRUCT_ENTRIES = 20
+
+/** Unstaged tracked edits can stay in the baseline without leaking into a later commit. */
+export function isUnstagedTrackedResidue(entry: PorcelainStatusEntry): boolean {
+  return !entry.ambiguous
+    && entry.kind === "ordinary"
+    && entry.indexStatus === " "
+    && (entry.worktreeStatus === "M" || entry.worktreeStatus === "D" || entry.worktreeStatus === "T")
+}
+
+/** Reconstruct the unique status subset that produced a stored baseline digest. */
+export function findEntriesMatchingDigest(
+  entries: readonly PorcelainStatusEntry[],
+  digest: string,
+): PorcelainStatusEntry[] | undefined {
+  if (digest === EMPTY_STATUS_DIGEST) return []
+  if (digestStatusEntries(entries) === digest) return [...entries]
+
+  const residue = entries.filter(isUnstagedTrackedResidue)
+  if (digestStatusEntries(residue) === digest) return residue
+  if (entries.length > MAX_BASELINE_RECONSTRUCT_ENTRIES) return undefined
+
+  let matched: PorcelainStatusEntry[] | undefined
+  const limit = 1 << entries.length
+  for (let mask = 1; mask < limit; mask++) {
+    const subset: PorcelainStatusEntry[] = []
+    for (let index = 0; index < entries.length; index++) {
+      if ((mask & (1 << index)) !== 0) subset.push(entries[index]!)
+    }
+    if (digestStatusEntries(subset) !== digest) continue
+    if (matched !== undefined) return undefined
+    matched = subset
+  }
+  return matched
+}
+
 export function checkpointCommitMessage(slug: string, taskName: string, taskType: string): string {
   if (!isValidTaskSlug(slug)) throw new Error(`invalid task slug: ${slug}`)
   const normalizedTaskName = taskName.trim().replace(/\s+/g, " ")
@@ -269,18 +305,23 @@ export class CheckpointService implements CheckpointServiceContract {
       currentTask = await loadFreshTask({ ...input.task, path: repository.taskPath })
       const snapshot = await this.captureSnapshot(repository.root)
       this.validateBaseline(snapshot.entries, repository.taskRelativePath)
+      const baseline = this.baselineFromSnapshot(snapshot, repository.taskRelativePath)
 
       const record: CheckpointRecord = {
         state: "active",
-        base_head: snapshot.head,
-        baseline_digest: snapshot.digest,
+        base_head: baseline.head,
+        baseline_digest: baseline.digest,
         paths: [repository.taskRelativePath],
       }
       currentTask = await updateTaskCheckpoint(currentTask, record)
 
       const after = await this.captureSnapshot(repository.root)
       const changed = pathSet(after.entries.flatMap((entry) => entry.paths))
-      if (!changed.has(repository.taskRelativePath) || [...changed].some((path) => !this.allowedBaselinePaths.has(path) && path !== repository.taskRelativePath)) {
+      if (!changed.has(repository.taskRelativePath) || [...changed].some((path) => (
+        path !== repository.taskRelativePath
+        && !baseline.paths.has(path)
+        && !this.allowedBaselinePaths.has(path)
+      ))) {
         try {
           await clearTaskCheckpoint(currentTask)
         } catch (cleanupError) {
@@ -289,10 +330,7 @@ export class CheckpointService implements CheckpointServiceContract {
         throw new CheckpointFailure("repository changed while capturing the checkpoint baseline")
       }
 
-      this.baselines.set(repository.key, {
-        ...snapshot,
-        paths: new Set(snapshot.entries.flatMap((entry) => entry.paths)),
-      })
+      this.baselines.set(repository.key, baseline)
       return createdOutcome("checkpoint baseline captured")
     } catch (error) {
       return blockedOutcome(this.diagnostic("unable to begin checkpoint", error))
@@ -369,11 +407,15 @@ export class CheckpointService implements CheckpointServiceContract {
       const baseline = this.resolveBaseline(context, record, before)
       this.assertBaselineUnchanged(record, before, baseline)
 
-      if (record.state === "blocked") {
-        const expected = validateCandidatePaths(record.paths)
-        const currentCandidates = this.candidateEntries(before.entries, baseline)
-        const currentPaths = flattenEntryPaths(currentCandidates)
-        assertSamePathSet(currentPaths, expected, "stored candidate paths do not match current Git state")
+      const currentCandidates = this.candidateEntries(before.entries, baseline)
+      const currentPaths = flattenEntryPaths(currentCandidates)
+      const beginOnlyBlockedPaths = record.state === "blocked"
+        && record.paths.length === 1
+        && record.paths[0] === context.taskRelativePath
+        && currentPaths.length > 1
+        && currentPaths.includes(context.taskRelativePath)
+      if (record.state === "blocked" && !beginOnlyBlockedPaths) {
+        assertSamePathSet(currentPaths, validateCandidatePaths(record.paths), "stored candidate paths do not match current Git state")
       }
 
       currentTask = await clearTaskCheckpoint(currentTask)
@@ -382,14 +424,14 @@ export class CheckpointService implements CheckpointServiceContract {
       this.assertBaselineUnchanged(record, snapshot, baseline)
 
       const candidateEntries = this.candidateEntries(snapshot.entries, baseline)
-      const candidatePaths = record.state === "blocked"
+      const candidatePaths = record.state === "blocked" && !beginOnlyBlockedPaths
         ? validateCandidatePaths(record.paths)
         : validateCandidatePaths(flattenEntryPaths(candidateEntries))
       if (candidatePaths.length === 0) throw new CheckpointFailure("no task changes were found for checkpoint delivery")
-      if (record.state === "active" && !candidatePaths.includes(context.taskRelativePath)) {
+      if ((record.state === "active" || beginOnlyBlockedPaths) && !candidatePaths.includes(context.taskRelativePath)) {
         throw new CheckpointFailure("task metadata path is missing from the temporal candidate delta")
       }
-      if (record.state === "blocked") {
+      if (record.state === "blocked" && !beginOnlyBlockedPaths) {
         assertSamePathSet(flattenEntryPaths(candidateEntries), candidatePaths, "candidate path drift detected before retry")
       }
 
@@ -529,9 +571,21 @@ export class CheckpointService implements CheckpointServiceContract {
     for (const entry of entries) {
       this.validateEntry(entry)
       const paths = entry.paths.map((path) => normalizeSafePath(path))
+      const isCurrentTask = paths.every((path) => path === taskRelativePath)
       const allowed = paths.every((path) => this.allowedBaselinePaths.has(path))
-      if (!allowed) throw new CheckpointFailure("pre-existing Git changes make checkpoint attribution unsafe")
-      if (paths.includes(taskRelativePath)) throw new CheckpointFailure("task path is already dirty at checkpoint begin")
+      if (!allowed && !isCurrentTask && !isUnstagedTrackedResidue(entry)) {
+        throw new CheckpointFailure("pre-existing Git changes make checkpoint attribution unsafe")
+      }
+    }
+  }
+
+  private baselineFromSnapshot(snapshot: Snapshot, taskRelativePath: string): Baseline {
+    const entries = snapshot.entries.filter((entry) => !entry.paths.map(normalizeSafePath).includes(taskRelativePath))
+    return {
+      head: snapshot.head,
+      entries,
+      digest: digestStatusEntries(entries),
+      paths: new Set(entries.flatMap((entry) => entry.paths)),
     }
   }
 
@@ -549,20 +603,22 @@ export class CheckpointService implements CheckpointServiceContract {
       return { head: record.base_head, entries: [], digest: EMPTY_STATUS_DIGEST, paths: new Set() }
     }
     const candidatePaths = new Set(record.paths)
-    let entries = snapshot.entries.filter((entry) => entry.paths.every((path) => !candidatePaths.has(path)))
-    if (digestStatusEntries(entries) !== record.baseline_digest) {
-      entries = snapshot.entries.filter((entry) => entry.paths.every((path) => (
-        !candidatePaths.has(path) && this.allowedBaselinePaths.has(path)
-      )))
-    }
-    if (digestStatusEntries(entries) !== record.baseline_digest) {
+    const excluded = snapshot.entries.filter((entry) => entry.paths.every((path) => !candidatePaths.has(path)))
+    const allowed = excluded.filter((entry) => entry.paths.every((path) => this.allowedBaselinePaths.has(path)))
+    const matched = digestStatusEntries(excluded) === record.baseline_digest
+      ? excluded
+      : digestStatusEntries(allowed) === record.baseline_digest
+        ? allowed
+        : findEntriesMatchingDigest(excluded, record.baseline_digest)
+          ?? findEntriesMatchingDigest(snapshot.entries, record.baseline_digest)
+    if (matched === undefined) {
       throw new CheckpointFailure("checkpoint baseline snapshot is unavailable or has drifted")
     }
     return {
       head: record.base_head,
-      entries,
+      entries: matched,
       digest: record.baseline_digest,
-      paths: new Set(entries.flatMap((entry) => entry.paths)),
+      paths: new Set(matched.flatMap((entry) => entry.paths)),
     }
   }
 
