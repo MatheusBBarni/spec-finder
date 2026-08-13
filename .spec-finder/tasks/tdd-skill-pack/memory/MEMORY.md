@@ -2,7 +2,7 @@
 
 ## Current State
 
-- Packet `tdd-skill-pack` implementation in progress. `task_01` and `task_02` delivered plan and execute. `task_03` authored `skills/sf-tdd-report/` with a byte-equivalent doctrine copy.
+- Packet `tdd-skill-pack` implementation in progress. `task_01`–`task_04` authored the four standalone TDD skill trees.
 
 ## Shared Decisions
 
@@ -22,4 +22,4 @@
 
 ## Handoffs
 
-- Next implementation: `task_04` batch skill, cloning core batch and invoking only `sf-tdd-execute` / `sf-tdd-report`.
+- Next implementation: `task_05` allowlist + README when-to-use. Do not retarget engine prompts.

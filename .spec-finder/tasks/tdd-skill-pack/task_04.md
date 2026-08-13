@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Author TDD batch skill
 type: docs
 complexity: medium
@@ -47,11 +47,11 @@ Add `sf-tdd-batch` as the manual range runner that only invokes TDD execute and 
 
 ## Subtasks
 
-- [ ] 04.1 Batch skill tree exists with doctrine copy and Codex display wrapper.
-- [ ] 04.2 Range parsing and dependency gating match core batch forms (`all`, single id, inclusive ranges, `force`).
-- [ ] 04.3 Each selected task runs only through TDD execute and TDD report.
-- [ ] 04.4 Failed, blocked, or incomplete evidence stops the range before later tasks.
-- [ ] 04.5 `auto_commit: true` uses the existing checkpoint CLI; `bun run verify` stays green.
+- [x] 04.1 Batch skill tree exists with doctrine copy and Codex display wrapper.
+- [x] 04.2 Range parsing and dependency gating match core batch forms (`all`, single id, inclusive ranges, `force`).
+- [x] 04.3 Each selected task runs only through TDD execute and TDD report.
+- [x] 04.4 Failed, blocked, or incomplete evidence stops the range before later tasks.
+- [x] 04.5 `auto_commit: true` uses the existing checkpoint CLI; `bun run verify` stays green.
 
 ## Implementation Details
 
