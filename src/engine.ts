@@ -9,6 +9,7 @@ import { AcpProcessExitError, withAcpSession } from "./acp-client.ts"
 import {
   createCheckpointService,
   digestStatusEntries,
+  isUnstagedTrackedResidue,
   parsePorcelainStatus,
   runGit,
   type CheckpointInput,
@@ -382,13 +383,15 @@ function validatePreMemorySnapshot(
 ): void {
   const recoveryPaths = checkpointPaths(tasks)
   const memoryPaths = packetMemoryPathsRelative(root, packetDirectory, tasks)
+  const taskPaths = packetTaskPathsRelative(root, tasks)
   const hasRecoveryState = recoveryPaths.size > 0
   for (const entry of entries) {
     if (entry.ambiguous) throw new Error("pre-memory Git state is ambiguous or unmerged")
     const paths = entry.paths.map(normalizeRepositoryPath)
     const isRecoveryState = paths.every((path) => recoveryPaths.has(path))
+    const isPacketTask = paths.every((path) => taskPaths.has(path))
     const isBootstrapResidue = hasRecoveryState && entry.status === "??" && paths.every((path) => memoryPaths.has(path))
-    if (!isRecoveryState && !isBootstrapResidue) {
+    if (!isRecoveryState && !isPacketTask && !isBootstrapResidue && !isUnstagedTrackedResidue(entry)) {
       throw new Error("pre-existing Git changes make checkpoint attribution unsafe")
     }
   }
@@ -422,6 +425,10 @@ function validatePostMemorySnapshot(
 
 function checkpointPaths(tasks: readonly TaskFile[]): Set<string> {
   return new Set(tasks.flatMap((task) => task.frontmatter.checkpoint?.paths ?? []).map(normalizeRepositoryPath))
+}
+
+function packetTaskPathsRelative(root: string, tasks: readonly TaskFile[]): Set<string> {
+  return new Set(tasks.map((task) => normalizeRepositoryPath(relative(root, task.path))))
 }
 
 function packetMemoryPathsRelative(root: string, packetDirectory: string, tasks: readonly TaskFile[]): Set<string> {

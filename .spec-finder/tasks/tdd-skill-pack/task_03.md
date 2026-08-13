@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Author TDD report skill
 type: docs
 complexity: medium
@@ -47,11 +47,11 @@ Add `sf-tdd-report` so a manual TDD completion claim is falsifiable. The report 
 
 ## Subtasks
 
-- [ ] 03.1 Report skill tree and template exist, including core outcome/changes/requirements/verification/risks fields.
-- [ ] 03.2 Behavioral completed is blocked when any slice is missing red or green command identity.
-- [ ] 03.3 Not-applicable completed is allowed only with the one-line reason and no invented red rows.
-- [ ] 03.4 Report skill does not write frontmatter status and does not edit core `sf-task-report`.
-- [ ] 03.5 `bun run verify` stays green.
+- [x] 03.1 Report skill tree and template exist, including core outcome/changes/requirements/verification/risks fields.
+- [x] 03.2 Behavioral completed is blocked when any slice is missing red or green command identity.
+- [x] 03.3 Not-applicable completed is allowed only with the one-line reason and no invented red rows.
+- [x] 03.4 Report skill does not write frontmatter status and does not edit core `sf-task-report`.
+- [x] 03.5 `bun run verify` stays green.
 
 ## Implementation Details
 

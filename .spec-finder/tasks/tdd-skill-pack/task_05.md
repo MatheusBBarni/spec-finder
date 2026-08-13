@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Install TDD pack and document when-to-use
 type: infra
 complexity: medium
@@ -50,11 +50,11 @@ Register the four TDD skill trees on the managed install allowlist, prove setup 
 
 ## Subtasks
 
-- [ ] 05.1 Allowlist contains the four TDD names in the approved order and setup copies each `SKILL.md`.
-- [ ] 05.2 Setup test title and assertions cover thirteen managed skills without weakening the matrix.
-- [ ] 05.3 Engine implementation and report prompts still name the core skills.
-- [ ] 05.4 README lists the TDD pack, when-to-use, ACP default, and re-run-setup after upgrade.
-- [ ] 05.5 Focused setup and engine tests plus `bun run verify` pass.
+- [x] 05.1 Allowlist contains the four TDD names in the approved order and setup copies each `SKILL.md`.
+- [x] 05.2 Setup test title and assertions cover thirteen managed skills without weakening the matrix.
+- [x] 05.3 Engine implementation and report prompts still name the core skills.
+- [x] 05.4 README lists the TDD pack, when-to-use, ACP default, and re-run-setup after upgrade.
+- [x] 05.5 Focused setup and engine tests plus `bun run verify` pass.
 
 ## Implementation Details
 

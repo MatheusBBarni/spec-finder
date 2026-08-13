@@ -2,15 +2,18 @@
 
 ## Current State
 
-- Packet `tdd-skill-pack` has approved `_prd.md`, `_techspec.md`, ADRs 001–004, and an approved five-task graph. Implementation has not started.
+- Packet `tdd-skill-pack` V1 trees, allowlist, prompt locks, and README when-to-use are authored. `task_05` is the leaf.
 
 ## Shared Decisions
 
 - Approach A: standalone `skills/sf-tdd-*` trees, duplicated doctrine, additive `## TDD Plan`, memory notes in existing headings, TDD batch checkpoint parity, setup+contract tests.
 - `spec-finder upgrade` stays npm-only; existing workspaces re-run `setup`.
 - ACP `run` stays on `sf-execute-task` / `sf-task-report` in V1.
+- Doctrine runtime source after setup is `skills/sf-tdd-plan/references/tdd-doctrine.md`. Later TDD skills copy that file; they do not rewrite it.
 
 ## Shared Learnings
+
+- Upstream `/tdd` interactive seam confirmation is overridden in the vendored doctrine; seams are derived from task, TechSpec, ADRs, and any existing plan.
 
 ## Open Risks
 
@@ -19,4 +22,4 @@
 
 ## Handoffs
 
-- Next implementation: `task_01` doctrine + `sf-tdd-plan`.
+- No remaining implementation tasks in this packet after `task_05`.

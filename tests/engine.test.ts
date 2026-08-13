@@ -232,6 +232,7 @@ dependencies: []
     expect(await readFile(join(packet, "memory", "task_01.md"), "utf8")).toContain("- Build the mock")
     expect(await readFile(join(packet, "reports", "task_01.md"), "utf8")).toContain("Final verdict: completed")
     expect(await readFile(promptLog, "utf8")).toContain(`Use the sf-execute-task skill to execute ${taskPath}.`)
+    expect(await readFile(promptLog, "utf8")).toContain("Use the sf-task-report skill if it is installed.")
     const processIds = (await readFile(processLog, "utf8")).trim().split("\n")
     expect(processIds).toHaveLength(2)
     expect(new Set(processIds).size).toBe(1)
@@ -943,6 +944,101 @@ checkpoint:
     expect(occurrences(prompts, "Task 01: Recoverable checkpoint")).toBe(1)
     expect(prompts).toContain("Task 02: Downstream task")
     expect(await readFile(join(fixture.packet, "task_02.md"), "utf8")).toContain("status: completed")
+  })
+
+  test("allows leftover current-packet task status when capturing the checkpoint baseline", async () => {
+    const fixture = await createGitPacketFixture(["Resume leftover status"])
+    await writeFile(join(fixture.packet, "task_01.md"), `---
+status: in_progress
+title: Resume leftover status
+type: test
+complexity: low
+dependencies: []
+---
+
+# Task 01: Resume leftover status
+`)
+    const events: RunEvent[] = []
+
+    const result = await runTaskPacket({
+      root: fixture.root,
+      slug: "demo",
+      config: fixture.config,
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: process.execPath,
+        args: [fixture.agent],
+        env: { SPEC_FINDER_TEST_PROMPT_LOG: fixture.promptLog },
+        authMethod: null,
+      },
+    })
+
+    expect(result).toEqual({ ok: true, completed: 1, failed: 0, blocked: 0 })
+    expect(activityMessages(events).some((message) => message.includes("pre-existing Git changes"))).toBeFalse()
+    expect(await readFile(join(fixture.packet, "task_01.md"), "utf8")).toContain("status: completed")
+    expect(occurrences(await readFile(fixture.promptLog, "utf8"), "Use the sf-execute-task skill")).toBe(1)
+  })
+
+  test("keeps unstaged tracked residue in the checkpoint baseline", async () => {
+    const fixture = await createGitPacketFixture(["Tracked residue"])
+    await writeFile(join(fixture.root, "README.md"), "tracked residue\n")
+    await runGitCommand(fixture.root, ["add", "--", "README.md"])
+    await runGitCommand(fixture.root, ["commit", "-m", "tracked residue"])
+    await writeFile(join(fixture.root, "README.md"), "unstaged tracked residue\n")
+    const events: RunEvent[] = []
+
+    const result = await runTaskPacket({
+      root: fixture.root,
+      slug: "demo",
+      config: fixture.config,
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: process.execPath,
+        args: [fixture.agent],
+        env: { SPEC_FINDER_TEST_PROMPT_LOG: fixture.promptLog },
+        authMethod: null,
+      },
+    })
+
+    expect(result).toEqual({ ok: true, completed: 1, failed: 0, blocked: 0 })
+    expect(activityMessages(events).some((message) => message.includes("pre-existing Git changes"))).toBeFalse()
+    expect(await readFile(join(fixture.root, "README.md"), "utf8")).toBe("unstaged tracked residue\n")
+    expect(await readFile(join(fixture.packet, "task_01.md"), "utf8")).toContain("status: completed")
+    const status = await runCheckpointGit(["status", "--porcelain"], fixture.root)
+    expect(status.stdout).toContain(" M README.md")
+    expect(status.stdout).not.toContain("task_01.md")
+  })
+
+  test("still blocks checkpoint preparation when unrelated Git changes exist", async () => {
+    const fixture = await createGitPacketFixture(["Dirty unrelated"])
+    await writeFile(join(fixture.root, "unrelated.txt"), "nope\n")
+    const events: RunEvent[] = []
+
+    const result = await runTaskPacket({
+      root: fixture.root,
+      slug: "demo",
+      config: fixture.config,
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: process.execPath,
+        args: [fixture.agent],
+        env: { SPEC_FINDER_TEST_PROMPT_LOG: fixture.promptLog },
+        authMethod: null,
+      },
+    })
+
+    expect(result).toEqual({ ok: false, completed: 0, failed: 0, blocked: 1 })
+    expect(activityMessages(events).some((message) => (
+      message.includes("checkpoint pre-memory baseline blocked")
+      && message.includes("pre-existing Git changes")
+    ))).toBeTrue()
+    expect(await access(fixture.promptLog).then(() => true, () => false)).toBeFalse()
   })
 })
 

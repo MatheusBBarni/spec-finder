@@ -5,11 +5,13 @@ import { join } from "node:path"
 import {
   CheckpointService,
   checkpointCommitMessage,
+  digestStatusEntries,
+  findEntriesMatchingDigest,
   parseCachedDiff,
   parsePorcelainStatus,
   runGit as runCheckpointGit,
 } from "../src/checkpoints.ts"
-import { parseTask, updateTaskStatus, type TaskFile } from "../src/tasks.ts"
+import { parseTask, updateTaskCheckpoint, updateTaskStatus, type TaskFile } from "../src/tasks.ts"
 
 const roots: string[] = []
 
@@ -103,6 +105,134 @@ describe("safe Git checkpoint service", () => {
     expect(calls.some((args) => args.includes("--no-verify") || args.includes("--author"))).toBe(false)
     expect(calls.some((args) => args[0] === "add" && args[1] === "--")).toBe(true)
     expect(calls.find((args) => args[0] === "commit")).toEqual(["commit", "-m", "feat: demo Checkpoint task"])
+  })
+
+  test("keeps a pre-dirty allowed task path in the candidate set", async () => {
+    const fixture = await createFixture()
+    await updateTaskStatus(await readTask(fixture.taskPath), "in_progress")
+    const service = new CheckpointService({
+      enabled: true,
+      allowedBaselinePaths: [".spec-finder/tasks/demo/task_01.md"],
+    })
+
+    expect((await service.begin(fixture.input)).state).toBe("created")
+    await mkdir(join(fixture.root, "src"), { recursive: true })
+    await writeFile(join(fixture.root, "src", "implementation.ts"), "export const delivered = true\n")
+    await writeEvidenceAndComplete(fixture)
+
+    const outcome = await service.complete(fixture.input)
+    expect(outcome.state).toBe("created")
+    expect(outcome.commit).toMatch(/^[a-f0-9]{40,64}$/)
+    const tree = await gitText(fixture.root, ["-c", "core.quotePath=false", "ls-tree", "-r", "-z", "--name-only", "HEAD"])
+    expect(tree).toContain("src/implementation.ts")
+    expect(tree).toContain(".spec-finder/tasks/demo/task_01.md")
+    expect((await readTask(fixture.taskPath)).frontmatter.status).toBe("completed")
+    expect((await readTask(fixture.taskPath)).frontmatter.checkpoint).toBeUndefined()
+  })
+
+  test("reconstructs a baseline digest from a matching status subset", () => {
+    const residue = parsePorcelainStatus(" M src/leftover.ts\0 M tests/leftover.test.ts\0")
+    const newer = parsePorcelainStatus(" M src/leftover.ts\0 M tests/leftover.test.ts\0?? skills/new/SKILL.md\0 M .spec-finder/tasks/demo/task_01.md\0")
+    const digest = digestStatusEntries(residue)
+    expect(findEntriesMatchingDigest(newer, digest)?.map((entry) => entry.path)).toEqual([
+      "src/leftover.ts",
+      "tests/leftover.test.ts",
+    ])
+    expect(findEntriesMatchingDigest(residue, digest)?.map((entry) => entry.path)).toEqual([
+      "src/leftover.ts",
+      "tests/leftover.test.ts",
+    ])
+    expect(findEntriesMatchingDigest(newer, "c".repeat(64))).toBeUndefined()
+  })
+
+  test("delivers across process boundaries when leftover residue remains in the baseline", async () => {
+    const fixture = await createFixture()
+    await writeFile(join(fixture.root, "README.md"), "unstaged tracked residue\n")
+    const beginService = new CheckpointService({ enabled: true })
+    expect((await beginService.begin(fixture.input)).state).toBe("created")
+
+    await mkdir(join(fixture.root, "src"), { recursive: true })
+    await writeFile(join(fixture.root, "src", "implementation.ts"), "export const delivered = true\n")
+    await writeEvidenceAndComplete(fixture)
+
+    const completeService = new CheckpointService({ enabled: true })
+    const outcome = await completeService.complete(fixture.input)
+    expect(outcome.state).toBe("created")
+    expect(outcome.commit).toMatch(/^[a-f0-9]{40,64}$/)
+    expect(await gitText(fixture.root, ["show", "HEAD:README.md"])).toBe("fixture")
+    expect(await readFile(join(fixture.root, "README.md"), "utf8")).toBe("unstaged tracked residue\n")
+    expect(await gitText(fixture.root, ["diff", "--name-only"])).toBe("README.md")
+    expect(await gitText(fixture.root, ["-c", "core.quotePath=false", "ls-tree", "-r", "-z", "--name-only", "HEAD"]))
+      .toContain("src/implementation.ts")
+    expect((await readTask(fixture.taskPath)).frontmatter.checkpoint).toBeUndefined()
+  })
+
+  test("retries a blocked begin-only path set after reconstructing the baseline", async () => {
+    const fixture = await createFixture()
+    await writeFile(join(fixture.root, "README.md"), "unstaged tracked residue\n")
+    const beginService = new CheckpointService({ enabled: true })
+    expect((await beginService.begin(fixture.input)).state).toBe("created")
+    await mkdir(join(fixture.root, "src"), { recursive: true })
+    await writeFile(join(fixture.root, "src", "implementation.ts"), "export const delivered = true\n")
+    await writeEvidenceAndComplete(fixture)
+
+    const current = await readTask(fixture.taskPath)
+    const record = current.frontmatter.checkpoint
+    expect(record?.state).toBe("active")
+    if (record === undefined) throw new Error("expected an active checkpoint record")
+    await updateTaskCheckpoint(current, {
+      state: "blocked",
+      base_head: record.base_head,
+      baseline_digest: record.baseline_digest,
+      paths: [".spec-finder/tasks/demo/task_01.md"],
+      error: "checkpoint blocked: checkpoint baseline snapshot is unavailable or has drifted",
+    })
+
+    const retryService = new CheckpointService({ enabled: true })
+    const outcome = await retryService.complete(fixture.input)
+    expect(outcome.state).toBe("created")
+    expect(outcome.commit).toMatch(/^[a-f0-9]{40,64}$/)
+    expect(await gitText(fixture.root, ["show", "HEAD:README.md"])).toBe("fixture")
+    expect(await gitText(fixture.root, ["-c", "core.quotePath=false", "ls-tree", "-r", "-z", "--name-only", "HEAD"]))
+      .toContain("src/implementation.ts")
+    expect((await readTask(fixture.taskPath)).frontmatter.checkpoint).toBeUndefined()
+  })
+
+  test("blocks cross-process complete when leftover residue disappears", async () => {
+    const fixture = await createFixture()
+    await writeFile(join(fixture.root, "README.md"), "unstaged tracked residue\n")
+    const beginService = new CheckpointService({ enabled: true })
+    expect((await beginService.begin(fixture.input)).state).toBe("created")
+    await writeFile(join(fixture.root, "README.md"), "fixture\n")
+    await mkdir(join(fixture.root, "src"), { recursive: true })
+    await writeFile(join(fixture.root, "src", "implementation.ts"), "export const delivered = true\n")
+    await writeEvidenceAndComplete(fixture)
+
+    const completeService = new CheckpointService({ enabled: true })
+    const outcome = await completeService.complete(fixture.input)
+    expect(outcome.state).toBe("blocked")
+    expect(outcome.message).toContain("unavailable or has drifted")
+    expect(await gitText(fixture.root, ["rev-list", "--count", "HEAD"])).toBe("1")
+  })
+
+  test("keeps unstaged tracked residue out of the checkpoint commit", async () => {
+    const fixture = await createFixture()
+    await writeFile(join(fixture.root, "README.md"), "unstaged tracked residue\n")
+    const service = new CheckpointService({ enabled: true })
+
+    expect((await service.begin(fixture.input)).state).toBe("created")
+    await mkdir(join(fixture.root, "src"), { recursive: true })
+    await writeFile(join(fixture.root, "src", "implementation.ts"), "export const delivered = true\n")
+    await writeEvidenceAndComplete(fixture)
+
+    const outcome = await service.complete(fixture.input)
+    expect(outcome.state).toBe("created")
+    expect(await gitText(fixture.root, ["show", "HEAD:README.md"])).toBe("fixture")
+    expect(await readFile(join(fixture.root, "README.md"), "utf8")).toBe("unstaged tracked residue\n")
+    expect(await gitText(fixture.root, ["diff", "--name-only"])).toBe("README.md")
+    expect(await gitText(fixture.root, ["diff", "--cached", "--name-only"])).toBe("")
+    expect(await gitText(fixture.root, ["-c", "core.quotePath=false", "ls-tree", "-r", "-z", "--name-only", "HEAD"]))
+      .toContain("src/implementation.ts")
   })
 
   test("refuses dirty, staged, and untracked baselines without a commit", async () => {

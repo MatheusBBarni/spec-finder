@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Author TDD execute skill
 type: docs
 complexity: medium
@@ -47,11 +47,11 @@ Add `sf-tdd-execute` as the one-task TDD executor that forces red → green vert
 
 ## Subtasks
 
-- [ ] 02.1 Execute skill tree exists and carries the `task_01` doctrine copy.
-- [ ] 02.2 Behavioral slices cannot implement before recorded red for the same test identity.
-- [ ] 02.3 Not-applicable tasks complete the execute path without invented tests.
-- [ ] 02.4 Interrupted work resumes green or the next red from existing memory headings.
-- [ ] 02.5 ACP versus manual ownership matches core execute; `bun run verify` stays green.
+- [x] 02.1 Execute skill tree exists and carries the `task_01` doctrine copy.
+- [x] 02.2 Behavioral slices cannot implement before recorded red for the same test identity.
+- [x] 02.3 Not-applicable tasks complete the execute path without invented tests.
+- [x] 02.4 Interrupted work resumes green or the next red from existing memory headings.
+- [x] 02.5 ACP versus manual ownership matches core execute; `bun run verify` stays green.
 
 ## Implementation Details
 

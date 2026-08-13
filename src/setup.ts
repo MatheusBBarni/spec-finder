@@ -41,6 +41,10 @@ export const SPEC_FINDER_SKILLS = [
   "sf-execute-task",
   "sf-task-report",
   "sf-batch-tasks",
+  "sf-tdd-plan",
+  "sf-tdd-execute",
+  "sf-tdd-report",
+  "sf-tdd-batch",
   "sf-archive-tasks",
 ] as const
 
