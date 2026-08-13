@@ -10,7 +10,7 @@ The numeric ID is the canonical execution position. Every dependency points to a
 | task_02 | Author TDD execute skill | docs | medium | completed | task_01 | parallelizable with task_03 |
 | task_03 | Author TDD report skill | docs | medium | completed | task_01 | parallelizable with task_02 |
 | task_04 | Author TDD batch skill | docs | medium | completed | task_02, task_03 | after both invoke targets |
-| task_05 | Install TDD pack and document when-to-use | infra | medium | pending | task_01, task_02, task_03, task_04 | leaf |
+| task_05 | Install TDD pack and document when-to-use | infra | medium | completed | task_01, task_02, task_03, task_04 | leaf |
 
 ## Dependency graph
 

@@ -154,9 +154,17 @@ spec-finder upgrade
 | `sf-execute-task` | bounded implementation and verification |
 | `sf-task-report` | `reports/task_NN.md` |
 | `sf-batch-tasks` | dependency-safe manual range execution |
+| `sf-tdd-plan` | additive `## TDD Plan` on an existing task |
+| `sf-tdd-execute` | red → green vertical slices for opted-in behavioral work |
+| `sf-tdd-report` | red+green evidence report, or a one-line not-applicable reason |
+| `sf-tdd-batch` | TDD-only range runner; stop on failure |
 | `sf-archive-tasks` | completed-packet archival and reports |
 
 Every stage keeps the approval gates from the original Compozy skills. Research and interactive decisions happen before artifacts are saved. Tasks form an acyclic dependency graph and carry their own tests.
+
+### When to use TDD versus core
+
+The four `sf-tdd-*` skills are an optional pack for honest red-before-green work. Use them when a task adds or changes product behavior and you need a failing public-seam test before production code. Keep using core `sf-execute-task`, `sf-task-report`, and `sf-batch-tasks` for research, docs, chore, config-only, or any packet that does not need a red phase. `spec-finder run` stays on the core skills until a separate opt-in design; invoking TDD skills is a manual choice.
 
 ## Run tasks
 
@@ -369,7 +377,7 @@ spec-finder version
 
 The `--provider` option accepts `claude`, `codex`, `cursor`, or `grok`. Grok Build remains packet-only; `spec-finder exec --provider grok` is rejected before provider spawn while its separate packet launch remains available.
 
-`upgrade` runs `npm install --global spec-finder@latest`, keeping npm as the package authority.
+`upgrade` runs `npm install --global spec-finder@latest`, keeping npm as the package authority. It refreshes the installed package only and does not recopy agent skill destinations. Existing workspaces must re-run `spec-finder setup` to install newly shipped skills such as the TDD pack.
 
 ## Task contract
 

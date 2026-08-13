@@ -2,7 +2,7 @@
 
 ## Current State
 
-- Packet `tdd-skill-pack` implementation in progress. `task_01`–`task_04` authored the four standalone TDD skill trees.
+- Packet `tdd-skill-pack` V1 trees, allowlist, prompt locks, and README when-to-use are authored. `task_05` is the leaf.
 
 ## Shared Decisions
 
@@ -22,4 +22,4 @@
 
 ## Handoffs
 
-- Next implementation: `task_05` allowlist + README when-to-use. Do not retarget engine prompts.
+- No remaining implementation tasks in this packet after `task_05`.
