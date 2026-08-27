@@ -541,7 +541,7 @@ Read the complete task at ${task.path}. Read ${prd} and ${techspec} when they ex
 
 Use the sf-memory skill before editing. Read shared memory at ${memory.shared} and current task memory at ${memory.task}. Keep task memory current during execution and update it before finishing. Promote only durable cross-task context to shared memory.
 
-Implement only this task. Preserve unrelated work. Run the task's required focused tests and the repository's relevant verification gate. Do not mark task frontmatter complete and do not write the final report; Spec Finder owns both lifecycle phases.
+Implement only this task. Preserve unrelated work. Run the task's required focused tests and the repository's relevant verification gate. If verification fails, fix the implementation in scope and re-run until the gate is clean. Do not halt for recoverable verification failures, spec conflicts, missing Git HEAD, or missing optional platform evidence. Resolve the conflict, record the interpretation in task memory, and continue. Stop only for unmet declared dependencies or a failure that cannot be fixed inside this task. Do not mark task frontmatter complete and do not write the final report; Spec Finder owns both lifecycle phases.
 ${continuation}
 
 Task:

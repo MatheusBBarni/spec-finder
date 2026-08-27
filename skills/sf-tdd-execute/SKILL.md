@@ -16,6 +16,14 @@ description: Executes one Spec Finder task as vertical red-then-green slices at 
 
 Parallel opt-in executor. Core `sf-execute-task` remains the ACP default.
 
+## Uninterrupted execution
+
+- Never ask the user a question or wait for confirmation while executing a task.
+- Ambiguity is a decision to make, not a reason to halt. Derive seams and interpretations from the task, TechSpec, ADRs, and memory, then continue.
+- After the last green, if remaining focused tests or the repository gate fail, fix in scope and re-verify until clean. Do not ask whether to proceed.
+- Missing Git HEAD or checkpoint unavailability is not an implementation blocker.
+- TDD slice stops (unexpected red pass, failed green, doctrine anti-patterns) still apply to the current slice. They are not a reason to skip a later repair of an otherwise valid green path.
+
 ## Invocation
 
 ```text
@@ -30,7 +38,7 @@ Parallel opt-in executor. Core `sf-execute-task` remains the ACP default.
 1. Decide the lifecycle owner. ACP runtime versus a manual caller such as `sf-tdd-batch`.
 2. Read this skill, `references/tdd-doctrine.md`, the task, `_prd.md`, `_techspec.md`, `_tasks.md`, relevant ADRs, repository instructions, and current Git state.
 3. Use `sf-memory`. Read `memory/MEMORY.md` and `memory/task_NN.md`. Keep notes short: command identity, result meaning, decisive excerpt. No transcripts.
-4. Verify every declared dependency is completed and its required artifacts exist. Stop with a concrete blocker if not.
+4. Verify every declared dependency is completed and its required artifacts exist. Stop with a concrete blocker if not. This is a graph gate, not a design conflict.
 5. For a manual invocation, set the task to `in_progress` before editing. The runtime performs this transition itself for ACP runs.
 6. Resolve the plan:
    - If `## TDD Plan` is `not_applicable` with exactly one reason line, skip every red cycle. Do not invent tests. Continue at step 10.
@@ -45,7 +53,7 @@ Parallel opt-in executor. Core `sf-execute-task` remains the ACP default.
    3. Record the red note under `Learnings` (command identity, fail meaning, short excerpt) and `Ready for Next Run` as `red done / green incomplete`.
    4. Write only enough production code to pass that same command identity.
    5. Rerun the same command. Require pass. Record the green note and set `Ready for Next Run` to `green done → next red`, or done when no slices remain.
-9. After the last green, run the task's remaining focused tests and the repository verification gate to terminal exit.
+9. After the last green, run the task's remaining focused tests and the repository verification gate to terminal exit. On failure, fix in scope and re-run until the gate is clean.
 10. Update memory before any completion claim or handoff. `Important Decisions` holds applicability, seam derivation, and chosen test identities.
 11. **ACP path:** stop after implementation, verification, and memory. Do not write `reports/task_NN.md`. Do not change frontmatter status.
 12. **Manual path:** invoke `sf-tdd-report`, then set status to that report's exact verdict: `completed`, `failed`, or `blocked`.
@@ -56,3 +64,4 @@ Parallel opt-in executor. Core `sf-execute-task` remains the ACP default.
 - Never weaken tests or configuration to hide a failure.
 - Partial or stale command output is not evidence.
 - Do not absorb follow-up scope. Record it in memory instead.
+- Spec conflicts, missing optional platform evidence, and Git HEAD gaps are not halt conditions. Resolve, document, and continue unless the TDD slice itself failed.

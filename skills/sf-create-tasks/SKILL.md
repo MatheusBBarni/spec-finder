@@ -148,6 +148,9 @@ Every task must contain:
 
 Use the repository's coverage policy. If none exists, target at least 80% coverage for new or changed testable logic and state when coverage is not measurable or applicable.
 
+Created tasks run unattended. Do not write halt-on-first-failure, halt-on-ambiguity, or "ask the user" instructions into `task_NN.md`. Every generated `<critical>` block MUST include the template's uninterrupted-execution lines so an executor that only reads the task file still tries to fix verification failures and resolve spec conflicts before stopping.
+Prefer automated evidence. When platform evidence cannot run in the execution environment, the task MUST allow documenting the limitation and continuing with the automated gate.
+
 ### 8. Validate before completion
 
 Re-read every generated file and verify:
@@ -185,6 +188,7 @@ Fix all validation failures and repeat validation. Report unresolved failures ra
 - File paths guessed without codebase evidence.
 - Generic PRD or TechSpec instructions that let an executor select source artifacts from another packet.
 - Regeneration that silently renumbers tasks or erases memory.
+- Tasks that tell the executor to halt on the first failed command, missing optional platform evidence, Git HEAD, or spec ambiguity.
 
 ## Failure rules
 

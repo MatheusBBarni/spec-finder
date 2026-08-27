@@ -25,7 +25,9 @@ Replace `<slug>` with the current packet slug before writing the task. Never lea
 - Use `sf-memory`; read `memory/MEMORY.md` and `memory/task_NN.md` before editing and update memory before finishing.
 - Implement only this task; preserve unrelated work and do not absorb follow-up scope.
 - Reference TechSpec sections for design details instead of duplicating interfaces or architecture.
-- Run focused tests and the exact repository verification gate to terminal exit.
+- Run focused tests and the exact repository verification gate to terminal exit. If they fail, fix in scope and re-run until clean. Do not stop to ask whether to proceed.
+- Ambiguity and spec conflicts are decisions, not halt conditions. Resolve them against the TechSpec, this task's requirements, and ADRs; record the pick in memory; continue.
+- Missing Git HEAD or checkpoint unavailability is not an implementation blocker.
 - Do not change lifecycle status or write the final report when Spec Finder owns those phases.
 </critical>
 

@@ -232,6 +232,7 @@ dependencies: []
     expect(await readFile(join(packet, "memory", "task_01.md"), "utf8")).toContain("- Build the mock")
     expect(await readFile(join(packet, "reports", "task_01.md"), "utf8")).toContain("Final verdict: completed")
     expect(await readFile(promptLog, "utf8")).toContain(`Use the sf-execute-task skill to execute ${taskPath}.`)
+    expect(await readFile(promptLog, "utf8")).toContain("If verification fails, fix the implementation in scope and re-run until the gate is clean.")
     expect(await readFile(promptLog, "utf8")).toContain("Use the sf-task-report skill if it is installed.")
     const processIds = (await readFile(processLog, "utf8")).trim().split("\n")
     expect(processIds).toHaveLength(2)
