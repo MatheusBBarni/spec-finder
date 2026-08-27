@@ -9,7 +9,9 @@ import { AcpProcessExitError, withAcpSession } from "./acp-client.ts"
 import {
   createCheckpointService,
   digestStatusEntries,
+  isMissingGitHeadError,
   isUnstagedTrackedResidue,
+  MISSING_GIT_HEAD_SKIP_MESSAGE,
   parsePorcelainStatus,
   runGit,
   type CheckpointInput,
@@ -69,17 +71,22 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
   const checkpointEnabled = options.config.auto_commit
   let checkpointService: CheckpointServiceContract | undefined = options.checkpointService
   let checkpointPreparationError: string | undefined
+  let checkpointSkipReason: string | undefined
   let preMemorySnapshot: GitSnapshot | undefined
   if (checkpointEnabled && checkpointService === undefined) {
     try {
       preMemorySnapshot = await captureGitSnapshot(options.root)
       validatePreMemorySnapshot(preMemorySnapshot.entries, packet.tasks, options.root, packet.directory)
     } catch (error) {
-      checkpointPreparationError = boundedCheckpointMessage(`checkpoint pre-memory baseline blocked: ${errorMessage(error)}`)
+      if (isMissingGitHeadError(error)) {
+        checkpointSkipReason = boundedCheckpointMessage(MISSING_GIT_HEAD_SKIP_MESSAGE)
+      } else {
+        checkpointPreparationError = boundedCheckpointMessage(`checkpoint pre-memory baseline blocked: ${errorMessage(error)}`)
+      }
     }
   }
   await ensurePacketMemory(packet.directory, packet.tasks)
-  if (checkpointEnabled && checkpointService === undefined && checkpointPreparationError === undefined) {
+  if (checkpointEnabled && checkpointService === undefined && checkpointPreparationError === undefined && checkpointSkipReason === undefined) {
     try {
       const postMemorySnapshot = await captureGitSnapshot(options.root)
       if (preMemorySnapshot === undefined) throw new Error("pre-memory baseline is unavailable")
@@ -95,11 +102,18 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
         allowedBaselinePaths: [...postMemorySnapshot.entries.flatMap((entry) => entry.paths)],
       })
     } catch (error) {
-      checkpointPreparationError = boundedCheckpointMessage(`checkpoint post-memory baseline blocked: ${errorMessage(error)}`)
+      if (isMissingGitHeadError(error)) {
+        checkpointSkipReason = boundedCheckpointMessage(MISSING_GIT_HEAD_SKIP_MESSAGE)
+      } else {
+        checkpointPreparationError = boundedCheckpointMessage(`checkpoint post-memory baseline blocked: ${errorMessage(error)}`)
+      }
     }
   }
   const ordered = executionOrder(packet.tasks)
   options.emit({ type: "run_started", slug: options.slug, config: options.config, tasks: packet.tasks })
+  if (checkpointSkipReason !== undefined) {
+    options.emit({ type: "activity", message: `checkpoints skipped: ${checkpointSkipReason}` })
+  }
 
   if (ordered.length === 0 && !options.signal.aborted) {
     const result = {
@@ -176,7 +190,16 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
         blocked += 1
         break
       }
-      if (begin.state === "created") current = await reloadTask(current)
+      if (begin.state === "skipped") {
+        checkpointService = undefined
+        options.emit({
+          type: "activity",
+          taskId: current.id,
+          message: `checkpoints skipped: ${begin.message ?? MISSING_GIT_HEAD_SKIP_MESSAGE}`,
+        })
+      } else if (begin.state === "created") {
+        current = await reloadTask(current)
+      }
     }
 
     current = await updateTaskStatus(current, "in_progress")
@@ -289,7 +312,16 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
           blocked += 1
           break
         }
-        if (completion.state === "created") emitCheckpointOutcome(options.emit, current.id, completion)
+        if (completion.state === "skipped") {
+          checkpointService = undefined
+          options.emit({
+            type: "activity",
+            taskId: current.id,
+            message: `checkpoints skipped: ${completion.message ?? MISSING_GIT_HEAD_SKIP_MESSAGE}`,
+          })
+        } else if (completion.state === "created") {
+          emitCheckpointOutcome(options.emit, current.id, completion)
+        }
       }
     } catch (error) {
       const message = errorMessage(error)
@@ -368,10 +400,10 @@ async function captureGitSnapshot(root: string): Promise<GitSnapshot> {
   const entries = parsePorcelainStatus(status.stdout)
   const head = await runGit(["rev-parse", "HEAD"], root)
   if (head.exitCode !== 0) {
-    throw new Error(`could not read Git HEAD${head.stderr.trim() ? `: ${head.stderr.trim()}` : ` (exit ${head.exitCode})`}`)
+    throw new Error(`Git HEAD is missing: could not read Git HEAD${head.stderr.trim() ? `: ${head.stderr.trim()}` : ` (exit ${head.exitCode})`}`)
   }
   const oid = head.stdout.trim()
-  if (oid.length === 0) throw new Error("Git HEAD is empty")
+  if (oid.length === 0) throw new Error("Git HEAD is missing: Git HEAD is empty")
   return { head: oid, entries, digest: digestStatusEntries(entries) }
 }
 
@@ -465,7 +497,7 @@ async function callCheckpoint(
 }
 
 function emitCheckpointOutcome(emit: RunEventListener, taskId: string, outcome: CheckpointOutcome): void {
-  if (outcome.state === "disabled") return
+  if (outcome.state === "disabled" || outcome.state === "skipped") return
   if (outcome.state === "created") {
     const commit = outcome.commit
     emit(commit === undefined

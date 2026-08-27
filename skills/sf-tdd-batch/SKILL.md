@@ -80,17 +80,20 @@ Normalize numbers to the repository's actual zero-padded filename. Do not invent
 - Unless `force` is present, skip `completed`, `done`, and `finished` tasks.
 - For every task to run, require each dependency to be terminal-completed or scheduled earlier in this batch. Stop on an unmet dependency; do not merely warn.
 - Print tasks to run in order, completed skips, missing requests, dependency blockers, and the config-owned `auto_commit` mode.
-- When `auto_commit: true`, use the CLI bridge to capture each task baseline; do not capture or stage Git state in the skill itself.
+- When `auto_commit: true`, use the CLI bridge to capture each task baseline; do not capture or stage Git state in the skill itself. A skipped begin (missing Git HEAD) is not a batch blocker.
 
 ### 4. Execute sequentially
 
 For each selected task:
 
-1. If `auto_commit: true`, run `spec-finder checkpoint begin <slug> <task_id>` and require exit 0 before invoking `sf-tdd-execute`. A blocked begin stops the batch before task execution.
+1. If `auto_commit: true`, run `spec-finder checkpoint begin <slug> <task_id>`.
+   - Exit 0 and a created baseline: keep checkpoints enabled for this batch and continue.
+   - Exit 0 with `checkpoint begin skipped` (missing Git HEAD / unborn branch): print the skip reason, disable begin/complete for the rest of this batch, and continue task execution. Do not stop. Do not create an initial commit.
+   - Nonzero exit (blocked): stop the batch before task execution. Unsafe Git state still fail-closes.
 2. Invoke `sf-tdd-execute` with the absolute `task_NN.md` path and state that this is a manual batch invocation, so `sf-tdd-execute` owns the task's TDD report (`sf-tdd-report`) and status transition.
 3. Let it complete dependency checks, red→green slices or N/A skip, focused verification, repository verification, memory updates, and `sf-tdd-report`.
 4. Re-read the task and `reports/task_NN.md`. Continue only when status is exactly `completed`, the report is substantive, its verdict is completed, and TDD Evidence is either per-slice red+green or a one-line not-applicable reason.
-5. If `auto_commit: true`, run `spec-finder checkpoint complete <slug> <task_id>` only after that report/status gate. A blocked complete stops the batch before the next task; the completed task is retried by a normal rerun without rerunning its implementation.
+5. If checkpoints remain enabled for this batch, run `spec-finder checkpoint complete <slug> <task_id>` only after that report/status gate. A blocked complete stops the batch before the next task; the completed task is retried by a normal rerun without rerunning its implementation. Do not call complete after a skipped begin.
 6. Stop immediately on failed, blocked, incomplete, missing, partial, or stale evidence.
 
 Checkpoint phases are local-only and use the shared service. They preserve Git hooks/signing and never push, open a PR, imply review/merge, or accept remote/bypass/stash/reset/clean options.

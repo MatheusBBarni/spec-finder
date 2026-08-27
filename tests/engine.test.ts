@@ -1013,6 +1013,38 @@ dependencies: []
     expect(status.stdout).not.toContain("task_01.md")
   })
 
+  test("skips checkpoints and still executes when Git HEAD is missing", async () => {
+    const fixture = await createPacketFixture(["Unborn head"])
+    await runGitCommand(fixture.root, ["init", "-q"])
+    await runGitCommand(fixture.root, ["config", "user.name", "Spec Finder Test"])
+    await runGitCommand(fixture.root, ["config", "user.email", "spec-finder@example.test"])
+    const events: RunEvent[] = []
+
+    const result = await runTaskPacket({
+      root: fixture.root,
+      slug: "demo",
+      config: fixture.config,
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: process.execPath,
+        args: [fixture.agent],
+        env: { SPEC_FINDER_TEST_PROMPT_LOG: fixture.promptLog },
+        authMethod: null,
+      },
+    })
+
+    expect(result).toEqual({ ok: true, completed: 1, failed: 0, blocked: 0 })
+    expect(activityMessages(events).some((message) => (
+      message.includes("checkpoints skipped")
+      && message.includes("Git HEAD is missing")
+    ))).toBeTrue()
+    expect(events.some((event) => event.type === "checkpoint" && event.state === "blocked")).toBeFalse()
+    expect(await readFile(join(fixture.packet, "task_01.md"), "utf8")).toContain("status: completed")
+    expect(await access(fixture.promptLog).then(() => true, () => false)).toBeTrue()
+  })
+
   test("still blocks checkpoint preparation when unrelated Git changes exist", async () => {
     const fixture = await createGitPacketFixture(["Dirty unrelated"])
     await writeFile(join(fixture.root, "unrelated.txt"), "nope\n")

@@ -26,3 +26,4 @@ Choose exactly one lifecycle owner before editing: the Spec Finder ACP runtime o
 - Never weaken tests or configuration to hide a failure.
 - Distinguish implementation failure, environment failure, and missing platform evidence.
 - Record follow-ups instead of silently expanding scope.
+- Missing Git HEAD or checkpoint unavailability is not an implementation blocker. Do not stop the task to create an initial commit or to wait for checkpoints. Batch and runtime own checkpoint phases.

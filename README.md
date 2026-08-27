@@ -261,7 +261,7 @@ spec-finder checkpoint begin <task_slug> <task_id>
 spec-finder checkpoint complete <task_slug> <task_id>
 ```
 
-`begin` must succeed before task execution; `complete` runs only after the report and `status: completed` gate. A blocked delivery stops downstream tasks while preserving the verified task record. Resolve the local Git condition and rerun the packet normally; the rerun retries delivery without rerunning the verified implementation. Set `auto_commit` back to `false` to keep the existing no-commit flow.
+`begin` must succeed before task execution, except when Git HEAD is missing (unborn branch / no commits): checkpoints are skipped, no initial commit is created, and task work continues. `complete` runs only after the report and `status: completed` gate. A blocked delivery stops downstream tasks while preserving the verified task record. Resolve the local Git condition and rerun the packet normally; the rerun retries delivery without rerunning the verified implementation. Set `auto_commit` back to `false` to keep the existing no-commit flow.
 
 Provider process commands are built into Spec Finder for Claude, Codex, Cursor, and Grok Build. They are implementation details rather than user configuration. The Grok packet launch is `grok --no-auto-update agent stdio`; it requires the external binary and authentication prerequisites above. Spec Finder also follows each provider's default ACP mode: mode IDs are advertised by the agent and are not portable across providers. Final reports are always required in `reports/`, completed tasks are skipped, and the run stops after a task failure.
 

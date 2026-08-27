@@ -720,6 +720,10 @@ function reportCheckpointOutcome(
     output.write(`checkpoint ${phase} blocked for ${slug}/${taskId}: ${outcome.message ?? "delivery refused"}\n`)
     return 1
   }
+  if (outcome.state === "skipped") {
+    output.write(`checkpoint ${phase} skipped for ${slug}/${taskId}: ${outcome.message ?? "continuing without checkpoints"}\n`)
+    return 0
+  }
 
   if (phase === "begin") {
     output.write(`checkpoint begin: ${slug}/${taskId}: ${outcome.message ?? "baseline captured"}\n`)

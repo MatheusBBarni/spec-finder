@@ -1127,4 +1127,39 @@ Checkpoint bridge fixture.
     expect(result).toBe(1)
     expect(output.text()).toContain("checkpoint complete blocked for demo/task_01: hook refused local commit")
   })
+
+  test("returns zero when checkpoints are skipped because Git HEAD is missing", async () => {
+    const output = commandOutput()
+    const service: CheckpointServiceContract = {
+      begin: async () => ({ state: "skipped", message: "Git HEAD is missing; continuing without checkpoints" }),
+      complete: async () => ({ state: "skipped", message: "Git HEAD is missing; continuing without checkpoints" }),
+      retry: async () => ({ state: "blocked", message: "unused" }),
+      preserve: async () => ({ state: "created", message: "unused" }),
+    }
+    const task: TaskFile = {
+      id: "task_01",
+      number: 1,
+      path: "/tmp/task_01.md",
+      body: "\n# Bridge task\n",
+      source: "---\nstatus: pending\ntitle: Bridge task\ntype: backend\ncomplexity: low\ndependencies: []\n---\n\n# Bridge task\n",
+      frontmatter: {
+        status: "pending",
+        title: "Bridge task",
+        type: "backend",
+        complexity: "low",
+        dependencies: [],
+      },
+    }
+
+    const result = await checkpointCommand(["begin", "demo", "task_01"], {
+      root: "/tmp/spec-finder-checkpoint-skipped",
+      output: output.output,
+      loadConfig: async () => ({ ...DEFAULT_CONFIG, auto_commit: true }),
+      loadTaskPacket: async () => ({ directory: "/tmp", tasks: [task] }),
+      checkpointService: service,
+    })
+
+    expect(result).toBe(0)
+    expect(output.text()).toContain("checkpoint begin skipped for demo/task_01: Git HEAD is missing; continuing without checkpoints")
+  })
 })

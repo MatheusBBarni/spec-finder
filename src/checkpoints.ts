@@ -37,7 +37,8 @@ export interface CachedDiffEntry {
   ambiguous: boolean
 }
 
-export type CheckpointOutcomeState = "disabled" | "created" | "blocked"
+export type CheckpointOutcomeState = "disabled" | "created" | "blocked" | "skipped"
+export const MISSING_GIT_HEAD_SKIP_MESSAGE = "Git HEAD is missing; continuing without checkpoints"
 
 export interface CheckpointOutcome {
   state: CheckpointOutcomeState
@@ -333,6 +334,7 @@ export class CheckpointService implements CheckpointServiceContract {
       this.baselines.set(repository.key, baseline)
       return createdOutcome("checkpoint baseline captured")
     } catch (error) {
+      if (isMissingGitHeadError(error)) return skippedMissingHeadOutcome()
       return blockedOutcome(this.diagnostic("unable to begin checkpoint", error))
     }
   }
@@ -393,7 +395,15 @@ export class CheckpointService implements CheckpointServiceContract {
         throw new CheckpointFailure("task must be completed before checkpoint delivery")
       }
       record = currentTask.frontmatter.checkpoint
-      if (record === undefined) throw new CheckpointFailure("task has no checkpoint baseline to deliver")
+      if (record === undefined) {
+        try {
+          await this.captureSnapshot(repository.root)
+        } catch (error) {
+          if (isMissingGitHeadError(error)) return skippedMissingHeadOutcome()
+          throw error
+        }
+        throw new CheckpointFailure("task has no checkpoint baseline to deliver")
+      }
       if (retryOnly && record.state !== "blocked") {
         throw new CheckpointFailure("checkpoint retry requires blocked delivery metadata")
       }
@@ -561,9 +571,17 @@ export class CheckpointService implements CheckpointServiceContract {
       throw new CheckpointFailure(this.diagnostic("could not parse Git status", error))
     }
     const headResult = await this.invoke(root, ["rev-parse", "HEAD"])
-    if (headResult.exitCode !== 0) throw new CheckpointFailure(this.gitFailure("could not read Git HEAD", headResult))
+    if (headResult.exitCode !== 0) {
+      throw new CheckpointFailure(this.gitFailure("Git HEAD is missing: could not read Git HEAD", headResult))
+    }
     const head = headResult.stdout.trim()
-    if (!OBJECT_ID_PATTERN.test(head)) throw new CheckpointFailure("Git HEAD is not a valid object ID")
+    if (!OBJECT_ID_PATTERN.test(head)) {
+      throw new CheckpointFailure(
+        head.length === 0
+          ? "Git HEAD is missing: Git HEAD is empty"
+          : "Git HEAD is missing: Git HEAD is not a valid object ID",
+      )
+    }
     return { head, entries, digest: digestStatusEntries(entries) }
   }
 
@@ -776,4 +794,16 @@ function createdCommitOutcome(commit: string): CheckpointOutcome {
 
 function blockedOutcome(message: string): CheckpointOutcome {
   return { state: "blocked", message }
+}
+
+function skippedMissingHeadOutcome(): CheckpointOutcome {
+  return { state: "skipped", message: MISSING_GIT_HEAD_SKIP_MESSAGE }
+}
+
+/** True when Git has no usable HEAD, such as an unborn branch with no commits. */
+export function isMissingGitHeadError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.includes("Git HEAD is missing")
+    || message.includes("could not read Git HEAD")
+    || message.includes("Git HEAD is empty")
 }

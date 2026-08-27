@@ -354,6 +354,28 @@ describe("safe Git checkpoint service", () => {
     expect(await gitText(fixture.root, ["rev-list", "--count", "HEAD"])).toBe("2")
   })
 
+  test("skips begin on an unborn branch instead of blocking", async () => {
+    const fixture = await createUnbornFixture()
+    const service = new CheckpointService({ enabled: true })
+
+    const outcome = await service.begin(fixture.input)
+    expect(outcome.state).toBe("skipped")
+    expect(outcome.message).toContain("Git HEAD is missing")
+    expect((await readTask(fixture.taskPath)).frontmatter.checkpoint).toBeUndefined()
+    expect((await readTask(fixture.taskPath)).frontmatter.status).toBe("pending")
+  })
+
+  test("skips complete without a baseline when Git HEAD is missing", async () => {
+    const fixture = await createUnbornFixture()
+    await updateTaskStatus(await readTask(fixture.taskPath), "completed")
+    const service = new CheckpointService({ enabled: true })
+
+    const outcome = await service.complete(fixture.input)
+    expect(outcome.state).toBe("skipped")
+    expect(outcome.message).toContain("Git HEAD is missing")
+    expect((await readTask(fixture.taskPath)).frontmatter.checkpoint).toBeUndefined()
+  })
+
   test("returns disabled without touching Git", async () => {
     const fixture = await createFixture()
     let invoked = false
@@ -377,6 +399,31 @@ interface Fixture {
   taskPath: string
   task: TaskFile
   input: { root: string; slug: string; task: TaskFile }
+}
+
+async function createUnbornFixture(): Promise<Fixture> {
+  const root = await mkdtemp(join(tmpdir(), "spec-finder-checkpoint-unborn-"))
+  roots.push(root)
+  const taskPath = join(root, ".spec-finder", "tasks", "demo", "task_01.md")
+  await mkdir(join(root, ".spec-finder", "tasks", "demo"), { recursive: true })
+  await writeFile(taskPath, `---
+status: pending
+title: Checkpoint task
+type: backend
+complexity: low
+dependencies: []
+---
+
+# Task 01: Checkpoint task
+
+## Overview
+Fixture task.
+`)
+  await runGit(root, ["init", "-q"])
+  await runGit(root, ["config", "user.name", "Spec Finder Test"])
+  await runGit(root, ["config", "user.email", "spec-finder@example.test"])
+  const task = await readTask(taskPath)
+  return { root, taskPath, task, input: { root, slug: "demo", task } }
 }
 
 async function createFixture(): Promise<Fixture> {
