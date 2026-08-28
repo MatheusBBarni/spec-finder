@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Record live Pi packet evidence
 type: test
 complexity: medium
@@ -50,10 +50,10 @@ Prove the shipped Pi provider with one redacted live packet in this workspace, t
 
 ## Subtasks
 
-- [ ] 05.1 Attempt the live packet matrix from `.spec-finder/tasks/pi-acp-provider/_techspec.md` Testing and Evidence, in a disposable or this workspace path that does not leak secrets.
-- [ ] 05.2 Redact outputs, confirm no credentials in config/reports/logs/fixtures, and post the evidence on issue #15 when the packet ran.
-- [ ] 05.3 Replace the README tested-pair placeholder on success, or record why it stayed a placeholder.
-- [ ] 05.4 Run `bun run verify` regardless of live-packet availability.
+- [x] 05.1 Attempt the live packet matrix from `.spec-finder/tasks/pi-acp-provider/_techspec.md` Testing and Evidence, in a disposable or this workspace path that does not leak secrets.
+- [x] 05.2 Redact outputs, confirm no credentials in config/reports/logs/fixtures, and post the evidence on issue #15 when the packet ran.
+- [x] 05.3 Replace the README tested-pair placeholder on success, or record why it stayed a placeholder.
+- [x] 05.4 Run `bun run verify` regardless of live-packet availability.
 
 ## Implementation Details
 

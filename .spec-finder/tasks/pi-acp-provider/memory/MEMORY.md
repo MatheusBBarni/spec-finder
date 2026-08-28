@@ -2,26 +2,26 @@
 
 ## Current State
 
-- Packet `pi-acp-provider` task_01 through task_04 implemented; task_05 still pending.
+- Packet `pi-acp-provider` task_01 through task_05 implemented.
 
 ## Shared Decisions
 
-- TypeScript closed `Record<ProviderName, …>` forces launch recipe and exec-false onto task_01 with the enum.
-- Setup usage grammar includes `pi` in help and README; exec help still lists claude/codex/cursor/grok without claiming Pi exec certification.
-- Pi launch attaches `createPiAuthMethodPreference()` at resolve time (`methodIds: ["pi-stored-credentials"]`, empty env, `stderrPolicy: "redact"`, no session-config normalizer).
-- Auto-on-switch uses `defaultsRuntimeToAutoOnProviderSwitch` for both setup writes and `--provider` overrides (`grok` and `pi` only).
-- Pi packet runtime-option policy: model required, reasoning required, speed optional.
-- README Pi prerequisites include leftover `.pi/skills` preservation and a tested-pair placeholder for issue #15.
+- Pi is a packet-only provider: launch `npx --yes @automatalabs/pi-acp`, empty env, `pi-stored-credentials`, redact stderr, exec false.
+- Auto-on-switch uses `defaultsRuntimeToAutoOnProviderSwitch` for `grok` and `pi`.
+- Runtime options: model required, reasoning required, speed optional; no Pi metadata normalizer.
+- Live-tested pair (2026-08-27): `pi 0.84.3` and `@automatalabs/pi-acp` 0.6.1 on Darwin 25.6.0 arm64. Not a user-config pin.
 
 ## Shared Learnings
 
 - `SKILL_TARGETS` must include `pi` when the enum gains it.
-- `findConfigOption` matches Pi reasoning via `category: "thought_level"`; setter logs use option id `thinkingLevel`.
+- `findConfigOption` matches Pi reasoning via `category: "thought_level"`.
+- Empty HOME still lets the adapter initialize; missing advertised `pi-stored-credentials` is the fail-closed fixture path.
 
 ## Open Risks
 
-- Unpinned `@automatalabs/pi-acp` may differ from the issue #15 0.4.0 probe. Live packet on task_05 records the pair or documents why the placeholder stayed.
+- Unpinned npx can resolve a newer adapter than 0.6.1.
+- Empty-HOME live missing-auth produced `Internal error` rather than the unavailable retry message.
 
 ## Handoffs
 
-- task_05: attempt one redacted live Pi packet; replace README placeholder on success; never persist secrets.
+- None. Packet complete.

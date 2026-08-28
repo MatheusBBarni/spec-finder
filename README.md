@@ -27,7 +27,7 @@ Before selecting Grok Build in `setup` or running a packet with `--provider grok
 
 ### Pi prerequisites
 
-Pi is currently packet-only in source. The live-tested Pi and `@automatalabs/pi-acp` pair will be recorded here after a redacted packet on [issue #15](https://github.com/MatheusBBarni/spec-finder/issues/15). Until that packet completes, this is a placeholder rather than a compatibility promise. Packet launch is unpinned `npx --yes @automatalabs/pi-acp`, which can resolve a newer adapter than a prior probe. Do not pin an adapter version in user config. Pi is not certified for one-turn `exec`.
+Pi is currently packet-only in source. [Issue #15's redacted validation evidence](https://github.com/MatheusBBarni/spec-finder/issues/15) records `pi 0.84.3` with unpinned `npx --yes @automatalabs/pi-acp@0.6.1` on Darwin 25.6.0 arm64: with stored Pi credentials, `--provider pi` packet execution completed with `auto` model, reasoning, and speed defaults plus a final-report handoff in the same ACP session. Explicit model `anthropic/claude-sonnet-4` failed before prompting because it was not an advertised configuration value. Stderr was redacted to the generic diagnostic. This is not a compatibility promise for later Pi or adapter releases; unpinned `npx` can resolve a newer adapter than this probe. Do not pin an adapter version in user config. Pi is not certified for one-turn `exec`.
 
 Before selecting Pi in `setup` or running a packet with `--provider pi`:
 
