@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Apply Pi session-config policy and ACP fixtures
 type: backend
 complexity: medium
@@ -50,10 +50,10 @@ Make Pi packet sessions apply model and reasoning through advertised ACP session
 
 ## Subtasks
 
-- [ ] 02.1 Extend packet runtime-option policy so Pi requires model and reasoning and leaves speed optional.
-- [ ] 02.2 Add Pi auth, auto-default, apply-or-fail, unsupported-speed, and redact fixtures using the existing mock agent, without Grok metadata normalizer.
-- [ ] 02.3 Prove implementation and report turns share one Pi session, following the Grok engine/client analog.
-- [ ] 02.4 Run focused ACP suites and `bun run verify`; record policy picks in memory.
+- [x] 02.1 Extend packet runtime-option policy so Pi requires model and reasoning and leaves speed optional.
+- [x] 02.2 Add Pi auth, auto-default, apply-or-fail, unsupported-speed, and redact fixtures using the existing mock agent, without Grok metadata normalizer.
+- [x] 02.3 Prove implementation and report turns share one Pi session, following the Grok engine/client analog.
+- [x] 02.4 Run focused ACP suites and `bun run verify`; record policy picks in memory.
 
 ## Implementation Details
 

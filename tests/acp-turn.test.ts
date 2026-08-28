@@ -16,6 +16,11 @@ import {
   type ProviderLaunch,
   type WorkspaceAccess,
 } from "../src/acp-turn.ts"
+import { DEFAULT_CONFIG } from "../src/config.ts"
+import {
+  createPiAuthMethodPreference,
+  resolvePacketProviderLaunch,
+} from "../src/providers.ts"
 
 const fixture = join(import.meta.dir, "fixtures", "mock-agent.ts")
 
@@ -102,6 +107,54 @@ describe("neutral ACP v1 turn core", () => {
 
     await expect(runAcpTurn(request)).rejects.toThrow("Run `grok login` or set XAI_API_KEY")
     expect(await lifecycleSteps(lifecycleLog)).toEqual(["initialize"])
+  })
+
+  test("fails before session creation when Pi stored credentials are not advertised", async () => {
+    const { root, lifecycleLog } = await fixtureContext()
+    const request = makeRequest(root, lifecycleLog, {
+      SPEC_FINDER_TEST_AUTH_METHODS: "oauth",
+    }, {
+      authPreference: createPiAuthMethodPreference(),
+      stderrPolicy: "redact",
+    })
+
+    await expect(runAcpTurn(request)).rejects.toThrow(
+      "Pi authentication unavailable. Run `pi` and `/login`, or set the provider API key, then rerun.",
+    )
+    expect(await lifecycleSteps(lifecycleLog)).toEqual(["initialize"])
+  })
+
+  test("selects advertised Pi stored credentials without copying an API key into launch env", async () => {
+    const { root, lifecycleLog } = await fixtureContext()
+    const prior = process.env.XAI_API_KEY
+    process.env.XAI_API_KEY = "configured-secret"
+    let resolvedEnv: Record<string, string>
+    try {
+      resolvedEnv = resolvePacketProviderLaunch({ ...DEFAULT_CONFIG, provider: "pi" }).env
+    } finally {
+      if (prior === undefined) delete process.env.XAI_API_KEY
+      else process.env.XAI_API_KEY = prior
+    }
+    expect(resolvedEnv).toEqual({})
+    expect(Object.hasOwn(resolvedEnv, "XAI_API_KEY")).toBeFalse()
+
+    const request = makeRequest(root, lifecycleLog, {
+      SPEC_FINDER_TEST_AUTH_METHODS: "pi-stored-credentials",
+      SPEC_FINDER_TEST_EXPECT_AUTH_METHOD: "pi-stored-credentials",
+    }, {
+      authPreference: createPiAuthMethodPreference(),
+      stderrPolicy: "redact",
+    })
+    const result = await runAcpTurn(request)
+
+    expect(result.stopReason).toBe("end_turn")
+    expect(request.launch.env).not.toHaveProperty("XAI_API_KEY")
+    expect(await lifecycleSteps(lifecycleLog)).toEqual([
+      "initialize",
+      "authenticate:pi-stored-credentials",
+      "session/new",
+      "session/prompt",
+    ])
   })
 
   test("does not fall back after a selected Grok authentication attempt fails", async () => {

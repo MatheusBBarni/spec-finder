@@ -7,7 +7,10 @@ import { runTaskPacket } from "../src/engine.ts"
 import type { RunEvent } from "../src/events.ts"
 import { runGit as runCheckpointGit } from "../src/checkpoints.ts"
 import type { CheckpointServiceContract } from "../src/checkpoints.ts"
-import { createGrokAuthMethodPreference } from "../src/providers.ts"
+import {
+  createGrokAuthMethodPreference,
+  createPiAuthMethodPreference,
+} from "../src/providers.ts"
 
 describe("task engine", () => {
   test("returns a typed no-work result for a valid all-complete packet without launching a provider", async () => {
@@ -261,6 +264,82 @@ dependencies: []
       status: "completed",
       reportReference: ".spec-finder/tasks/demo/reports/task_01.md",
     })
+  })
+
+  test("keeps Pi implementation and report turns in one fresh authenticated ACP session", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-engine-pi-"))
+    const packet = join(root, ".spec-finder", "tasks", "demo")
+    await mkdir(packet, { recursive: true })
+    const taskPath = join(packet, "task_01.md")
+    const promptLog = join(root, "prompts.log")
+    const processLog = join(root, "processes.log")
+    const lifecycleLog = join(root, "lifecycle.log")
+    const events: RunEvent[] = []
+    await writeFile(taskPath, `---
+status: pending
+title: Build the mock
+type: test
+complexity: low
+dependencies: []
+---
+
+# Task 01: Build the mock
+
+## Requirements
+
+1. Complete both ACP phases.
+`)
+    const fixture = join(import.meta.dir, "fixtures", "mock-agent.ts")
+    const config = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "pi",
+      model: "auto",
+      reasoning: "auto",
+      speed: "auto",
+      permissions: "approve-all",
+    })
+
+    const result = await runTaskPacket({
+      root,
+      slug: "demo",
+      config,
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: process.execPath,
+        args: [fixture],
+        env: {
+          SPEC_FINDER_TEST_AUTH_METHODS: "pi-stored-credentials",
+          SPEC_FINDER_TEST_EXPECT_AUTH_METHOD: "pi-stored-credentials",
+          SPEC_FINDER_TEST_ADVERTISE_CLOSE: "1",
+          SPEC_FINDER_TEST_REQUEST_PERMISSION: "1",
+          SPEC_FINDER_TEST_PROMPT_LOG: promptLog,
+          SPEC_FINDER_TEST_PROCESS_LOG: processLog,
+          SPEC_FINDER_TEST_LIFECYCLE_LOG: lifecycleLog,
+          SPEC_FINDER_TEST_EMIT_REPORT_SESSION_INFO: "1",
+        },
+        authMethod: null,
+        authPreference: createPiAuthMethodPreference(),
+        stderrPolicy: "redact",
+      },
+    })
+
+    expect(result).toEqual({ ok: true, completed: 1, failed: 0, blocked: 0 })
+    const processIds = (await readFile(processLog, "utf8")).trim().split("\n")
+    expect(processIds).toHaveLength(2)
+    expect(new Set(processIds).size).toBe(1)
+    expect((await readFile(lifecycleLog, "utf8")).trim().split("\n")).toEqual([
+      "initialize",
+      "authenticate:pi-stored-credentials",
+      "session/new",
+      "session/prompt",
+      "session/prompt",
+      "session/close",
+    ])
+    const updates = events.filter((event): event is Extract<RunEvent, { type: "session_update" }> => event.type === "session_update")
+    expect(new Set(updates.map((event) => event.sessionId))).toEqual(new Set(["test-session"]))
+    expect(new Set(updates.map((event) => event.phase))).toEqual(new Set(["implementation", "report"]))
   })
 
   test("keeps Cursor implementation and report turns in one fresh ACP session", async () => {

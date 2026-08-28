@@ -88,7 +88,9 @@ export async function withAcpSession<T>(
       model: options.config.provider === "claude" || options.config.provider === "cursor"
         ? "launch-time"
         : "required",
-      reasoning: options.config.provider === "grok" ? "required" : "optional",
+      reasoning: options.config.provider === "grok" || options.config.provider === "pi"
+        ? "required"
+        : "optional",
       speed: "optional",
     },
     emit: (event) => emitPacketEvent(event, options, activePhase),
