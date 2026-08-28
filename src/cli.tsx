@@ -13,7 +13,7 @@ import {
 const HELP = `spec-finder — skill-driven specifications with an ACP cockpit
 
 Usage:
-  spec-finder setup [--agent claude|codex|cursor|grok] [--model auto|CURATED] [--speed auto|normal|fast] [--local|--global] [--copy]
+  spec-finder setup [--agent claude|codex|cursor|grok|pi] [--model auto|CURATED] [--speed auto|normal|fast] [--local|--global] [--copy]
   spec-finder upgrade
   spec-finder run <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
   spec-finder run --multiple <slug1,slug2,...> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
@@ -31,7 +31,7 @@ Setup mode:
   --local and --global independently choose the installation scope; supply at most one. --copy is
   retained compatibility syntax and is the only installation mode. Repeated or duplicate setup
   options, conflicting scopes, and --symlink are rejected before any writes.
-  Destinations are .claude/skills for Claude and .agents/skills for Codex, Cursor, or Grok Build. A valid v3
+  Destinations are .claude/skills for Claude and .agents/skills for Codex, Cursor, Grok Build, or Pi. A valid v3
   rerun preserves omitted provider, model, speed, and scope values, including a saved custom model.
   Migrated v1/v2 configurations require an explicit first --local or --global choice because their
   historic scope is unknown. Setup summaries say requested model and requested speed; runtime ACP feedback remains

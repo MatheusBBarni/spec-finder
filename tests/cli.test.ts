@@ -24,7 +24,7 @@ async function captureHelp(): Promise<string> {
 describe("CLI help", () => {
   test("publishes the singular setup contract in help and README", async () => {
     const help = await captureHelp()
-    const setupUsage = "spec-finder setup [--agent claude|codex|cursor|grok] [--model auto|CURATED] [--speed auto|normal|fast] [--local|--global] [--copy]"
+    const setupUsage = "spec-finder setup [--agent claude|codex|cursor|grok|pi] [--model auto|CURATED] [--speed auto|normal|fast] [--local|--global] [--copy]"
 
     for (const text of [help, README]) {
       expect(text).toContain(setupUsage)
@@ -61,7 +61,8 @@ describe("CLI help", () => {
     expect(README).not.toContain("those seven")
     expect(README).not.toContain("[--copy|--symlink]")
     expect(README).not.toContain("| Cursor | `.cursor/skills` | `~/.cursor/skills` |")
-    expect(help).not.toContain("[--agent claude|codex|cursor|grok]...")
+    expect(help).not.toContain("[--agent claude|codex|cursor|grok|pi]...")
+    expect(help).toContain("--provider is one of claude, codex, cursor, or grok")
   })
 
   test("keeps the single-slug usage and exposes the opt-in batch grammar", async () => {

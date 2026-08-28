@@ -45,7 +45,7 @@ In an interactive terminal, `setup` resolves exactly one provider and asks for i
 The automation grammar is:
 
 ```text
-spec-finder setup [--agent claude|codex|cursor|grok] [--model auto|CURATED] \
+spec-finder setup [--agent claude|codex|cursor|grok|pi] [--model auto|CURATED] \
   [--speed auto|normal|fast] [--local|--global] [--copy]
 ```
 
@@ -364,7 +364,7 @@ spec-finder config
 ## CLI
 
 ```text
-spec-finder setup [--agent claude|codex|cursor|grok] [--model auto|CURATED] [--speed auto|normal|fast] [--local|--global] [--copy]
+spec-finder setup [--agent claude|codex|cursor|grok|pi] [--model auto|CURATED] [--speed auto|normal|fast] [--local|--global] [--copy]
 spec-finder upgrade
 spec-finder run <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
 spec-finder run --multiple <slug1,slug2,...> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]

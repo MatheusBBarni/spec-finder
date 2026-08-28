@@ -40,7 +40,12 @@ import {
   type SetupResult,
   type SetupSpeed,
 } from "./setup.ts"
-import { getSetupModelChoices, getSetupProfile, isCuratedSetupModel } from "./setup-profile.ts"
+import {
+  defaultsRuntimeToAutoOnProviderSwitch,
+  getSetupModelChoices,
+  getSetupProfile,
+  isCuratedSetupModel,
+} from "./setup-profile.ts"
 import { isValidTaskSlug, loadTaskPacket, validateTasks, type TaskFile } from "./tasks.ts"
 import { CockpitStore } from "./ui/store.ts"
 import { startCockpit, type CockpitSession } from "./ui/cockpit.tsx"
@@ -495,6 +500,7 @@ async function promptForProvider(
       { label: "Codex", value: "codex", hint: "skills in .agents/skills" },
       { label: "Cursor", value: "cursor", hint: "skills in .agents/skills" },
       { label: "Grok Build", value: "grok", hint: "skills in .agents/skills" },
+      { label: "Pi", value: "pi", hint: "skills in .agents/skills" },
     ],
     initialValue,
     required: true,
@@ -993,9 +999,14 @@ function applyRunOverrides(config: SpecFinderConfig, args: readonly string[]): S
   const model = valueFor(args, "--model")
   const reasoning = valueFor(args, "--reasoning")
   const speed = valueFor(args, "--speed")
-  const switchesToGrok = provider === "grok" && config.provider !== "grok"
-  const selectedModel = model ?? (switchesToGrok ? "auto" : undefined)
-  const selectedReasoning = reasoning ?? (switchesToGrok ? "auto" : undefined)
+  const selectedProvider = provider !== undefined && (PROVIDERS as readonly string[]).includes(provider)
+    ? provider as ProviderName
+    : undefined
+  const switchesToAuto = selectedProvider !== undefined
+    && defaultsRuntimeToAutoOnProviderSwitch(selectedProvider)
+    && config.provider !== selectedProvider
+  const selectedModel = model ?? (switchesToAuto ? "auto" : undefined)
+  const selectedReasoning = reasoning ?? (switchesToAuto ? "auto" : undefined)
   return applyRuntimeConfigOverrides(config, {
     ...(provider ? { provider: provider as SpecFinderConfig["provider"] } : {}),
     ...(selectedModel === undefined ? {} : { model: selectedModel }),

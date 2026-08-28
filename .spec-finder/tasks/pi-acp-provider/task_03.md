@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Expose Pi in setup/run UX and auto-on-switch
 type: backend
 complexity: medium
@@ -50,11 +50,11 @@ Let operators choose Pi in interactive and flagged setup, and override a run wit
 
 ## Subtasks
 
-- [ ] 03.1 Add the Pi picker row and wire setup/run consumers of the task_01 auto-on-switch predicate, including changed-to-Pi reasoning defaults in setup writes.
-- [ ] 03.2 Accept `--agent pi` / `--provider pi`, reject non-auto Pi setup models, and preserve saved Pi reruns.
-- [ ] 03.3 Update CLI help grammar and the matching README usage line required by `tests/cli.test.ts`, without writing the full Pi README section.
-- [ ] 03.4 Add command tests mirroring Grok setup and runtime-override coverage.
-- [ ] 03.5 Run focused suites and `bun run verify`.
+- [x] 03.1 Add the Pi picker row and wire setup/run consumers of the task_01 auto-on-switch predicate, including changed-to-Pi reasoning defaults in setup writes.
+- [x] 03.2 Accept `--agent pi` / `--provider pi`, reject non-auto Pi setup models, and preserve saved Pi reruns.
+- [x] 03.3 Update CLI help grammar and the matching README usage line required by `tests/cli.test.ts`, without writing the full Pi README section.
+- [x] 03.4 Add command tests mirroring Grok setup and runtime-override coverage.
+- [x] 03.5 Run focused suites and `bun run verify`.
 
 ## Implementation Details
 

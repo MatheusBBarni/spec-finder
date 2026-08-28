@@ -112,6 +112,32 @@ describe("setup", () => {
     expect((await loadConfig(savedRoot)).reasoning).toBe("low")
   })
 
+  test("uses auto reasoning for changed-to-Pi setup without overwriting saved Pi intent", async () => {
+    const changedRoot = await tempRoot("spec-finder-pi-changed-")
+    await mkdir(join(changedRoot, ".spec-finder"), { recursive: true })
+    await writeFile(join(changedRoot, ".spec-finder", "config.json"), JSON.stringify({
+      ...DEFAULT_CONFIG,
+      provider: "codex",
+      reasoning: "high",
+      setup: { status: "configured", scope: "local", destination: ".agents/skills" },
+    }))
+    await setupWorkspace(changedRoot, request("pi"))
+    expect((await loadConfig(changedRoot)).provider).toBe("pi")
+    expect((await loadConfig(changedRoot)).reasoning).toBe("auto")
+    expect((await loadConfig(changedRoot)).setup).toMatchObject({ destination: ".agents/skills" })
+
+    const savedRoot = await tempRoot("spec-finder-pi-saved-")
+    await mkdir(join(savedRoot, ".spec-finder"), { recursive: true })
+    await writeFile(join(savedRoot, ".spec-finder", "config.json"), JSON.stringify({
+      ...DEFAULT_CONFIG,
+      provider: "pi",
+      reasoning: "low",
+      setup: { status: "configured", scope: "local", destination: ".agents/skills" },
+    }))
+    await setupWorkspace(savedRoot, request("pi"))
+    expect((await loadConfig(savedRoot)).reasoning).toBe("low")
+  })
+
   test("preserves legacy Cursor content and unrelated selected-root skills byte-for-byte", async () => {
     const root = await tempRoot()
     const legacy = join(root, ".cursor", "skills")

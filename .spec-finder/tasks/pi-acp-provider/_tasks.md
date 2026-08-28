@@ -8,7 +8,7 @@ The numeric ID is the canonical execution position. Every dependency points to a
 |---|---|---|---|---|---|---|
 | task_01 | Add Pi provider registries and packet launch recipe | backend | high | completed | [] | root |
 | task_02 | Apply Pi session-config policy and ACP fixtures | backend | medium | completed | task_01 | parallel with task_03 |
-| task_03 | Expose Pi in setup/run UX and auto-on-switch | backend | medium | pending | task_01 | parallel with task_02 |
+| task_03 | Expose Pi in setup/run UX and auto-on-switch | backend | medium | completed | task_01 | parallel with task_02 |
 | task_04 | Document packet-only Pi | docs | low | pending | task_02, task_03 | after both |
 | task_05 | Record live Pi packet evidence | test | medium | pending | task_04 | leaf |
 
