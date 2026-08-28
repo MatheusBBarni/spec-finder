@@ -43,6 +43,7 @@ describe("CLI help", () => {
         ".agents/skills",
         ".claude/skills",
         "Grok Build",
+        "Pi",
         "not migrated",
       ]) {
         expect(text).toContain(phrase)

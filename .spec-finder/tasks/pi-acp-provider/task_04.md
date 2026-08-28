@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Document packet-only Pi
 type: docs
 complexity: low
@@ -50,10 +50,10 @@ Publish the same packet-only Pi contract operators already see in setup and help
 
 ## Subtasks
 
-- [ ] 04.1 Add Pi to the supported-provider list, setup model table, and runtime config field docs without dropping the other four providers.
-- [ ] 04.2 Add a Grok-shaped Pi prerequisites section covering login-outside, packet-only, leftover `.pi/skills`, and a tested-pair placeholder.
-- [ ] 04.3 Align any remaining help/README phrases `tests/cli.test.ts` still requires.
-- [ ] 04.4 Run `tests/cli.test.ts` and `bun run verify`.
+- [x] 04.1 Add Pi to the supported-provider list, setup model table, and runtime config field docs without dropping the other four providers.
+- [x] 04.2 Add a Grok-shaped Pi prerequisites section covering login-outside, packet-only, leftover `.pi/skills`, and a tested-pair placeholder.
+- [x] 04.3 Align any remaining help/README phrases `tests/cli.test.ts` still requires.
+- [x] 04.4 Run `tests/cli.test.ts` and `bun run verify`.
 
 ## Implementation Details
 

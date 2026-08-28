@@ -2,7 +2,7 @@
 
 Spec Finder is a skill-driven specification framework with a local ACP cockpit, heavily inspired by Compozy. It brings back the compact workflow that made pre-0.3 Compozy useful—idea → PRD → TechSpec → executable tasks—without adding a daemon or a second source of truth.
 
-Specifications stay in the repository. Skills are portable Agent Skills. Claude, Codex, Cursor, and Grok Build run through their own ACP harnesses while Spec Finder owns task ordering, lifecycle state, permissions, and evidence reports.
+Specifications stay in the repository. Skills are portable Agent Skills. Claude, Codex, Cursor, Grok Build, and Pi run through their own ACP harnesses while Spec Finder owns task ordering, lifecycle state, permissions, and evidence reports.
 
 ## Requirements
 
@@ -12,8 +12,9 @@ Specifications stay in the repository. Skills are portable Agent Skills. Claude,
   - Codex: `@agentclientprotocol/codex-acp`
   - Cursor: `cursor-agent acp`
   - Grok Build: `grok --no-auto-update agent stdio`
+  - Pi: `npx --yes @automatalabs/pi-acp`
 
-The default Claude and Codex profiles use `npx --yes`, so their adapters can be resolved on demand. Cursor requires the Cursor CLI on `PATH`; Grok Build requires the `grok` binary on `PATH`. Spec Finder does not install provider binaries, authenticate providers, or run provider update commands.
+The default Claude, Codex, and Pi profiles use `npx --yes`, so their adapters can be resolved on demand. Cursor requires the Cursor CLI on `PATH`; Grok Build requires the `grok` binary on `PATH`. Spec Finder does not install provider binaries, authenticate providers, or run provider update commands.
 
 ### Grok Build prerequisites
 
@@ -23,6 +24,16 @@ Before selecting Grok Build in `setup` or running a packet with `--provider grok
 
 - Confirm that `grok` is available on `PATH` and run `grok --version`. If the binary is missing, install or repair Grok Build using xAI's documented method, put the resulting executable on `PATH`, start a fresh shell if needed, and repeat the version check. Spec Finder does not install, replace, or update the binary.
 - Authenticate outside Spec Finder with `grok login`. An existing cached login is sufficient. In a headless or non-browser environment, a nonblank `XAI_API_KEY` is an alternative: when it is set and the ACP agent advertises `xai.api_key`, Spec Finder selects that method; blank values are treated as absent, and otherwise it uses advertised cached-token authentication. The API-key selection path has redacted fixture coverage; no live API key is required. Keep credentials out of configuration files, task packets, logs, and this repository; Spec Finder never stores or prints a key value.
+
+### Pi prerequisites
+
+Pi is currently packet-only in source. The live-tested Pi and `@automatalabs/pi-acp` pair will be recorded here after a redacted packet on [issue #15](https://github.com/MatheusBBarni/spec-finder/issues/15). Until that packet completes, this is a placeholder rather than a compatibility promise. Packet launch is unpinned `npx --yes @automatalabs/pi-acp`, which can resolve a newer adapter than a prior probe. Do not pin an adapter version in user config. Pi is not certified for one-turn `exec`.
+
+Before selecting Pi in `setup` or running a packet with `--provider pi`:
+
+- Confirm that you already use Pi locally. Spec Finder does not install Pi, start `/login`, or inspect credential files. If `npx` cannot resolve `@automatalabs/pi-acp`, repair network or npm access outside Spec Finder and rerun.
+- Authenticate outside Spec Finder with `pi` and `/login`, or set a provider API key, then rerun. Packet runs fail before useful work when advertised `pi-stored-credentials` is missing. Keep credentials out of configuration files, task packets, logs, and this repository; Spec Finder never stores or prints a key value.
+- Leftover `.pi/skills` and `~/.pi/agent/skills` content is user-owned. Setup copies managed skills only to `.agents/skills` (or `~/.agents/skills` for global scope) and does not migrate, merge, or delete `.pi/skills`.
 
 ## Install
 
@@ -61,10 +72,13 @@ The `.spec-finder/config.json` and `.spec-finder/tasks/` scaffolding always rema
 | Codex | `auto`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` | `gpt-5.6-luna` | `.agents/skills` | `~/.agents/skills` |
 | Cursor | `auto` | `auto` | `.agents/skills` | `~/.agents/skills` |
 | Grok Build | `auto` | `auto` | `.agents/skills` | `~/.agents/skills` |
+| Pi | `auto` | `auto` | `.agents/skills` | `~/.agents/skills` |
 
 Existing v1 and v2 configuration files are read through an in-memory migration and are not rewritten until setup succeeds. Their historic installation scope is unknown: an interactive first setup requires an explicit scope choice, while a non-interactive first setup must include `--local` or `--global`; Spec Finder never guesses the old scope. A fresh workspace keeps the local default. Successful setup writes version 3 metadata with the provider-derived logical destination and selected scope.
 
 Cursor always installs managed skills in `.agents/skills` (or `~/.agents/skills` for global scope). Existing `.cursor/skills` content is legacy user content and is preserved untouched: setup performs no automatic migration, cleanup, merger, or deletion. When that path exists, the completion line says `legacy Cursor skills: preserved (not migrated)`; otherwise it reports that the path was absent and not migrated. Unrelated skills in the selected destination are preserved as well.
+
+Pi always installs managed skills in `.agents/skills` (or `~/.agents/skills` for global scope). Existing `.pi/skills` content is leftover user content and is preserved untouched: setup performs no automatic migration, cleanup, merger, or deletion.
 
 Setup does not launch a provider or perform live capability discovery. Completion lines intentionally say `requested model` and `requested speed`; those values describe setup intent, not a guarantee that an account or client can apply them. Runtime ACP feedback is authoritative and may report a capability as applied, defaulted, or unsupported after a session starts.
 
@@ -245,9 +259,9 @@ spec-finder run my-feature \
 
 Key behavior:
 
-- `provider`: `claude`, `codex`, `cursor`, or `grok`. Grok is supported by packet `run`; it is not currently certified for one-turn `exec`. Switching an existing packet run to Grok defaults omitted model and reasoning overrides to `auto`, so values saved for another provider are not sent to Grok; explicit `--model` and `--reasoning` values still win.
-- `model`: `auto` or a provider model ID. Claude uses `ANTHROPIC_MODEL`; Cursor receives `--model`; Codex uses advertised ACP session options. Grok Build leaves `auto` to provider defaults and applies an explicit model through an advertised ACP session option or fails clearly.
-- `reasoning`: `auto`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`. Grok Build leaves `auto` to provider defaults and applies an explicit choice through an advertised ACP session option or fails clearly; other providers apply it only when advertised.
+- `provider`: `claude`, `codex`, `cursor`, `grok`, or `pi`. Grok and Pi are supported by packet `run`; they are not currently certified for one-turn `exec`. Switching an existing packet run to Grok or Pi defaults omitted model and reasoning overrides to `auto`, so values saved for another provider are not sent; explicit `--model` and `--reasoning` values still win.
+- `model`: `auto` or a provider model ID. Claude uses `ANTHROPIC_MODEL`; Cursor receives `--model`; Codex uses advertised ACP session options. Grok Build and Pi leave `auto` to provider defaults and apply an explicit model through an advertised ACP session option or fail clearly.
+- `reasoning`: `auto`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`. Grok Build and Pi leave `auto` to provider defaults and apply an explicit choice through an advertised ACP session option or fail clearly; other providers apply it only when advertised.
 - `speed`: `auto`, `normal`, or `fast`. Unsupported providers continue with a truthful `unsupported` cockpit outcome.
 - `permissions`: `prompt` cancels permission requests in the read-only cockpit with a visible notice; with `--no-ui`, it prompts in an interactive terminal and cancels when input is unavailable. `approve-all` automatically chooses an allow option; `deny` automatically chooses a reject option.
 - `auto_commit`: `false` by default. Set it to `true` to enable one local recovery checkpoint after each task that passes implementation, verification, report, and status gates. The setting is configuration-only; invocation tokens such as `auto-commit=true|false` are rejected.
@@ -263,7 +277,7 @@ spec-finder checkpoint complete <task_slug> <task_id>
 
 `begin` must succeed before task execution, except when Git HEAD is missing (unborn branch / no commits): checkpoints are skipped, no initial commit is created, and task work continues. `complete` runs only after the report and `status: completed` gate. A blocked delivery stops downstream tasks while preserving the verified task record. Resolve the local Git condition and rerun the packet normally; the rerun retries delivery without rerunning the verified implementation. Set `auto_commit` back to `false` to keep the existing no-commit flow.
 
-Provider process commands are built into Spec Finder for Claude, Codex, Cursor, and Grok Build. They are implementation details rather than user configuration. The Grok packet launch is `grok --no-auto-update agent stdio`; it requires the external binary and authentication prerequisites above. Spec Finder also follows each provider's default ACP mode: mode IDs are advertised by the agent and are not portable across providers. Final reports are always required in `reports/`, completed tasks are skipped, and the run stops after a task failure.
+Provider process commands are built into Spec Finder for Claude, Codex, Cursor, Grok Build, and Pi. They are implementation details rather than user configuration. The Grok packet launch is `grok --no-auto-update agent stdio`; it requires the external binary and authentication prerequisites above. The Pi packet launch is `npx --yes @automatalabs/pi-acp`; it requires the authentication prerequisites above and is not a user-config pin. Spec Finder also follows each provider's default ACP mode: mode IDs are advertised by the agent and are not portable across providers. Final reports are always required in `reports/`, completed tasks are skipped, and the run stops after a task failure.
 
 ## One-turn `exec`
 
@@ -285,7 +299,7 @@ Exactly one non-empty positional prompt is required. Prompt text is quoted posit
 
 The four overrides are validated against the existing configuration schema:
 
-- `--provider NAME`: `claude`, `codex`, `cursor`, or `grok`. Grok is listed for the shared configuration grammar, but remains packet-only until its separate exec certification passes.
+- `--provider NAME`: `claude`, `codex`, `cursor`, `grok`, or `pi`. Grok and Pi are listed for the shared configuration grammar, but remain packet-only until their separate exec certification passes.
 - `--model ID`: any non-empty model ID; `auto` is the default profile value.
 - `--reasoning LEVEL`: `auto`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`.
 - `--speed MODE`: `auto`, `normal`, or `fast`.
@@ -294,7 +308,7 @@ Overrides apply after profile selection. Model values use the existing provider 
 
 Runtime precedence is exactly `CLI flags > nearest repository .spec-finder/config.json > ~/.spec-finder/config.json`. The repository and user files are complete runtime profiles selected by fallback; fields are not merged. An existing but invalid repository profile fails clearly and does not fall through to the user file. When no repository profile exists, the user profile must be valid. Configuration resolution completes before provider startup.
 
-The names above are the values accepted by the shared configuration schema, not a claim that every value is currently launchable through `exec`. Task 09's certification is currently blocked, so the source-owned `exec` registry marks Claude, Codex, Cursor, and Grok Build unavailable for real exec launches. Grok Build's source-owned certification entry remains `exec: false`; packet launch resolution is intentionally independent of that gate. A real provider is rejected before spawn until its complete certification matrix passes. Grok Build is packet-only for now: packet `run` provider support is a separate compatibility path and is not disabled by this exec gate.
+The names above are the values accepted by the shared configuration schema, not a claim that every value is currently launchable through `exec`. Task 09's certification is currently blocked, so the source-owned `exec` registry marks Claude, Codex, Cursor, Grok Build, and Pi unavailable for real exec launches. Grok Build and Pi source-owned certification entries remain `exec: false`; packet launch resolution is intentionally independent of that gate. A real provider is rejected before spawn until its complete certification matrix passes. Grok Build and Pi are packet-only for now: packet `run` provider support is a separate compatibility path and is not disabled by this exec gate.
 
 ### Workspace, permissions, and host access
 
@@ -375,7 +389,7 @@ spec-finder config
 spec-finder version
 ```
 
-The `--provider` option accepts `claude`, `codex`, `cursor`, or `grok`. Grok Build remains packet-only; `spec-finder exec --provider grok` is rejected before provider spawn while its separate packet launch remains available.
+The `--provider` option accepts `claude`, `codex`, `cursor`, `grok`, or `pi`. Grok Build and Pi remain packet-only; `spec-finder exec --provider grok` and `spec-finder exec --provider pi` are rejected before provider spawn while their separate packet launches remain available.
 
 `upgrade` runs `npm install --global spec-finder@latest`, keeping npm as the package authority. It refreshes the installed package only and does not recopy agent skill destinations. Existing workspaces must re-run `spec-finder setup` to install newly shipped skills such as the TDD pack.
 
