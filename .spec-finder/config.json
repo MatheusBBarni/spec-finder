@@ -1,8 +1,8 @@
 {
   "version": 2,
   "provider": "grok",
-  "model": "grok-4.6",
-  "reasoning": "xhigh",
+  "model": "auto",
+  "reasoning": "auto",
   "speed": "normal",
   "permissions": "prompt",
   "auto_commit": true
