@@ -68,6 +68,13 @@ const PROVIDER_LAUNCHES: Readonly<Record<ProviderName, Readonly<ProviderLaunch>>
     sessionConfigNormalizer: normalizeGrokSessionConfigOptions,
     stderrPolicy: "redact",
   },
+  pi: {
+    command: "npx",
+    args: ["--yes", "@automatalabs/pi-acp"],
+    env: {},
+    authMethod: null,
+    stderrPolicy: "redact",
+  },
 }
 
 export interface ProviderCertification {
@@ -80,6 +87,7 @@ export const EXEC_PROVIDER_CERTIFICATION: Readonly<Record<ProviderName, Provider
     codex: Object.freeze({ exec: false }),
     cursor: Object.freeze({ exec: false }),
     grok: Object.freeze({ exec: false }),
+    pi: Object.freeze({ exec: false }),
   })
 
 export class ProviderCertificationError extends Error {
@@ -161,7 +169,9 @@ export function resolveProviderLaunch(
   }
   const authPreference = provider === "grok"
     ? createGrokAuthMethodPreference(hasNonblankXaiApiKey(process.env.XAI_API_KEY))
-    : entry.authPreference
+    : provider === "pi"
+      ? createPiAuthMethodPreference()
+      : entry.authPreference
   return {
     mode,
     command: entry.command,
@@ -176,6 +186,15 @@ export function resolveProviderLaunch(
 
 function hasNonblankXaiApiKey(value: string | undefined): boolean {
   return value !== undefined && /\S/u.test(value)
+}
+
+/** Pi chooses only advertised stored credentials; keys are never copied into launch env. */
+export function createPiAuthMethodPreference(): AuthMethodPreference {
+  return {
+    methodIds: ["pi-stored-credentials"],
+    unavailableMessage:
+      "Pi authentication unavailable. Run `pi` and `/login`, or set the provider API key, then rerun.",
+  }
 }
 
 /** Grok chooses only advertised methods; the key itself remains inherited. */
@@ -319,5 +338,6 @@ export function providerLabel(provider: ProviderName): string {
   if (provider === "claude") return "Claude"
   if (provider === "codex") return "Codex"
   if (provider === "cursor") return "Cursor"
+  if (provider === "pi") return "Pi"
   return "Grok Build"
 }

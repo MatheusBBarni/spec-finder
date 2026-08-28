@@ -206,6 +206,25 @@ describe("config", () => {
     expect(overridden.model).toBe("custom")
     expect(overridden.setup).toBe(configured.setup)
     expect(applyRuntimeConfigOverrides(configured, { provider: "grok", model: "auto" }).provider).toBe("grok")
+    expect(applyRuntimeConfigOverrides(configured, { provider: "pi", model: "auto" }).provider).toBe("pi")
     expect(() => applyRuntimeConfigOverrides(configured, { provider: "not-a-provider" as never })).toThrow(ConfigError)
+  })
+
+  test("accepts pi as a persisted runtime provider with the agents skill destination", () => {
+    const config = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "pi",
+      model: "auto",
+      reasoning: "auto",
+      setup: { status: "configured", scope: "local", destination: ".agents/skills" },
+    })
+
+    expect(config.provider).toBe("pi")
+    expect(config.model).toBe("auto")
+    expect(config.setup).toEqual({ status: "configured", scope: "local", destination: ".agents/skills" })
+    expect(() => parseConfig({
+      ...config,
+      setup: { status: "configured", scope: "local", destination: ".claude/skills" },
+    })).toThrow(ConfigError)
   })
 })

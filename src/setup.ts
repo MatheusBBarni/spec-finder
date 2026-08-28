@@ -14,7 +14,12 @@ import {
   type SetupScope as ConfigSetupScope,
   type SpecFinderConfig,
 } from "./config.ts"
-import { getSetupProfile, isCuratedSetupModel, type SetupDestination } from "./setup-profile.ts"
+import {
+  defaultsRuntimeToAutoOnProviderSwitch,
+  getSetupProfile,
+  isCuratedSetupModel,
+  type SetupDestination,
+} from "./setup-profile.ts"
 import { CONFIG_FILE, SPEC_DIR, TASKS_DIR, bundledSkillsPath } from "./paths.ts"
 
 export const SKILL_TARGETS = {
@@ -22,6 +27,7 @@ export const SKILL_TARGETS = {
   codex: getSetupProfile("codex").destination,
   cursor: getSetupProfile("cursor").destination,
   grok: getSetupProfile("grok").destination,
+  pi: getSetupProfile("pi").destination,
 } as const
 
 export type SkillTarget = keyof typeof SKILL_TARGETS
@@ -225,7 +231,8 @@ function createConfigCandidate(
   request: SetupRequest,
   destination: SetupDestination,
 ): SpecFinderConfig {
-  const reasoning = request.provider === "grok" && previous.provider !== "grok"
+  const reasoning = defaultsRuntimeToAutoOnProviderSwitch(request.provider)
+    && previous.provider !== request.provider
     ? "auto"
     : previous.reasoning
   return {

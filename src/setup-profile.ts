@@ -42,6 +42,13 @@ const PROFILE_BY_PROVIDER: Readonly<Record<ProviderName, SetupProviderProfile>> 
     models: Object.freeze([]),
     defaultModel: "auto",
   }),
+  pi: Object.freeze({
+    provider: "pi",
+    label: "Pi",
+    destination: ".agents/skills",
+    models: Object.freeze([]),
+    defaultModel: "auto",
+  }),
 })
 
 /** Alias kept explicit for consumers that want to inspect the whole policy. */
@@ -63,4 +70,9 @@ export function isCuratedSetupModel(provider: ProviderName, model: string): bool
 
 export function isSetupDestination(value: unknown): value is SetupDestination {
   return typeof value === "string" && (SETUP_DESTINATIONS as readonly string[]).includes(value)
+}
+
+/** Switching to Grok or Pi defaults omitted model/reasoning to `auto`. */
+export function defaultsRuntimeToAutoOnProviderSwitch(provider: ProviderName): boolean {
+  return provider === "grok" || provider === "pi"
 }

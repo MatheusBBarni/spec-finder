@@ -8,7 +8,7 @@ import {
 } from "./setup-profile.ts"
 export type { SetupDestination } from "./setup-profile.ts"
 
-export const PROVIDERS = ["claude", "codex", "cursor", "grok"] as const
+export const PROVIDERS = ["claude", "codex", "cursor", "grok", "pi"] as const
 export type ProviderName = (typeof PROVIDERS)[number]
 
 export const REASONING_VALUES = ["auto", "low", "medium", "high", "xhigh", "max", "ultra"] as const

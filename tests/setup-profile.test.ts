@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { PROVIDERS } from "../src/config.ts"
 import {
+  defaultsRuntimeToAutoOnProviderSwitch,
   getSetupModelChoices,
   getSetupProfile,
   isCuratedSetupModel,
@@ -22,7 +23,9 @@ describe("setup provider policy", () => {
             ? "Codex"
             : provider === "cursor"
               ? "Cursor"
-              : "Grok Build",
+              : provider === "pi"
+                ? "Pi"
+                : "Grok Build",
       )
       expect(isSetupDestination(profile.destination)).toBeTrue()
       expect(["auto", ...profile.models]).toContain(profile.defaultModel)
@@ -56,6 +59,13 @@ describe("setup provider policy", () => {
       models: [],
       defaultModel: "auto",
     })
+    expect(getSetupProfile("pi")).toMatchObject({
+      label: "Pi",
+      destination: ".agents/skills",
+      models: [],
+      defaultModel: "auto",
+    })
+    expect(isCuratedSetupModel("pi", "anthropic/claude-sonnet-4")).toBeFalse()
   })
 
   test("keeps auto universal without widening the curated provider lists", () => {
@@ -65,5 +75,13 @@ describe("setup provider policy", () => {
       expect(getSetupModelChoices(provider)).toEqual(["auto", ...profile.models])
       expect(isCuratedSetupModel(provider, "not-a-curated-model")).toBeFalse()
     }
+  })
+
+  test("defaults omitted runtime model and reasoning only when switching to grok or pi", () => {
+    expect(defaultsRuntimeToAutoOnProviderSwitch("grok")).toBeTrue()
+    expect(defaultsRuntimeToAutoOnProviderSwitch("pi")).toBeTrue()
+    expect(defaultsRuntimeToAutoOnProviderSwitch("claude")).toBeFalse()
+    expect(defaultsRuntimeToAutoOnProviderSwitch("codex")).toBeFalse()
+    expect(defaultsRuntimeToAutoOnProviderSwitch("cursor")).toBeFalse()
   })
 })

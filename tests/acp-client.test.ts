@@ -7,6 +7,7 @@ import { DEFAULT_CONFIG, parseConfig } from "../src/config.ts"
 import type { AcpTurnPhase, RunEvent } from "../src/events.ts"
 import {
   createGrokAuthMethodPreference,
+  createPiAuthMethodPreference,
   normalizeGrokSessionConfigOptions,
 } from "../src/providers.ts"
 import { GROK_BUILD_1_0_SESSION_CONFIG_METADATA } from "./fixtures/grok-session-config.ts"
@@ -408,6 +409,283 @@ describe("ACP client", () => {
     expect(JSON.stringify(events)).not.toContain(sentinel)
   })
 
+  test("leaves auto Pi runtime choices to provider defaults", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-pi-auto-"))
+    const fixture = join(import.meta.dir, "fixtures", "mock-agent.ts")
+    const lifecycleLog = join(root, "lifecycle.log")
+    const events: RunEvent[] = []
+    const config = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "pi",
+      model: "auto",
+      reasoning: "auto",
+      speed: "auto",
+      permissions: "approve-all",
+    })
+
+    const result = await runAcpTurn({
+      root,
+      config,
+      prompt: "Run one provider-default Pi fixture turn",
+      taskId: "task_01",
+      phase: "implementation",
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: process.execPath,
+        args: [fixture],
+        env: {
+          SPEC_FINDER_TEST_AUTH_METHODS: "pi-stored-credentials",
+          SPEC_FINDER_TEST_CONFIG_OPTIONS: JSON.stringify(piSessionConfigOptions()),
+          SPEC_FINDER_TEST_LIFECYCLE_LOG: lifecycleLog,
+        },
+        authMethod: null,
+        authPreference: createPiAuthMethodPreference(),
+        stderrPolicy: "redact",
+      },
+    })
+
+    expect(result.stopReason).toBe("end_turn")
+    expect(await readFile(lifecycleLog, "utf8")).not.toContain("session/set_config_option")
+    expect(events.filter((event) => event.type === "runtime_option")).toEqual([
+      { type: "runtime_option", name: "model", requested: "auto", outcome: "default" },
+      { type: "runtime_option", name: "reasoning", requested: "auto", outcome: "default" },
+      { type: "runtime_option", name: "speed", requested: "auto", outcome: "default" },
+    ])
+  })
+
+  test("applies explicit Pi model and reasoning through advertised thought_level options", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-pi-apply-"))
+    const fixture = join(import.meta.dir, "fixtures", "mock-agent.ts")
+    const lifecycleLog = join(root, "lifecycle.log")
+    const events: RunEvent[] = []
+    const config = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "pi",
+      model: "anthropic/claude-sonnet-4",
+      reasoning: "high",
+      speed: "auto",
+      permissions: "approve-all",
+    })
+
+    const result = await runAcpTurn({
+      root,
+      config,
+      prompt: "Run one explicit Pi fixture turn",
+      taskId: "task_01",
+      phase: "implementation",
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: process.execPath,
+        args: [fixture],
+        env: {
+          SPEC_FINDER_TEST_AUTH_METHODS: "pi-stored-credentials",
+          SPEC_FINDER_TEST_CONFIG_OPTIONS: JSON.stringify(piSessionConfigOptions()),
+          SPEC_FINDER_TEST_LIFECYCLE_LOG: lifecycleLog,
+        },
+        authMethod: null,
+        authPreference: createPiAuthMethodPreference(),
+        stderrPolicy: "redact",
+      },
+    })
+
+    expect(result.stopReason).toBe("end_turn")
+    expect(await readFile(lifecycleLog, "utf8")).toContain("session/set_config_option:model:anthropic/claude-sonnet-4")
+    expect(await readFile(lifecycleLog, "utf8")).toContain("session/set_config_option:thinkingLevel:high")
+    expect(events).toContainEqual({
+      type: "runtime_option",
+      name: "model",
+      requested: "anthropic/claude-sonnet-4",
+      outcome: "applied",
+    })
+    expect(events).toContainEqual({
+      type: "runtime_option",
+      name: "reasoning",
+      requested: "high",
+      outcome: "applied",
+    })
+    expect(events).toContainEqual({ type: "runtime_option", name: "speed", requested: "auto", outcome: "default" })
+  })
+
+  test("fails explicit Pi options before prompting when the generic setter is rejected", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-pi-rejects-config-"))
+    const fixture = join(import.meta.dir, "fixtures", "mock-agent.ts")
+    const lifecycleLog = join(root, "lifecycle.log")
+    const config = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "pi",
+      model: "anthropic/claude-sonnet-4",
+      reasoning: "high",
+      speed: "auto",
+      permissions: "approve-all",
+    })
+
+    await expect(runAcpTurn({
+      root,
+      config,
+      prompt: "This must not prompt",
+      taskId: "task_01",
+      phase: "implementation",
+      signal: new AbortController().signal,
+      emit: () => {},
+      interactivePermissions: false,
+      providerLaunch: {
+        command: process.execPath,
+        args: [fixture],
+        env: {
+          SPEC_FINDER_TEST_AUTH_METHODS: "pi-stored-credentials",
+          SPEC_FINDER_TEST_CONFIG_OPTIONS: JSON.stringify(piSessionConfigOptions()),
+          SPEC_FINDER_TEST_REJECT_CONFIG_OPTION: "1",
+          SPEC_FINDER_TEST_LIFECYCLE_LOG: lifecycleLog,
+        },
+        authMethod: null,
+        authPreference: createPiAuthMethodPreference(),
+        stderrPolicy: "redact",
+      },
+    })).rejects.toThrow("unable to set model configuration option")
+
+    expect((await readFile(lifecycleLog, "utf8")).trim().split("\n")).toEqual([
+      "initialize",
+      "authenticate:pi-stored-credentials",
+      "session/new",
+      "session/set_config_option:model:anthropic/claude-sonnet-4",
+    ])
+  })
+
+  test("fails before prompting when Pi omits a required reasoning option", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-pi-no-reasoning-"))
+    const fixture = join(import.meta.dir, "fixtures", "mock-agent.ts")
+    const lifecycleLog = join(root, "lifecycle.log")
+    const config = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "pi",
+      model: "anthropic/claude-sonnet-4",
+      reasoning: "high",
+      speed: "auto",
+      permissions: "approve-all",
+    })
+
+    await expect(runAcpTurn({
+      root,
+      config,
+      prompt: "This must not prompt",
+      taskId: "task_01",
+      phase: "implementation",
+      signal: new AbortController().signal,
+      emit: () => {},
+      interactivePermissions: false,
+      providerLaunch: {
+        command: process.execPath,
+        args: [fixture],
+        env: {
+          SPEC_FINDER_TEST_AUTH_METHODS: "pi-stored-credentials",
+          SPEC_FINDER_TEST_CONFIG_OPTIONS: JSON.stringify(piSessionConfigOptions({ reasoning: false })),
+          SPEC_FINDER_TEST_LIFECYCLE_LOG: lifecycleLog,
+        },
+        authMethod: null,
+        authPreference: createPiAuthMethodPreference(),
+        stderrPolicy: "redact",
+      },
+    })).rejects.toThrow("agent did not advertise a reasoning configuration option")
+
+    expect((await readFile(lifecycleLog, "utf8")).trim().split("\n")).toEqual([
+      "initialize",
+      "authenticate:pi-stored-credentials",
+      "session/new",
+      "session/set_config_option:model:anthropic/claude-sonnet-4",
+    ])
+  })
+
+  test("continues a Pi turn when requested speed is unsupported", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-pi-speed-"))
+    const fixture = join(import.meta.dir, "fixtures", "mock-agent.ts")
+    const lifecycleLog = join(root, "lifecycle.log")
+    const events: RunEvent[] = []
+    const config = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "pi",
+      model: "auto",
+      reasoning: "auto",
+      speed: "fast",
+      permissions: "approve-all",
+    })
+
+    const result = await runAcpTurn({
+      root,
+      config,
+      prompt: "Run one Pi fixture turn without speed",
+      taskId: "task_01",
+      phase: "implementation",
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: process.execPath,
+        args: [fixture],
+        env: {
+          SPEC_FINDER_TEST_AUTH_METHODS: "pi-stored-credentials",
+          SPEC_FINDER_TEST_CONFIG_OPTIONS: JSON.stringify(piSessionConfigOptions()),
+          SPEC_FINDER_TEST_LIFECYCLE_LOG: lifecycleLog,
+        },
+        authMethod: null,
+        authPreference: createPiAuthMethodPreference(),
+        stderrPolicy: "redact",
+      },
+    })
+
+    expect(result.stopReason).toBe("end_turn")
+    expect(await readFile(lifecycleLog, "utf8")).toContain("session/prompt")
+    expect(events).toContainEqual({ type: "runtime_option", name: "speed", requested: "fast", outcome: "unsupported" })
+  })
+
+  test("redacts Pi provider stderr before packet activities receive it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-pi-stderr-"))
+    const fixture = join(import.meta.dir, "fixtures", "mock-agent.ts")
+    const events: RunEvent[] = []
+    const sentinel = "PI_API_KEY=REDACTION_SENTINEL_NOT_A_CREDENTIAL"
+    const config = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "pi",
+      model: "auto",
+      reasoning: "auto",
+      speed: "auto",
+      permissions: "approve-all",
+    })
+
+    const result = await runAcpTurn({
+      root,
+      config,
+      prompt: "Run one redacted Pi fixture turn",
+      taskId: "task_01",
+      phase: "implementation",
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: process.execPath,
+        args: [fixture],
+        env: {
+          SPEC_FINDER_TEST_AUTH_METHODS: "pi-stored-credentials",
+          SPEC_FINDER_TEST_PROVIDER_STDERR: sentinel,
+        },
+        authMethod: null,
+        authPreference: createPiAuthMethodPreference(),
+        stderrPolicy: "redact",
+      },
+    })
+
+    expect(result.stopReason).toBe("end_turn")
+    expect(events).toContainEqual({
+      type: "activity",
+      taskId: "task_01",
+      message: "Provider emitted diagnostic output; details redacted.",
+    })
+    expect(JSON.stringify(events)).not.toContain(sentinel)
+  })
+
   test("completes a framed turn and selects an allow option for approve-all", async () => {
     const root = await mkdtemp(join(tmpdir(), "spec-finder-acp-"))
     const fixture = join(import.meta.dir, "fixtures", "mock-agent.ts")
@@ -664,4 +942,33 @@ async function runPermissionTurn(options: {
 
 function sessionUpdates(events: readonly RunEvent[]): Array<Extract<RunEvent, { type: "session_update" }>> {
   return events.filter((event): event is Extract<RunEvent, { type: "session_update" }> => event.type === "session_update")
+}
+
+function piSessionConfigOptions(options: { model?: boolean; reasoning?: boolean } = {}) {
+  const includeModel = options.model !== false
+  const includeReasoning = options.reasoning !== false
+  return [
+    ...(includeModel ? [{
+      type: "select" as const,
+      id: "model",
+      name: "Model",
+      currentValue: "auto",
+      options: [
+        { value: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4" },
+        { value: "auto", name: "Auto" },
+      ],
+      category: "model",
+    }] : []),
+    ...(includeReasoning ? [{
+      type: "select" as const,
+      id: "thinkingLevel",
+      name: "Thinking",
+      currentValue: "auto",
+      options: [
+        { value: "high", name: "High" },
+        { value: "low", name: "Low" },
+      ],
+      category: "thought_level",
+    }] : []),
+  ]
 }
