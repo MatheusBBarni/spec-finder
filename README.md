@@ -1,20 +1,80 @@
 # Spec Finder
 
-Spec Finder is a skill-driven specification framework with a local ACP cockpit, heavily inspired by Compozy. It brings back the compact workflow that made pre-0.3 Compozy useful—idea → PRD → TechSpec → executable tasks—without adding a daemon or a second source of truth.
+[![npm](https://img.shields.io/npm/v/spec-finder.svg)](https://www.npmjs.com/package/spec-finder)
+[![Bun](https://img.shields.io/badge/bun-%3E%3D1.3-black)](https://bun.sh)
+
+A skill-driven specification framework with a local ACP cockpit, heavily inspired by Compozy. It brings back the compact workflow that made pre-0.3 Compozy useful—idea → PRD → TechSpec → executable tasks—without adding a daemon or a second source of truth.
 
 Specifications stay in the repository. Skills are portable Agent Skills. Claude, Codex, Cursor, Grok Build, and Pi run through their own ACP harnesses while Spec Finder owns task ordering, lifecycle state, permissions, and evidence reports.
 
-## Requirements
+## Features
 
-- Bun 1.3 or newer
-- One supported ACP provider:
-  - Claude: `@agentclientprotocol/claude-agent-acp`
-  - Codex: `@agentclientprotocol/codex-acp`
-  - Cursor: `cursor-agent acp`
-  - Grok Build: `grok --no-auto-update agent stdio`
-  - Pi: `npx --yes @automatalabs/pi-acp`
+- **Closed specification pipeline** — idea, PRD, TechSpec, and numbered tasks live in `.spec-finder/tasks/<slug>/`.
+- **Five ACP providers** — Claude, Codex, Cursor, plus packet-only Grok Build and Pi.
+- **Read-only cockpit** — watch provider, task graph, ACP activity, and tool calls without extra UI chrome.
+- **One session per task** — implementation and the final report share one ACP session.
+- **Ordered batch runs** — `spec-finder run --multiple slug1,slug2` is serial and fail-fast.
+- **Local checkpoints** — optional `auto_commit` writes recovery commits after verified tasks; never pushes.
+- **Optional TDD pack** — red-before-green skills when a task changes product behavior.
+- **Packet-free `exec`** — one-turn ACP prompt (currently uncertified for every real provider).
+
+## Getting started
+
+Requires **Bun 1.3 or newer** and exactly one supported ACP provider already usable on the machine.
+
+```bash
+npm install --global spec-finder
+cd /path/to/project
+spec-finder setup
+spec-finder run my-feature
+```
+
+`setup` creates:
+
+```text
+.spec-finder/
+├── config.json
+└── tasks/
+```
+
+In an interactive terminal, `setup` resolves exactly one provider and asks for its installation scope, model, and speed. Use `↑`/`↓` to move, `Enter` to confirm, and `Esc` to cancel; the provider and every other choice are single-select. Supplying a flag skips only that choice's picker. `--copy` remains accepted for compatibility and is the only installation mode.
+
+```text
+spec-finder setup [--agent claude|codex|cursor|grok|pi] [--model auto|CURATED] \
+  [--speed auto|normal|fast] [--local|--global] [--copy]
+```
+
+Each `--agent`, `--model`, and `--speed` option is optional and accepts at most one value. `--model` accepts the universal `auto` value or a curated model for the selected provider. `--speed` accepts auto, normal, or fast. `--local` and `--global` are independent scope flags; supply at most one. Repeated or duplicate setup options, conflicting scopes, and `--symlink` are rejected before any writes; the error directs users to `--copy`.
+
+Fresh setup defaults to Codex, `gpt-5.6-luna`, `normal` speed, and local scope. A valid configured v3 rerun reuses omitted provider, model, speed, and scope values, including a saved custom model. Selecting a different provider uses that provider's newest catalogue model while an omitted speed still reuses the saved speed. `auto` remains available for every provider.
+
+```bash
+spec-finder run my-feature --no-ui
+spec-finder run my-feature --provider pi --model auto --reasoning auto
+```
+
+## Supported providers
+
+| Provider | Packet `run` | One-turn `exec` | Setup models | Skills |
+|---|---|---|---|---|
+| Claude | yes | uncertified | `auto`, `fable`, `opus`, `sonnet`, `haiku` | `.claude/skills` |
+| Codex | yes | uncertified | `auto`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna` | `.agents/skills` |
+| Cursor | yes | uncertified | `auto` | `.agents/skills` |
+| Grok Build | packet-only | uncertified | `auto` | `.agents/skills` |
+| Pi | packet-only | uncertified | `auto` | `.agents/skills` |
+
+Launch recipes are source-owned, not user config:
+
+- Claude: `@agentclientprotocol/claude-agent-acp`
+- Codex: `@agentclientprotocol/codex-acp`
+- Cursor: `cursor-agent acp`
+- Grok Build: `grok --no-auto-update agent stdio`
+- Pi: `npx --yes @automatalabs/pi-acp`
 
 The default Claude, Codex, and Pi profiles use `npx --yes`, so their adapters can be resolved on demand. Cursor requires the Cursor CLI on `PATH`; Grok Build requires the `grok` binary on `PATH`. Spec Finder does not install provider binaries, authenticate providers, or run provider update commands.
+
+> [!IMPORTANT]
+> Grok Build and Pi are packet-only. `spec-finder exec --provider grok` and `spec-finder exec --provider pi` are rejected before provider spawn. Switching a run to Grok or Pi defaults omitted `--model` and `--reasoning` to `auto` so a saved Codex/Claude id is not sent.
 
 ### Grok Build prerequisites
 
@@ -35,34 +95,7 @@ Before selecting Pi in `setup` or running a packet with `--provider pi`:
 - Authenticate outside Spec Finder with `pi` and `/login`, or set a provider API key, then rerun. Packet runs fail before useful work when advertised `pi-stored-credentials` is missing. Keep credentials out of configuration files, task packets, logs, and this repository; Spec Finder never stores or prints a key value.
 - Leftover `.pi/skills` and `~/.pi/agent/skills` content is user-owned. Setup copies managed skills only to `.agents/skills` (or `~/.agents/skills` for global scope) and does not migrate, merge, or delete `.pi/skills`.
 
-## Install
-
-```bash
-npm install --global spec-finder
-cd /path/to/project
-spec-finder setup
-```
-
-`setup` creates:
-
-```text
-.spec-finder/
-├── config.json
-└── tasks/
-```
-
-In an interactive terminal, `setup` resolves exactly one provider and asks for its installation scope, model, and speed. Use `↑`/`↓` to move, `Enter` to confirm, and `Esc` to cancel; the provider and every other choice are single-select. Supplying a flag skips only that choice's picker. `--copy` remains accepted for compatibility and is the only installation mode.
-
-The automation grammar is:
-
-```text
-spec-finder setup [--agent claude|codex|cursor|grok|pi] [--model auto|CURATED] \
-  [--speed auto|normal|fast] [--local|--global] [--copy]
-```
-
-Each `--agent`, `--model`, and `--speed` option is optional and accepts at most one value. `--model` accepts the universal `auto` value or a curated model for the selected provider. `--speed` accepts auto, normal, or fast. `--local` and `--global` are independent scope flags; supply at most one. Repeated or duplicate setup options, conflicting scopes, and `--symlink` are rejected before any writes; the error directs users to `--copy`.
-
-Fresh setup defaults to Codex, `gpt-5.6-luna`, `normal` speed, and local scope. A valid configured v3 rerun reuses omitted provider, model, speed, and scope values, including a saved custom model. Selecting a different provider uses that provider's newest catalogue model while an omitted speed still reuses the saved speed. `auto` remains available for every provider.
+### Skill destinations
 
 The `.spec-finder/config.json` and `.spec-finder/tasks/` scaffolding always remain in the current project. Skill destinations are derived from the selected provider and scope:
 
@@ -81,80 +114,6 @@ Cursor always installs managed skills in `.agents/skills` (or `~/.agents/skills`
 Pi always installs managed skills in `.agents/skills` (or `~/.agents/skills` for global scope). Existing `.pi/skills` content is leftover user content and is preserved untouched: setup performs no automatic migration, cleanup, merger, or deletion.
 
 Setup does not launch a provider or perform live capability discovery. Completion lines intentionally say `requested model` and `requested speed`; those values describe setup intent, not a guarantee that an account or client can apply them. Runtime ACP feedback is authoritative and may report a capability as applied, defaulted, or unsupported after a session starts.
-
-## Stable npm releases (maintainers)
-
-The stable release workflow is a deliberate, stable-only dispatch from `main`. It reads the version from the reviewed `package.json`; there is no dispatch-time version override. The workflow creates the matching `v<version>` tag and GitHub Release, then runs the installed-package smoke checks.
-
-This runbook applies the TechSpec sections **Compatibility, Migration, and Rollback**, **Failure and Recovery Behavior**, and **Observability** without replacing them with workflow implementation detail.
-
-### Prerequisites
-
-Before the first live release, confirm all of the following:
-
-- You have permission to run Actions and write repository contents, and the intended version is merged on `main` as a stable SemVer.
-- The repository has authority over the public `spec-finder` npm package name. A `release` run requires the exact `spec-finder@<version>` to be absent; a `reconcile` run requires that exact version to already be published.
-- The repository secret `NPM_TOKEN` is set to an npm automation or granular access token that can publish `spec-finder`. The publish job authenticates with that secret via a step-local `.npmrc`.
-- The publish job also keeps `id-token: write` so `npm publish --provenance` can attach OIDC provenance when npm accepts it on GitHub Actions. Provenance is additive; publication still requires `NPM_TOKEN`.
-
-The workflow runs `bun run release:check`, `bun run verify`, and the packed-file allowlist checks before any release-mode publication. These local gates do not prove npm ownership, OIDC exchange, GitHub API writes, or native Windows behavior; the first live release and Windows evidence happen in GitHub Actions.
-
-### Dispatch procedure
-
-1. Merge the intended stable version to `main` and confirm the package, tag (`v<version>`), and public identity are not already in a mismatched state.
-2. Open **Actions → Stable release → Run workflow**, select the `main` branch, and choose exactly one mode:
-
-   | Mode | Use it when | What it may do |
-   |---|---|---|
-   | `release` | npm, the tag, and the GitHub Release are all absent for this version. | Publish the package with `NPM_TOKEN` (and provenance when available), then create or verify the exact tag and generated GitHub Release. |
-   | `reconcile` | The exact npm version is already published and matching metadata or smoke evidence is incomplete. | Create or verify only missing matching metadata and rerun smoke; it never runs `npm publish`. |
-
-3. Wait for candidate preflight and remote-state refresh. A candidate is not mutation-eligible until the local gates and the retained `release-candidate` and `release-state` handoffs pass.
-4. In `release` mode, the workflow publishes with `NPM_TOKEN`, verifies the package, creates the annotated tag before the GitHub Release, appends the fixed installer footer, and runs the Ubuntu/Windows matrix. In `reconcile` mode, it rechecks the published npm version and performs no npm publication.
-5. Read the **Stable release outcome summary** in the run. Retained run artifacts include `release-candidate`, `release-state`, `published-package` (release mode), `release-metadata`, and `smoke-ubuntu`/`smoke-windows` when the matrix runs.
-
-Each smoke runner uses an isolated temporary workspace, home/profile, npm cache and global prefix, and executable path. It installs `spec-finder@<version>` and runs the installed `spec-finder version`, `spec-finder setup`, and `spec-finder upgrade` commands. Upgrade evidence is counted only when `npm view spec-finder@latest` is the candidate version; `upgrade` is not proof for an older version after a newer stable release exists.
-
-### Reading the outcome
-
-The summary is plain text and includes the source ref/SHA, package URL, tag URL, GitHub Release URL, preflight state, both smoke states, and one `Next action` line.
-
-| Result | Interpretation and next action |
-|---|---|
-| `complete` | The package, matching `v<version>` tag, GitHub Release, and both Ubuntu and Windows smoke artifacts passed. No recovery action is required. |
-| `blocked` | Preflight or remote identity failed closed. No completed release is declared. Fix the named candidate or identity problem, then dispatch `release` from `main` when the public version is absent; a mismatch requires manual identity correction first. |
-| `partial` | Preflight passed, but publication metadata, public links, or platform smoke is incomplete. Treat the listed package/tag/Release links and retained smoke artifacts as partial evidence only, then follow the single recovery action—normally `Run reconcile mode for the same main version; do not republish npm.` |
-
-The GitHub Release body for a completed release retains generated notes and the repository-owned footer:
-
-```text
-Package: https://www.npmjs.com/package/spec-finder/v/<version>
-Install: npm install --global spec-finder@<version>
-Upgrade: spec-finder upgrade
-```
-
-### Recovery boundaries
-
-- **Blocked before publication:** correct the source, version, packed contents, or public identity on `main`, then rerun the local gates and dispatch `release`. Do not treat a blocked run as a release.
-- **Package published but tag, Release, or smoke incomplete:** dispatch `reconcile` for the same `main` version. Reconciliation requires the exact npm version to be published, is additive, and never republishes npm. If the tag or Release targets the wrong SHA/version, stop for manual identity correction; the workflow does not force-update tags, clobber Releases, or overwrite npm versions.
-- **Trusted-publisher/OIDC failure:** fix the npm package authority or the exact repository/workflow registration and rerun the appropriate mode. There is no token fallback.
-- **Defective published version:** npm versions are immutable. Deprecate only the exact bad version, bump `package.json` to a new stable version on `main`, publish that corrective version through the normal `release` path, and update the affected GitHub Release notes to explain the correction. For example:
-
-  ```bash
-  npm deprecate spec-finder@<bad-version> "Use spec-finder@<corrective-version>: <reason>"
-  gh release edit v<bad-version> --notes-file corrected-release-notes.md
-  ```
-
-  Use an authenticated maintainer session for these manual operations. The workflow never unpublishes, automatically rolls back, or rewrites an immutable npm version.
-
-For installers, the existing commands remain the compatibility contract:
-
-```bash
-npm install --global spec-finder
-spec-finder upgrade
-```
-
-`spec-finder upgrade` always runs `npm install --global spec-finder@latest`; it does not select a historical version. Install a specific published version explicitly with `npm install --global spec-finder@<version>`.
 
 ## Specification pipeline
 
@@ -204,7 +163,7 @@ Batch mode is an opt-in command for a declared sequence. Use exactly one comma-s
 ```bash
 spec-finder run --multiple first-packet,second-packet,third-packet
 spec-finder run --multiple first-packet,second-packet,third-packet --no-ui \
-  --provider codex --model gpt-5.6-sol --reasoning xhigh --speed fast
+  --provider pi --model auto --reasoning auto --speed auto
 ```
 
 The batch branch supports the same runtime flags shown above: `--no-ui`, `--provider NAME`, `--model ID`,
@@ -230,10 +189,10 @@ Runtime overrides are explicit and validated:
 
 ```bash
 spec-finder run my-feature \
-  --provider codex \
-  --model gpt-5.6-sol \
-  --reasoning xhigh \
-  --speed fast
+  --provider pi \
+  --model auto \
+  --reasoning high \
+  --speed auto
 ```
 
 ## Configuration
@@ -243,9 +202,9 @@ spec-finder run my-feature \
 ```json
 {
   "version": 3,
-  "provider": "codex",
-  "model": "gpt-5.6-luna",
-  "reasoning": "high",
+  "provider": "pi",
+  "model": "auto",
+  "reasoning": "auto",
   "speed": "normal",
   "permissions": "prompt",
   "auto_commit": false,
@@ -282,6 +241,9 @@ Provider process commands are built into Spec Finder for Claude, Codex, Cursor, 
 ## One-turn `exec`
 
 `exec` is the packet-free, human-oriented one-turn command. It performs one fresh ACP prompt in the invocation-derived workspace and then exits. It does not create a task packet or any Spec Finder run history.
+
+> [!WARNING]
+> Task 09's certification is currently blocked. Every real provider, including Grok Build and Pi, is refused before spawn. Host access stays read-only.
 
 ### Invocation and runtime resolution
 
@@ -430,6 +392,80 @@ bun run verify
 ```
 
 The full gate runs strict TypeScript, Bun tests, an OpenTUI frame test, and the distributable build.
+
+## Stable npm releases (maintainers)
+
+The stable release workflow is a deliberate, stable-only dispatch from `main`. It reads the version from the reviewed `package.json`; there is no dispatch-time version override. The workflow creates the matching `v<version>` tag and GitHub Release, then runs the installed-package smoke checks.
+
+This runbook applies the TechSpec sections **Compatibility, Migration, and Rollback**, **Failure and Recovery Behavior**, and **Observability** without replacing them with workflow implementation detail.
+
+### Prerequisites
+
+Before the first live release, confirm all of the following:
+
+- You have permission to run Actions and write repository contents, and the intended version is merged on `main` as a stable SemVer.
+- The repository has authority over the public `spec-finder` npm package name. A `release` run requires the exact `spec-finder@<version>` to be absent; a `reconcile` run requires that exact version to already be published.
+- The repository secret `NPM_TOKEN` is set to an npm automation or granular access token that can publish `spec-finder`. The publish job authenticates with that secret via a step-local `.npmrc`.
+- The publish job also keeps `id-token: write` so `npm publish --provenance` can attach OIDC provenance when npm accepts it on GitHub Actions. Provenance is additive; publication still requires `NPM_TOKEN`.
+
+The workflow runs `bun run release:check`, `bun run verify`, and the packed-file allowlist checks before any release-mode publication. These local gates do not prove npm ownership, OIDC exchange, GitHub API writes, or native Windows behavior; the first live release and Windows evidence happen in GitHub Actions.
+
+### Dispatch procedure
+
+1. Merge the intended stable version to `main` and confirm the package, tag (`v<version>`), and public identity are not already in a mismatched state.
+2. Open **Actions → Stable release → Run workflow**, select the `main` branch, and choose exactly one mode:
+
+   | Mode | Use it when | What it may do |
+   |---|---|---|
+   | `release` | npm, the tag, and the GitHub Release are all absent for this version. | Publish the package with `NPM_TOKEN` (and provenance when available), then create or verify the exact tag and generated GitHub Release. |
+   | `reconcile` | The exact npm version is already published and matching metadata or smoke evidence is incomplete. | Create or verify only missing matching metadata and rerun smoke; it never runs `npm publish`. |
+
+3. Wait for candidate preflight and remote-state refresh. A candidate is not mutation-eligible until the local gates and the retained `release-candidate` and `release-state` handoffs pass.
+4. In `release` mode, the workflow publishes with `NPM_TOKEN`, verifies the package, creates the annotated tag before the GitHub Release, appends the fixed installer footer, and runs the Ubuntu/Windows matrix. In `reconcile` mode, it rechecks the published npm version and performs no npm publication.
+5. Read the **Stable release outcome summary** in the run. Retained run artifacts include `release-candidate`, `release-state`, `published-package` (release mode), `release-metadata`, and `smoke-ubuntu`/`smoke-windows` when the matrix runs.
+
+Each smoke runner uses an isolated temporary workspace, home/profile, npm cache and global prefix, and executable path. It installs `spec-finder@<version>` and runs the installed `spec-finder version`, `spec-finder setup`, and `spec-finder upgrade` commands. Upgrade evidence is counted only when `npm view spec-finder@latest` is the candidate version; `upgrade` is not proof for an older version after a newer stable release exists.
+
+### Reading the outcome
+
+The summary is plain text and includes the source ref/SHA, package URL, tag URL, GitHub Release URL, preflight state, both smoke states, and one `Next action` line.
+
+| Result | Interpretation and next action |
+|---|---|
+| `complete` | The package, matching `v<version>` tag, GitHub Release, and both Ubuntu and Windows smoke artifacts passed. No recovery action is required. |
+| `blocked` | Preflight or remote identity failed closed. No completed release is declared. Fix the named candidate or identity problem, then dispatch `release` from `main` when the public version is absent; a mismatch requires manual identity correction first. |
+| `partial` | Preflight passed, but publication metadata, public links, or platform smoke is incomplete. Treat the listed package/tag/Release links and retained smoke artifacts as partial evidence only, then follow the single recovery action—normally `Run reconcile mode for the same main version; do not republish npm.` |
+
+The GitHub Release body for a completed release retains generated notes and the repository-owned footer:
+
+```text
+Package: https://www.npmjs.com/package/spec-finder/v/<version>
+Install: npm install --global spec-finder@<version>
+Upgrade: spec-finder upgrade
+```
+
+### Recovery boundaries
+
+- **Blocked before publication:** correct the source, version, packed contents, or public identity on `main`, then rerun the local gates and dispatch `release`. Do not treat a blocked run as a release.
+- **Package published but tag, Release, or smoke incomplete:** dispatch `reconcile` for the same `main` version. Reconciliation requires the exact npm version to be published, is additive, and never republishes npm. If the tag or Release targets the wrong SHA/version, stop for manual identity correction; the workflow does not force-update tags, clobber Releases, or overwrite npm versions.
+- **Trusted-publisher/OIDC failure:** fix the npm package authority or the exact repository/workflow registration and rerun the appropriate mode. There is no token fallback.
+- **Defective published version:** npm versions are immutable. Deprecate only the exact bad version, bump `package.json` to a new stable version on `main`, publish that corrective version through the normal `release` path, and update the affected GitHub Release notes to explain the correction. For example:
+
+  ```bash
+  npm deprecate spec-finder@<bad-version> "Use spec-finder@<corrective-version>: <reason>"
+  gh release edit v<bad-version> --notes-file corrected-release-notes.md
+  ```
+
+  Use an authenticated maintainer session for these manual operations. The workflow never unpublishes, automatically rolls back, or rewrites an immutable npm version.
+
+For installers, the existing commands remain the compatibility contract:
+
+```bash
+npm install --global spec-finder
+spec-finder upgrade
+```
+
+`spec-finder upgrade` always runs `npm install --global spec-finder@latest`; it does not select a historical version. Install a specific published version explicitly with `npm install --global spec-finder@<version>`.
 
 ## Design references
 
