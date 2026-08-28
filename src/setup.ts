@@ -22,6 +22,7 @@ export const SKILL_TARGETS = {
   codex: getSetupProfile("codex").destination,
   cursor: getSetupProfile("cursor").destination,
   grok: getSetupProfile("grok").destination,
+  pi: getSetupProfile("pi").destination,
 } as const
 
 export type SkillTarget = keyof typeof SKILL_TARGETS

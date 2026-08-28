@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Add Pi provider registries and packet launch recipe
 type: backend
 complexity: high
@@ -49,11 +49,11 @@ Make `pi` a valid Spec Finder provider id with a complete packet launch recipe, 
 
 ## Subtasks
 
-- [ ] 01.1 Add `pi` to the provider enum, setup profile, and setup skill-target map so destination `.agents/skills` and `auto` defaults are policy, not live discovery.
-- [ ] 01.2 Add the frozen packet launch, Pi auth preference, redacted stderr, exec-false entry, and explicit `providerLabel("pi")`.
-- [ ] 01.3 Export a source-owned auto-on-switch predicate for `grok` and `pi` only, with tests, without wiring CLI consumers.
-- [ ] 01.4 Extend exhaustive provider tests so hardcoded four-provider loops include `pi` and reject unknown agents as before.
-- [ ] 01.5 Run focused suites and `bun run verify`; record durable registry facts in packet memory.
+- [x] 01.1 Add `pi` to the provider enum, setup profile, and setup skill-target map so destination `.agents/skills` and `auto` defaults are policy, not live discovery.
+- [x] 01.2 Add the frozen packet launch, Pi auth preference, redacted stderr, exec-false entry, and explicit `providerLabel("pi")`.
+- [x] 01.3 Export a source-owned auto-on-switch predicate for `grok` and `pi` only, with tests, without wiring CLI consumers.
+- [x] 01.4 Extend exhaustive provider tests so hardcoded four-provider loops include `pi` and reject unknown agents as before.
+- [x] 01.5 Run focused suites and `bun run verify`; record durable registry facts in packet memory.
 
 ## Implementation Details
 

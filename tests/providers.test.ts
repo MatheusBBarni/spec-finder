@@ -4,6 +4,7 @@ import {
   EXEC_PROVIDER_CERTIFICATION,
   ProviderCertificationError,
   createGrokAuthMethodPreference,
+  createPiAuthMethodPreference,
   getProviderCertification,
   isExecProviderCertified,
   normalizeGrokSessionConfigOptions,
@@ -130,7 +131,7 @@ describe("provider launch", () => {
   })
 
   test("keeps packet launch resolution independent from exec certification", () => {
-    for (const provider of ["claude", "codex", "cursor", "grok"] as const) {
+    for (const provider of ["claude", "codex", "cursor", "grok", "pi"] as const) {
       expect(() => resolvePacketProviderLaunch({ ...DEFAULT_CONFIG, provider })).not.toThrow()
       expect(isExecProviderCertified(provider)).toBeFalse()
       expect(getProviderCertification(provider)).toEqual({ exec: false })
@@ -140,11 +141,12 @@ describe("provider launch", () => {
       codex: { exec: false },
       cursor: { exec: false },
       grok: { exec: false },
+      pi: { exec: false },
     })
   })
 
   test("rejects every uncertified real provider before an exec launch", () => {
-    for (const provider of ["claude", "codex", "cursor", "grok"] as const) {
+    for (const provider of ["claude", "codex", "cursor", "grok", "pi"] as const) {
       expect(() => resolveExecProviderLaunch({ ...DEFAULT_CONFIG, provider }))
         .toThrow(ProviderCertificationError)
     }
@@ -187,6 +189,31 @@ describe("provider launch", () => {
     expect(providerLabel("codex")).toBe("Codex")
     expect(providerLabel("cursor")).toBe("Cursor")
     expect(providerLabel("grok")).toBe("Grok Build")
+    expect(providerLabel("pi")).toBe("Pi")
+    expect(providerLabel("pi")).not.toBe("Grok Build")
+  })
+
+  test("launches Pi through the frozen unpinned packet recipe without a session-config normalizer", () => {
+    const launch = resolveProviderLaunch({ ...DEFAULT_CONFIG, provider: "pi", model: "anthropic/claude-sonnet-4" })
+
+    expect(launch.command).toBe("npx")
+    expect(launch.args).toEqual(["--yes", "@automatalabs/pi-acp"])
+    expect(launch.env).toEqual({})
+    expect(launch.authMethod).toBeNull()
+    expect(launch.authPreference).toEqual(createPiAuthMethodPreference())
+    expect(launch.authPreference?.methodIds).toEqual(["pi-stored-credentials"])
+    expect(launch.stderrPolicy).toBe("redact")
+    expect(launch.sessionConfigNormalizer).toBeUndefined()
+  })
+
+  test("keeps Pi launch env empty even when process environment has API keys", () => {
+    const launch = withXaiApiKey("configured", () =>
+      resolveProviderLaunch({ ...DEFAULT_CONFIG, provider: "pi" }),
+    )
+
+    expect(launch.env).toEqual({})
+    expect(Object.hasOwn(launch.env, "XAI_API_KEY")).toBeFalse()
+    expect(JSON.stringify(launch.env)).not.toContain("configured")
   })
 })
 
