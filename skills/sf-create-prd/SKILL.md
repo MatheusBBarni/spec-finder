@@ -11,6 +11,9 @@ description: Creates or updates an approved business-focused Product Requirement
 - NEVER skip research or interaction because a feature appears simple or technical.
 - NEVER infer a material product decision when multiple credible choices remain.
 - NEVER drift into databases, APIs, frameworks, code structure, or testing design.
+- NEVER treat a requested feature or “users want X” as the problem.
+- NEVER expand MVP capabilities before explicit non-goals.
+- NEVER save a goal without a baseline (or explicit unknown plus how it will be measured), target, window, and measurement method.
 - NEVER require section-by-section approval; synthesize one complete draft after the approach decision.
 </HARD-GATE>
 
@@ -50,7 +53,7 @@ Read `references/question-protocol.md` before asking questions.
 - Derive or confirm the slug and target `.spec-finder/tasks/<slug>/`.
 - Read repository instructions and all existing packet artifacts, including `_idea.md` when present, an existing `_prd.md`, downstream artifacts, and every ADR. Read `.spec-finder/config.json` when present.
 - When `_idea.md` exists, treat it as approved input, not immutable truth; surface conflicts with current evidence.
-- In update mode, identify the requested delta and preserve untouched sections.
+- New PRDs use `references/prd-template.md`. In update mode, identify the requested delta, preserve untouched sections, and keep the existing document structure. Do not migrate Overview / Core Features / Success Metrics layouts unless the user explicitly asks. The PRD is a living document; change only the approved delta.
 
 ### 2. Research before questions
 
@@ -79,7 +82,8 @@ If external research is unavailable, disclose the missing evidence and ask with 
 ### 3. Clarify the product need
 
 - Ask 3-6 questions following `references/question-protocol.md`.
-- Cover the primary problem, target user, current workflow, capabilities, business value, constraints, MVP boundary, rollout, and measurable success as relevant.
+- Follow the protocol order: need, users, testable success, non-goals and scope, then capabilities.
+- Restate the problem from evidence (who, current workflow, failure, cost). A feature request is not a problem.
 - Do not ask questions already answered by approved artifacts or research unless evidence conflicts.
 - Translate technical-sounding requests into user outcomes. Ask which events need notification, not whether to use polling; ask what export users need, not which library to use.
 
@@ -99,19 +103,32 @@ If external research is unavailable, disclose the missing evidence and ask with 
 
 ### 6. Draft the complete PRD
 
-- Read `references/prd-template.md` and fill every mandatory section.
-- Apply YAGNI: every MVP capability must trace to a verified user need or business outcome.
-- Use stable IDs for goals, stories, features, and metrics so the TechSpec can trace them.
-- Define acceptance conditions as observable product behavior, not implementation steps.
+- Read `references/prd-template.md` and fill every mandatory section in this order: Problem and Evidence, Goals, Out of Scope, In Scope, User Stories, Constraints, Risks, ADRs, Open Questions.
+- Target 800–1600 words. Cut anything that does not change a decision. Evidence is at most 8 decision-changing rows; if `_idea.md` exists, synthesize it rather than duplicating the ledger.
+- Problem first: who, current workflow, failure, and cost, with evidence. Do not lead with features.
+- Write Out of Scope before In Scope and before extra capabilities. Later phases belong in Out of Scope with a promotion trigger.
+- Apply YAGNI: every in-scope `F-xx` must trace to a verified user need or goal.
+- Use stable IDs so the TechSpec can trace them: `G-xx` (goals are the metrics), `US-xx`, `F-xx`. Add `M-xx` only when one goal needs more than one metric.
+- Every `US-xx` uses Given/When/Then for observable product behavior, not implementation steps. Empty, failure, recovery, and accessibility paths are extra GWT triples, not a UX essay.
+- Keep `F-xx` as a thin capability table. Do not write MUST/SHOULD feature specs.
 - Put unresolved non-blocking items in Open Questions and explicitly exclude deferred work.
-- Cite market claims near their source. Label estimates and inference.
+- Cite market claims near their source. Label estimates and inference. Never invent a baseline.
 
 ### 7. Review and save
 
 - Present one complete draft and ask with `A. Approve`, `B. Adjust`, `C. Rewrite`, and `D. Discard`.
 - Apply requested changes and present the complete current draft again.
 - Write `.spec-finder/tasks/<slug>/_prd.md` only after explicit approval of that version.
-- Re-read the saved file and validate IDs, traceability, metrics, non-goals, ADR links, citations, and unresolved questions.
+- Re-read the saved file and validate:
+  - the problem is evidenced and is not a feature request;
+  - every `G-xx` has baseline (or explicit unknown plus measurement plan), target, window, and method;
+  - Out of Scope exists and is not contradicted by In Scope;
+  - every `US-xx` has Given/When/Then;
+  - every `F-xx` maps to a goal or story and states an observable outcome, not a design;
+  - no APIs, frameworks, schema, or testing design;
+  - Evidence is capped, cited, and distinguished from inference;
+  - ADRs are linked and no material branch sits in Open Questions;
+  - length is in the 800–1600 word target unless the user approved a longer delta.
 - Point to `sf-create-techspec` as the next step.
 
 ## Anti-patterns
@@ -119,12 +136,18 @@ If external research is unavailable, disclose the missing evidence and ask with 
 - Calling assumptions “research”.
 - Asking the user to decide facts discoverable from the repository or current sources.
 - Offering approaches that differ only in implementation technology.
+- Treating “users want X” or a solution as the problem.
+- Drafting features before non-goals.
+- Untestable goals or invented baselines.
+- MUST/SHOULD or UX essays that belong in the TechSpec.
+- Dumping the full research ledger into Evidence.
 - Treating “nice to have” as MVP without a mapped goal or story.
 - Hiding unresolved scope inside vague language such as “support common cases”.
 
 ## Failure rules
 
 - Stop if both the requested outcome and target user remain unclear after clarification.
+- Stop if success cannot be stated with a target, window, and measurement method after clarification.
 - If research contradicts an existing `_idea.md`, present the conflict and ask with lettered choices whether current evidence, the approved idea, or another direction governs before drafting.
 - If a material decision remains open, do not move it silently into Open Questions and save anyway.
 - Preserve unrelated approved content in update mode.

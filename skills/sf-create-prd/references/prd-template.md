@@ -1,69 +1,58 @@
 # [Feature] Product Requirements Document
 
-## Overview
+## Problem
 
-State the verified problem, target user, selected product approach, value, and MVP boundary.
+State the verified problem, not a feature request. Cover who is affected, the current workflow, how it fails, and what it costs. Do not write “users want X”.
 
-## Research Evidence
+Name the primary user and why this is worth solving now.
 
-| Kind | Finding | Source | Date | Product consequence |
-|---|---|---|---|---|
-| Repository / External / Inference | [Finding] | [Path or URL] | [Date] | [Consequence] |
+### Evidence
+
+Decision-changing rows only. Prefer repository paths, user quotes, drop-off, and primary sources. Label inference. Never invent a baseline.
+
+| Kind | Finding | Source | Date | Confidence | Product consequence |
+|---|---|---|---|---|---|
+| Repository / External / Inference | [Finding] | [Path or URL] | [Date] | High / Medium / Low | [Consequence] |
 
 ## Goals
 
-| ID | Goal | Measurable outcome |
-|---|---|---|
-| G-01 | [Goal] | [Outcome] |
+Goals are the metrics. Every `G-xx` needs a baseline (or explicit unknown plus how it will be measured), target, method, and window.
 
-## User Stories
+| ID | Goal | Baseline | Target | Measurement method | Window |
+|---|---|---|---|---|---|
+| G-01 | [Goal] | [Value or unknown + measurement plan] | [Target] | [Method] | [Window] |
 
-| ID | Persona | Story | Acceptance signal |
-|---|---|---|---|
-| US-01 | [Persona] | As a ..., I want ..., so that ... | [Observable signal] |
+## Out of Scope
 
-## Core Features
-
-### F-01: [Feature]
-
-- **User value:** [Value]
-- **Mapped goals/stories:** [G-01, US-01]
-- **MUST:** [Observable required behavior]
-- **SHOULD:** [Important but non-blocking behavior]
-- **Acceptance conditions:** [Specific user-visible outcomes]
-
-Repeat for every MVP feature.
-
-## User Experience
-
-- Primary journey from discovery to recurring use.
-- Empty, loading, success, failure, recovery, and accessibility expectations.
-- Discoverability, feedback, cancellation, and reversibility requirements.
-
-## High-Level Constraints
-
-- Product-facing privacy, security, compliance, compatibility, performance, portability, or integration boundaries.
-- Do not prescribe implementation technology.
-
-## Non-Goals
+Write exclusions and later phases here, each with a rationale and reconsideration trigger.
 
 - **[Excluded capability]** — [Rationale and reconsideration trigger]
 
-## Phased Rollout Plan
+## In Scope (MVP)
 
-### MVP
+Selected approach: [one sentence on the chosen product approach and what it gives up].
 
-- Included features and entry/exit criteria.
+Thin capabilities only. No MUST/SHOULD design, APIs, or implementation.
 
-### Later phases
+| ID | Capability | User value | Mapped goals/stories | Observable outcome |
+|---|---|---|---|---|
+| F-01 | [Capability] | [Value] | G-01, US-01 | [User-visible result] |
 
-- Deferred capabilities and the evidence required to promote them.
+## User Stories
 
-## Success Metrics
+### US-01: [Short name]
 
-| ID | Metric | Baseline | Target | Measurement method | Window |
-|---|---|---|---|---|---|
-| M-01 | [Metric] | [Value or unknown] | [Target] | [Method] | [Window] |
+- **Persona:** [Persona]
+- **Story:** As a [persona], I want [capability], so that [outcome].
+- **Acceptance:**
+  - **Given** [precondition]
+  - **When** [action]
+  - **Then** [observable result]
+
+## Constraints
+
+- Product-facing privacy, security, compliance, compatibility, performance, portability, or integration boundaries.
+- Do not prescribe implementation technology.
 
 ## Risks and Mitigations
 
@@ -75,10 +64,6 @@ Keep this section product-focused; technical risks belong in the TechSpec.
 ## Architecture Decision Records
 
 - [ADR-NNN: Title](adrs/adr-NNN.md) — [Decision summary]
-
-## Research Limitations
-
-- Missing, stale, conflicting, or low-confidence evidence.
 
 ## Open Questions
 
