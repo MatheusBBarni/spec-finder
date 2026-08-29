@@ -2,11 +2,11 @@
 
 ## Required progression
 
-1. **Need:** verified problem/opportunity and current workflow.
+1. **Need:** verified problem and current workflow. Restate from evidence (who, failure, cost). A requested feature is not the problem.
 2. **Users:** primary persona, secondary impacts, and usage context.
-3. **Capabilities:** observable user outcomes and acceptance boundaries.
-4. **Scope:** MVP, exclusions, phasing, dependencies, and constraints.
-5. **Success:** baseline, target, measurement method, and window.
+3. **Success:** baseline (or explicit unknown plus how it will be measured), target, measurement method, and window. Refuse untestable success.
+4. **Scope:** non-goals first, then MVP boundary, dependencies, and constraints. Ask what is out before extra capabilities.
+5. **Capabilities:** observable user outcomes and Given/When/Then acceptance that survive the non-goals cut.
 
 ## Rules
 
@@ -21,6 +21,9 @@
 - Ask 3-6 questions. Skip only dimensions already explicit in approved artifacts and evidence.
 - Do not ask the user to choose facts that research can establish.
 - Do not ask about databases, APIs, frameworks, code structure, architecture, or testing implementation.
+- When restating the problem, cite research or repository evidence. Do not accept “users want X” as sufficient.
+- Do not ask for extra capabilities until non-goals are explicit.
+- Success questions must include baseline, target, window, and method. If baseline is unknown, the answer must say how it will be measured.
 - Never auto-resolve product scope, target users, rollout policy, or success metrics.
 
 ## Required shape

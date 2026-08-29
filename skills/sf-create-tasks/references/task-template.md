@@ -1,7 +1,7 @@
 ---
 status: pending
 title: [Imperative task title]
-type: [frontend, backend, docs, test, infra, refactor, chore, bugfix, or repository-defined type]
+type: [frontend, backend, docs, test, infra, refactor, chore, bugfix, spike, or repository-defined type]
 complexity: [low, medium, high, or critical]
 dependencies: []
 ---
@@ -10,7 +10,7 @@ dependencies: []
 
 ## Overview
 
-[In 2-3 sentences, state the independently testable outcome, why it matters, and its place in the approved design.]
+One independently testable user/operator outcome. Name the primary `US-xx` / `F-xx`. Say why it matters and what this slice gives up.
 
 ## Source Artifacts
 
@@ -24,12 +24,24 @@ Replace `<slug>` with the current packet slug before writing the task. Never lea
 - Treat this task's numeric ID as its canonical execution position; every declared dependency must already be completed and have a lower numeric ID.
 - Use `sf-memory`; read `memory/MEMORY.md` and `memory/task_NN.md` before editing and update memory before finishing.
 - Implement only this task; preserve unrelated work and do not absorb follow-up scope.
-- Reference TechSpec sections for design details instead of duplicating interfaces or architecture.
+- Reference TechSpec Contracts, Architecture, and Sequencing instead of duplicating interfaces or architecture.
 - Run focused tests and the exact repository verification gate to terminal exit. If they fail, fix in scope and re-run until clean. Do not stop to ask whether to proceed.
 - Ambiguity and spec conflicts are decisions, not halt conditions. Resolve them against the TechSpec, this task's requirements, and ADRs; record the pick in memory; continue.
 - Missing Git HEAD or checkpoint unavailability is not an implementation blocker.
 - Do not change lifecycle status or write the final report when Spec Finder owns those phases.
 </critical>
+
+## Acceptance
+
+Specialize the mapped PRD story for this slice. Do not paste the whole PRD.
+
+- **Given** [precondition]
+- **When** [action]
+- **Then** [observable result]
+
+## Out of Scope
+
+- **[Excluded work]** — [later `task_NN` or PRD non-goal]
 
 <requirements>
 1. MUST [specific observable technical contract mapped to PRD/TechSpec ID].
@@ -43,6 +55,8 @@ Replace `<slug>` with the current packet slug before writing the task. Never lea
 
 ## Subtasks
 
+Implementation steps under this outcome (files, endpoints, tests). Not extra stories.
+
 - [ ] NN.1 [Outcome to accomplish, not code mechanics]
 - [ ] NN.2 [Outcome]
 - [ ] NN.3 [Verification outcome]
@@ -51,7 +65,7 @@ Use 3-7 subtasks.
 
 ## Implementation Details
 
-Reference the approved TechSpec sections, integration points, and constraints. Do not paste its code or diagrams.
+Reference the approved TechSpec Contracts, Architecture, Failure, and Sequencing sections. Do not paste its code or diagrams.
 
 ### Relevant Files
 
@@ -91,9 +105,13 @@ Reference the approved TechSpec sections, integration points, and constraints. D
 - `[focused command]`
 - `[repository gate]`
 
+## Rollout
+
+- [Migration, compatibility, or docs note, or `N/A` with reason]
+
 ## Success Criteria
 
-- Every mapped requirement is satisfied with evidence.
+- Mapped acceptance and requirements are satisfied with evidence.
 - Focused tests and repository gate pass to terminal exit.
 - Coverage meets repository policy or reaches 80% for changed testable logic when measurable.
 - No unrelated file or approved behavior changes.

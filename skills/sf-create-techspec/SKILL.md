@@ -10,6 +10,9 @@ description: Translates an approved PRD into an approved, codebase-informed Tech
 - NEVER propose architecture from memory when the repository or current documentation can verify it.
 - NEVER silently choose a material boundary, dependency, persistence, security, migration, or failure-policy decision.
 - NEVER skip design review because the change appears small.
+- NEVER copy PRD problem or feature prose as the design.
+- NEVER omit technical non-goals.
+- NEVER leave a public contract as prose when a signature, schema, or CLI grammar exists.
 - NEVER require section-by-section approval; present one complete draft after the technical direction is selected.
 </HARD-GATE>
 
@@ -30,7 +33,7 @@ Read `references/question-protocol.md` before asking questions.
 - A packet slug with an approved `_prd.md`.
 - Optional `_idea.md` and existing `_techspec.md` for context/update mode.
 
-If `_prd.md` is absent, stop and present lettered choices: `A. (Recommended) Create the PRD first`, `B. Proceed from a bounded description and accept the traceability gap`, and `C. Other`. Proceed without a PRD only after the user selects the traceability-gap option; record that gap in the Executive Summary and Open Questions.
+If `_prd.md` is absent, stop and present lettered choices: `A. (Recommended) Create the PRD first`, `B. Proceed from a bounded description and accept the traceability gap`, and `C. Other`. Proceed without a PRD only after the user selects the traceability-gap option; record that gap in Context and Open Questions.
 
 ## Mandatory phase checklist
 
@@ -48,8 +51,8 @@ If `_prd.md` is absent, stop and present lettered choices: `A. (Recommended) Cre
 ### 1. Load authoritative context
 
 - Read `_prd.md`, `_idea.md` when present, existing `_techspec.md`, `_tasks.md`, all ADRs, packet memory, repository instructions, and `.spec-finder/config.json` when relevant.
-- Extract every goal, story, capability, constraint, metric, risk, and open question into a requirements ledger with stable IDs.
-- In update mode, identify the requested delta and the downstream artifacts it may invalidate.
+- Extract every goal, story, capability, constraint, risk, and open question into a requirements ledger with stable IDs. Goals carry baseline, target, window, and method; map leftover `M-xx` from older PRDs or when one goal has multiple metrics.
+- New TechSpecs use `references/techspec-template.md`. In update mode, identify the requested delta, preserve untouched sections, and keep the existing document structure. Do not migrate Executive Summary / Implementation Design / Impact Analysis layouts unless the user explicitly asks. The TechSpec is a living document; change only the approved delta. Identify downstream task files that may need regeneration.
 
 ### 2. Research the implementation context
 
@@ -81,8 +84,9 @@ If a conflict could change product behavior, stop and return it to the PRD owner
 
 ### 4. Clarify material decisions
 
-- Ask 3-6 one-at-a-time questions covering only relevant dimensions: component ownership, state/data lifecycle, public interfaces, integration, compatibility/migration, failure/recovery, security/privacy, performance, observability, and test/platform evidence.
-- Skip dimensions already fixed by evidence; do not manufacture questions to reach a quota.
+- Ask 3-6 questions following `references/question-protocol.md`.
+- Follow the protocol order: contracts, state, failure and NFRs, then evidence.
+- Skip dimensions already fixed by the PRD, repository, or official docs; do not manufacture questions to reach a quota.
 - When uncertainty can be resolved with a bounded spike, offer the spike and its decision criterion instead of asking for a guess.
 
 ### 5. Present technical approaches
@@ -101,12 +105,15 @@ If a conflict could change product behavior, stop and return it to the PRD owner
 
 ### 7. Draft the TechSpec
 
-- Read `references/techspec-template.md` and fill every applicable section.
-- Map every PRD goal, story, feature, constraint, and metric to components, interfaces, and verification in a traceability matrix. No requirement may disappear silently.
-- Use repository language for interface examples and keep each example under 20 lines.
-- Prefer existing modules and dependencies. Justify every new package, directory, abstraction, or service.
-- Specify success and failure behavior, security/privacy, migration/compatibility, observability, rollback, and platform-specific evidence.
-- Provide dependency-ordered build sequencing; every step after the first names prerequisites.
+- Read `references/techspec-template.md` and fill applicable sections in this order: Context and Evidence, Technical Goals and Non-Goals, Requirement Traceability, Decision, Architecture, Contracts, Failure and Edge Cases, Security/NFRs/Operations, Tests, Sequencing, Open Questions, ADRs.
+- Target 800–1500 words of prose. Schemas, signatures, tables, and diagrams do not count. Skip N/A sections. Cut anything that does not change a decision. Evidence is at most 8 decision-changing rows.
+- Link the packet `_prd.md`. Translate PRD IDs into technical obligations; do not copy problem or feature prose.
+- Write technical non-goals before extra design. Justify every new package, directory, abstraction, or service.
+- Prefer existing modules. Prefer a mermaid or ASCII diagram over a flow paragraph when more than one component changes.
+- Contracts are the source of truth: types, CLI grammar, schemas, errors, and changed boundaries. They may exceed 20 lines when they are the contract; unused fields are still forbidden.
+- Map every PRD goal, story, capability, and constraint in the traceability table. Map `M-xx` when present. No requirement may disappear silently.
+- Name failure modes, security/privacy, compatibility, rollback, and observability only where they apply.
+- Sequencing is build-order constraints for `sf-create-tasks`, not a task plan. Every step after the first names prerequisites.
 - End with links to every relevant ADR.
 
 ### 8. Review, save, and validate
@@ -114,7 +121,18 @@ If a conflict could change product behavior, stop and return it to the PRD owner
 - Present one complete draft and ask with `A. Approve`, `B. Adjust`, `C. Rewrite`, and `D. Discard`.
 - Apply feedback and present the complete current draft again.
 - Write `.spec-finder/tasks/<slug>/_techspec.md` only after explicit approval.
-- Re-read the saved file and validate requirement traceability, evidence citations, interfaces, failure behavior, security, tests, sequencing, risks, and ADR links.
+- Re-read the saved file and validate:
+  - the packet PRD is linked, or an approved traceability gap is recorded in Context and Open Questions;
+  - technical non-goals exist and are not contradicted by Contracts or Architecture;
+  - every PRD goal, story, capability, and constraint is mapped; leftover `M-xx` is mapped when present;
+  - public contracts are signatures, schemas, or CLI grammar, not prose alone;
+  - failure modes are named with detection, behavior, and recovery;
+  - tests map to contracts and name exact gates;
+  - sequencing is build-order constraints, not tasks;
+  - no product-scope expansion;
+  - Evidence is capped, cited, and distinguished from inference;
+  - ADRs are linked and no material branch sits in Open Questions;
+  - prose is in the 800–1500 word target unless the user approved a longer delta.
 - Point to `sf-create-tasks` as the next step.
 
 ## Anti-patterns
@@ -124,6 +142,10 @@ If a conflict could change product behavior, stop and return it to the PRD owner
 - “Handle errors” without named failure modes and recovery behavior.
 - Tests that do not map to contracts and requirements.
 - Copying PRD prose instead of translating it into technical obligations.
+- Public contracts as prose when a schema, signature, or CLI grammar exists.
+- Filling N/A sections to match the template.
+- Dumping the full research ledger into Evidence.
+- Sequencing that is a task plan.
 - Hiding unresolved decisions as implementation details.
 
 ## Failure rules

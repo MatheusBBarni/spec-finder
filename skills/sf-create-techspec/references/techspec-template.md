@@ -1,105 +1,128 @@
 # [Feature] Technical Specification
 
-## Executive Summary
+## Context
 
-State the selected design, how it fits the existing architecture, the primary trade-off, and any approved traceability gap.
+- **PRD:** `.spec-finder/tasks/<slug>/_prd.md`
+- Current seam, why a design is needed, and the selected design in one sentence. Do not copy PRD problem or feature prose. Record an approved traceability gap here if there is no PRD.
 
-## Technical Evidence
+### Evidence
+
+Decision-changing rows only. Prefer repository paths and current official docs. Label inference.
 
 | Kind | Finding/constraint | Source | Version/date | Design consequence |
 |---|---|---|---|---|
 | Repository / Official docs / Inference | [Finding] | [Path or URL] | [Version/date] | [Consequence] |
+
+## Technical Goals and Non-Goals
+
+### Goals
+
+Engineering obligations mapped to PRD IDs. Not a restatement of user stories.
+
+- **[Design obligation]** — [G-01, F-01]
+
+### Non-Goals
+
+Explicit what not to do in this design.
+
+- **[Excluded design]** — [Rationale and reconsideration trigger]
 
 ## Requirement Traceability
 
 | PRD ID | Technical obligation | Component/interface | Verification | Status/gap |
 |---|---|---|---|---|
 
-Map every PRD goal, story, feature, constraint, and metric.
+Map every PRD goal, story, capability, and constraint. Map `M-xx` when present. Do not repeat essays from the PRD.
 
-## System Architecture
+## Decision
 
-### Components and Boundaries
+Chosen approach: [one paragraph on the selected design, the primary trade-off, and what it gives up].
+
+### Alternatives rejected
+
+- **[Alternative]** — [Why not selected]
+
+## Architecture
+
+### Components
 
 | Component | Existing/new | Responsibility | Inputs/outputs | Dependencies |
 |---|---|---|---|---|
 
-### Data and Control Flow
+### Data flow
 
-Describe normal, failure, cancellation, and recovery paths.
+Mermaid or ASCII for normal, failure, cancellation, and recovery when more than one component changes. Skip when the change is a single function.
 
-## Implementation Design
-
-### Core Interfaces
-
-Use the repository's language. Keep each example under 20 lines and specify errors, ownership, and compatibility.
-
-### Data Models and Lifecycle
-
-Define entities, validation, ownership, retention, migration, concurrency, and consistency only when applicable.
-
-### External Interfaces
-
-Define method/protocol, request, response, errors, authentication/authorization, retries, idempotency, and compatibility.
-
-## Integration Points
-
-| Boundary | Current contract | Change | Failure behavior | Compatibility/migration |
-|---|---|---|---|---|
-
-## Failure and Recovery Behavior
-
-| Failure mode | Detection | User/system behavior | Recovery/rollback | Evidence |
-|---|---|---|---|---|
-
-## Security and Privacy
-
-- Trust boundaries, permissions, secrets, sensitive data, abuse cases, auditability, and fail-closed behavior.
-
-## Compatibility, Migration, and Rollback
-
-- Versioning, schema/config migration, rollout ordering, backward compatibility, rollback trigger, and cleanup.
-
-## Impact Analysis
+### Impact
 
 | Component/file | Impact | Risk | Required action |
 |---|---|---|---|
 
 Include direct consumers and dependent tests, not only edit targets.
 
-## Testing and Evidence
+## Contracts
 
-### Unit Tests
+Schemas, signatures, and CLI grammar over prose. Specify errors, ownership, and compatibility. Omit unused fields.
 
-- Named contracts, inputs, boundaries, and expected outcomes.
+### Public interfaces
 
-### Integration Tests
+Repository language for types, functions, CLI, or protocol contracts.
 
-- Component boundaries, fixtures, environments, and failure scenarios.
+### Data model
 
-### End-to-End or Platform Evidence
+Entities, validation, ownership, retention, concurrency, and consistency only when applicable.
 
-- Native platform, packaging, accessibility, performance, security, or manual evidence that unit tests cannot prove.
+### Errors
 
-### Verification Gates
+Named errors, mapping to user/system behavior, and fail-closed cases.
 
-- Exact focused commands and repository-wide gate.
+### Changed boundaries
 
-## Observability
+| Boundary | Current contract | Change | Failure behavior | Compatibility/migration |
+|---|---|---|---|---|
 
-- Structured events, metrics, logs, redaction, diagnostic context, alerts, and success/failure signals.
+Omit this table when no boundary contract changes.
 
-## Development Sequencing
+## Failure and Edge Cases
+
+| Failure mode | Detection | User/system behavior | Recovery/rollback | Evidence |
+|---|---|---|---|---|
+
+## Security, NFRs, and Operations
+
+Omit empty subsections.
+
+### Security and privacy
+
+Trust boundaries, permissions, secrets, sensitive data, abuse cases, auditability, and fail-closed behavior.
+
+### Compatibility, rollout, and rollback
+
+Versioning, schema/config migration, rollout ordering, backward compatibility, rollback trigger, and cleanup.
+
+### Observability
+
+Structured events, metrics, logs, redaction, diagnostic context, and success/failure signals.
+
+## Tests
+
+Named contracts mapped to obligations. Exact commands, not a testing essay.
+
+- **Unit:** [contract, inputs, expected outcome]
+- **Integration:** [boundary, fixture, failure case]
+- **Platform / e2e:** [evidence unit tests cannot prove]
+- **Gates:** [focused command] ; [repository-wide gate]
+
+## Sequencing
+
+Build-order constraints for implementation, not a task plan.
 
 1. [Step] — no dependencies.
 2. [Step] — depends on step 1 because [reason].
 
-Include external prerequisites and parallelizable work.
+## Open Questions
 
-## Known Risks and Open Technical Questions
-
-| Item | Evidence | Consequence | Resolution criterion/owner |
-|---|---|---|---|
+- Non-blocking unresolved items only. Do not save with a material design branch undecided.
 
 ## Architecture Decision Records
 
