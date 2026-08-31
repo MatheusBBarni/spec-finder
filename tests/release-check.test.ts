@@ -89,6 +89,18 @@ describe("release check runner", () => {
     ).rejects.toThrow("exited with code 17: npm cache is unavailable")
   })
 
+  test("keeps the tail of pack stdout when npm exits nonzero", async () => {
+    const stdout = `${"ok ".repeat(400)}(fail) cockpit test exploded`
+    await expect(
+      runReleaseCheck({
+        runPack: injectedPack(
+          { exitCode: 1, stdout, stderr: "prepack starting" },
+          [],
+        ),
+      }),
+    ).rejects.toThrow("cockpit test exploded")
+  })
+
   test("reports an injected process failure without falling through to parsing", async () => {
     await expect(
       runReleaseCheck({

@@ -56,7 +56,16 @@ function isRecord(value: unknown): value is UnknownRecord {
 
 function oneLine(value: string, limit = 400): string {
   const normalized = value.trim().replace(/\s+/g, " ")
-  return normalized.length > limit ? `${normalized.slice(0, limit - 1)}…` : normalized
+  if (normalized.length <= limit) return normalized
+  return `…${normalized.slice(1 - limit)}`
+}
+
+function packFailureDetail(result: PackProcessResult): string {
+  const combined = [result.stderr, result.stdout]
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+    .join(" ")
+  return oneLine(combined, 1500)
 }
 
 function isPackPayload(value: unknown): value is readonly [PackPayload] {
@@ -181,7 +190,7 @@ export async function runReleaseCheck(
   }
 
   if (processResult.exitCode !== 0) {
-    const detail = oneLine(processResult.stderr)
+    const detail = packFailureDetail(processResult)
     const suffix = detail.length > 0 ? `: ${detail}` : ""
     throw new ReleaseCheckError(
       `npm pack --dry-run --json exited with code ${processResult.exitCode}${suffix}`,
