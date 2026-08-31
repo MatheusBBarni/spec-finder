@@ -75,6 +75,7 @@ export interface SetupResult {
   model: string
   speed: SetupSpeed
   destination: SetupDestination
+  skillRoot: string
   scope: SetupScope
   installed: string[]
   legacyCursor: "preserved" | "absent"
@@ -421,6 +422,7 @@ class SetupTransaction {
         model: this.input.request.model,
         speed: this.input.request.speed,
         destination: getSetupProfile(this.input.request.provider).destination,
+        skillRoot: this.paths.targetRoot,
         scope: this.input.request.scope,
         installed: SPEC_FINDER_SKILLS.map((skill) => join(
           getSetupProfile(this.input.request.provider).destination,
@@ -466,7 +468,12 @@ class SetupTransaction {
     await mkdir(this.paths.stageRoot, { recursive: true })
     const sourceRoot = bundledSkillsPath()
     for (const skill of SPEC_FINDER_SKILLS) {
-      await cp(join(sourceRoot, skill), join(this.paths.stageRoot, skill), { recursive: true })
+      const from = join(sourceRoot, skill)
+      try {
+        await cp(from, join(this.paths.stageRoot, skill), { recursive: true })
+      } catch (error) {
+        throw new Error(`bundled skill ${skill} is missing from ${sourceRoot}: ${errorMessage(error)}`)
+      }
     }
     await writeFile(this.paths.configStagePath, serializeConfig(this.input.candidate), { flag: "wx" })
   }

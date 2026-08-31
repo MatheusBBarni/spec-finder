@@ -319,6 +319,7 @@ describe("setup command options", () => {
           model: request.model,
           speed: request.speed,
           destination: ".agents/skills",
+          skillRoot: join(root, ".agents/skills"),
           scope: request.scope,
           installed: [".agents/skills/sf-task-report"],
           legacyCursor: "preserved",
@@ -328,6 +329,7 @@ describe("setup command options", () => {
       expect(terminal.text()).toContain("requested model: auto")
       expect(terminal.text()).toContain("requested speed: fast")
       expect(terminal.text()).toContain("destination: .agents/skills")
+      expect(terminal.text()).toContain(`skill root: ${join(root, ".agents/skills")}`)
       expect(terminal.text()).toContain("legacy Cursor skills: preserved (not migrated)")
     } finally {
       await rm(root, { recursive: true, force: true })

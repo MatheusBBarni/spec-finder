@@ -165,6 +165,7 @@ export async function setupCommand(args: string[], commandOptions: SetupCommandO
   output.write(`requested model: ${result.model}\n`)
   output.write(`requested speed: ${result.speed}\n`)
   output.write(`destination: ${result.destination}\n`)
+  output.write(`skill root: ${result.skillRoot}\n`)
   output.write(`scope: ${result.scope}\n`)
   output.write(`installed managed skills: ${result.installed.length}\n`)
   output.write(`legacy Cursor skills: ${result.legacyCursor === "preserved" ? "preserved (not migrated)" : "absent (not migrated)"}\n`)

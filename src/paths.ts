@@ -1,3 +1,4 @@
+import { realpathSync, statSync } from "node:fs"
 import { access, lstat, realpath } from "node:fs/promises"
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -87,8 +88,66 @@ export function specPath(root: string, ...parts: string[]): string {
   return join(root, SPEC_DIR, ...parts)
 }
 
+const BUNDLED_SKILL_SENTINEL = join("sf-execute-task", "SKILL.md")
+const BUNDLED_SKILLS_WALK_LIMIT = 8
+
+/**
+ * Locate the packaged `skills/` tree from this module or a global bin shim.
+ * `import.meta.url` can be the unresolved bin symlink (`prefix/bin/spec-finder`),
+ * so callers must realpath and walk to the package root rather than assume `../skills`.
+ */
 export function bundledSkillsPath(): string {
-  return fileURLToPath(new URL("../skills", import.meta.url))
+  return resolveBundledSkillsPath(moduleFilePath())
+}
+
+export function resolveBundledSkillsPath(moduleFile: string): string {
+  const starts: string[] = [resolve(moduleFile)]
+  try {
+    starts.push(realpathSync(moduleFile))
+  } catch {
+    // Keep the unresolved location when the path is virtual or missing.
+  }
+
+  const seen = new Set<string>()
+  for (const start of starts) {
+    let dir = directoryOf(start)
+    for (let depth = 0; depth < BUNDLED_SKILLS_WALK_LIMIT; depth += 1) {
+      const candidate = join(dir, "skills")
+      if (!seen.has(candidate)) {
+        seen.add(candidate)
+        if (isBundledSkillsRoot(candidate)) return candidate
+      }
+      const parent = dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+  }
+
+  throw new Error(
+    `unable to locate bundled Spec Finder skills next to ${moduleFile}; reinstall spec-finder so the package skills/ directory is present`,
+  )
+}
+
+function moduleFilePath(): string {
+  const bunPath = (import.meta as ImportMeta & { path?: string }).path
+  if (typeof bunPath === "string" && bunPath.length > 0) return bunPath
+  return fileURLToPath(import.meta.url)
+}
+
+function directoryOf(start: string): string {
+  try {
+    return statSync(start).isDirectory() ? start : dirname(start)
+  } catch {
+    return dirname(start)
+  }
+}
+
+function isBundledSkillsRoot(candidate: string): boolean {
+  try {
+    return statSync(join(candidate, BUNDLED_SKILL_SENTINEL)).isFile()
+  } catch {
+    return false
+  }
 }
 
 export function assertInsideWorkspace(root: string, candidate: string): string {

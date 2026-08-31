@@ -61,6 +61,7 @@ describe("setup", () => {
         expect(result.provider).toBe(provider)
         expect(result.scope).toBe(scope)
         expect(result.destination).toBe(destination)
+        expect(result.skillRoot).toBe(join(base, destination))
         expect(result.installed).toHaveLength(SPEC_FINDER_SKILLS.length)
         for (const skill of SPEC_FINDER_SKILLS) {
           await access(join(base, destination, skill, "SKILL.md"))
@@ -248,5 +249,42 @@ describe("setup", () => {
     expect(cleanupError).toBeInstanceOf(SetupTransactionError)
     expect((cleanupError as SetupTransactionError).phase).toBe("cleanup")
     expect((cleanupError as SetupTransactionError).message).toContain("recovery artifacts retained")
+  })
+
+  test("CLI global setup copies managed skills into HOME rather than the current workspace", async () => {
+    const home = await tempRoot("spec-finder-cli-home-")
+    const cwd = await tempRoot("spec-finder-cli-cwd-")
+    const cli = join(import.meta.dir, "../src/cli.tsx")
+    const proc = Bun.spawn([
+      "bun",
+      cli,
+      "setup",
+      "--agent",
+      "pi",
+      "--global",
+      "--model",
+      "auto",
+      "--speed",
+      "normal",
+      "--copy",
+    ], {
+      cwd,
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ])
+    if (code !== 0) {
+      throw new Error(`setup CLI exited ${code}\nstdout:\n${stdout}\nstderr:\n${stderr}`)
+    }
+    expect(stdout).toContain("scope: global")
+    expect(stdout).toContain(`skill root: ${join(home, ".agents/skills")}`)
+    await access(join(home, ".agents", "skills", "sf-execute-task", "SKILL.md"))
+    await expect(access(join(cwd, ".agents", "skills", "sf-execute-task", "SKILL.md"))).rejects.toThrow()
   })
 })

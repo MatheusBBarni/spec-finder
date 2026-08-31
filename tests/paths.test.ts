@@ -1,8 +1,14 @@
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises"
+import { access, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, relative } from "node:path"
 import { afterEach, describe, expect, test } from "bun:test"
-import { assertInsideWorkspace, findExecWorkspace, resolveWorkspaceRelativeReference } from "../src/paths.ts"
+import {
+  assertInsideWorkspace,
+  bundledSkillsPath,
+  findExecWorkspace,
+  resolveBundledSkillsPath,
+  resolveWorkspaceRelativeReference,
+} from "../src/paths.ts"
 
 const roots: string[] = []
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))))
@@ -82,5 +88,39 @@ describe("workspace paths", () => {
     expect(await resolveWorkspaceRelativeReference(root, "\\\\server\\share\\report.md")).toBeUndefined()
     expect(await resolveWorkspaceRelativeReference(root, control)).toBeUndefined()
     expect(await resolveWorkspaceRelativeReference(root, insideLink)).toBeUndefined()
+  })
+})
+
+describe("bundled skill discovery", () => {
+  test("finds the repository skills tree from the source module", async () => {
+    await access(join(bundledSkillsPath(), "sf-execute-task", "SKILL.md"))
+  })
+
+  test("resolves skills through a global bin symlink to dist/cli.js", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-skills-bin-"))
+    roots.push(root)
+    const pkg = join(root, "lib", "node_modules", "spec-finder")
+    const skills = join(pkg, "skills", "sf-execute-task")
+    await mkdir(join(pkg, "dist"), { recursive: true })
+    await mkdir(skills, { recursive: true })
+    await writeFile(join(pkg, "dist", "cli.js"), "#!/usr/bin/env bun\n")
+    await writeFile(join(skills, "SKILL.md"), "skill\n")
+    const bin = join(root, "bin", "spec-finder")
+    await mkdir(join(root, "bin"), { recursive: true })
+    await symlink(join(pkg, "dist", "cli.js"), bin)
+
+    const expected = await realpath(join(pkg, "skills"))
+    expect(await realpath(resolveBundledSkillsPath(bin))).toBe(expected)
+    expect(await realpath(resolveBundledSkillsPath(join(pkg, "dist", "cli.js")))).toBe(expected)
+  })
+
+  test("rejects a global bin that has no packaged skills tree", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-skills-missing-"))
+    roots.push(root)
+    const bin = join(root, "bin", "spec-finder")
+    await mkdir(join(root, "bin"), { recursive: true })
+    await writeFile(bin, "#!/usr/bin/env bun\n")
+
+    expect(() => resolveBundledSkillsPath(bin)).toThrow("unable to locate bundled Spec Finder skills")
   })
 })
