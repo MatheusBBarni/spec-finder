@@ -174,9 +174,17 @@ export async function setupWorkspace(
   const homeDirectory = resolve(options.homeDirectory ?? homedir())
   const profile = getSetupProfile(request.provider)
   const base = request.scope === "global" ? homeDirectory : workspace
-  const targetRoot = join(base, profile.destination)
   const configPath = join(workspace, SPEC_DIR, CONFIG_FILE)
-
+  let targetRoot: string
+  try {
+    targetRoot = await resolveSkillTargetRoot(
+      base,
+      join(base, profile.destination),
+      `${request.scope} skill path`,
+    )
+  } catch (error) {
+    throw new SetupTransactionError(errorMessage(error), "preflight")
+  }
   await preflightPaths(workspace, base, targetRoot, configPath, request.scope)
   const previousConfig = await loadPreviousConfig(workspace)
   const candidate = createConfigCandidate(previousConfig.config, request, profile.destination)
@@ -259,14 +267,67 @@ async function preflightPaths(
   scope: SetupScope,
 ): Promise<void> {
   try {
-    await assertPathAncestors(base, targetRoot, `${scope} skill path`)
     await assertPathAncestors(workspace, configPath, "workspace config path")
     await assertExistingPathNotSymlink(configPath, "workspace config path")
-    await assertManagedEntries(targetRoot, `${scope} skill path`)
+    await assertManagedEntries(targetRoot, base, `${scope} skill path`)
   } catch (error) {
     if (error instanceof SetupTransactionError) throw error
     throw new SetupTransactionError(errorMessage(error), "preflight")
   }
+}
+
+function pathEscapesRoot(root: string, candidate: string): boolean {
+  const offset = relative(root, candidate)
+  return offset === ".." || offset.startsWith(`..${sep}`) || isAbsolute(offset)
+}
+
+/** Follow in-root destination/ancestor symlinks; reject anything that leaves the allowed root. */
+async function resolveSkillTargetRoot(base: string, targetRoot: string, label: string): Promise<string> {
+  const basePath = resolve(base)
+  const candidatePath = resolve(targetRoot)
+  if (pathEscapesRoot(basePath, candidatePath)) {
+    throw new Error(`${label} escapes allowed root: ${targetRoot}`)
+  }
+
+  let canonicalBase: string
+  try {
+    canonicalBase = await realpath(basePath)
+  } catch (error) {
+    if (isMissingPath(error)) throw new Error(`${label} allowed root is missing: ${basePath}`)
+    throw error
+  }
+
+  const components = relative(basePath, candidatePath).split(sep).filter(Boolean)
+  let cursor = canonicalBase
+  for (let index = 0; index < components.length; index += 1) {
+    const next = join(cursor, components[index]!)
+    const isFinal = index === components.length - 1
+    try {
+      const status = await lstat(next)
+      if (status.isSymbolicLink() || status.isDirectory()) {
+        let canonical: string
+        try {
+          canonical = await realpath(next)
+        } catch (error) {
+          throw new Error(`${label} contains a broken symlink: ${next}`, { cause: error })
+        }
+        if (pathEscapesRoot(canonicalBase, canonical)) {
+          throw new Error(`${label} escapes allowed root: ${next}`)
+        }
+        const resolved = await lstat(canonical)
+        if (!resolved.isDirectory()) {
+          throw new Error(isFinal ? `${label} is not a directory: ${next}` : `${label} ancestor is not a directory: ${next}`)
+        }
+        cursor = canonical
+        continue
+      }
+      throw new Error(isFinal ? `${label} is not a directory: ${next}` : `${label} ancestor is not a directory: ${next}`)
+    } catch (error) {
+      if (isMissingPath(error)) return join(cursor, ...components.slice(index))
+      throw error
+    }
+  }
+  return cursor
 }
 
 async function assertPathAncestors(base: string, candidate: string, label: string): Promise<void> {
@@ -310,18 +371,45 @@ async function assertExistingPathNotSymlink(path: string, label: string): Promis
   }
 }
 
-async function assertManagedEntries(targetRoot: string, label: string): Promise<void> {
+async function assertManagedEntries(targetRoot: string, allowedRoot: string, label: string): Promise<void> {
+  let canonicalBase: string
+  try {
+    canonicalBase = await realpath(resolve(allowedRoot))
+  } catch (error) {
+    if (isMissingPath(error)) throw new Error(`${label} allowed root is missing: ${allowedRoot}`)
+    throw error
+  }
+
   try {
     const rootStatus = await lstat(targetRoot)
-    if (rootStatus.isSymbolicLink()) throw new Error(`${label} contains a symlink: ${targetRoot}`)
-    if (!rootStatus.isDirectory()) throw new Error(`${label} is not a directory: ${targetRoot}`)
+    if (rootStatus.isSymbolicLink() || rootStatus.isDirectory()) {
+      const canonical = await realpath(targetRoot)
+      if (pathEscapesRoot(canonicalBase, canonical)) {
+        throw new Error(`${label} escapes allowed root: ${targetRoot}`)
+      }
+      const resolved = await lstat(canonical)
+      if (!resolved.isDirectory()) throw new Error(`${label} is not a directory: ${targetRoot}`)
+    } else {
+      throw new Error(`${label} is not a directory: ${targetRoot}`)
+    }
   } catch (error) {
     if (isMissingPath(error)) return
     throw error
   }
 
   for (const skill of SPEC_FINDER_SKILLS) {
-    await assertExistingPathNotSymlink(join(targetRoot, skill), `${label} managed entry`)
+    const entry = join(targetRoot, skill)
+    try {
+      const status = await lstat(entry)
+      if (!status.isSymbolicLink()) continue
+      const canonical = await realpath(entry)
+      if (pathEscapesRoot(canonicalBase, canonical)) {
+        throw new Error(`${label} managed entry escapes allowed root: ${entry}`)
+      }
+    } catch (error) {
+      if (isMissingPath(error)) continue
+      throw error
+    }
   }
 }
 

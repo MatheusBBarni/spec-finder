@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { access, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
+import { access, lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { DEFAULT_CONFIG, PROVIDERS, loadConfig } from "../src/config.ts"
@@ -61,7 +61,7 @@ describe("setup", () => {
         expect(result.provider).toBe(provider)
         expect(result.scope).toBe(scope)
         expect(result.destination).toBe(destination)
-        expect(result.skillRoot).toBe(join(base, destination))
+        expect(await realpath(result.skillRoot)).toBe(await realpath(join(base, destination)))
         expect(result.installed).toHaveLength(SPEC_FINDER_SKILLS.length)
         for (const skill of SPEC_FINDER_SKILLS) {
           await access(join(base, destination, skill, "SKILL.md"))
@@ -199,7 +199,7 @@ describe("setup", () => {
     const localRoot = await tempRoot()
     const localOutside = await tempRoot("spec-finder-outside-")
     await symlink(localOutside, join(localRoot, ".agents"), "dir")
-    await expect(setupWorkspace(localRoot, request("codex"))).rejects.toThrow("local skill path contains a symlink")
+    await expect(setupWorkspace(localRoot, request("codex"))).rejects.toThrow("local skill path escapes allowed root")
     await expect(access(join(localOutside, "sf-create-prd"))).rejects.toThrow()
 
     const globalRoot = await tempRoot()
@@ -208,8 +208,23 @@ describe("setup", () => {
     await mkdir(globalHome, { recursive: true })
     await symlink(globalOutside, join(globalHome, ".agents"), "dir")
     await expect(setupWorkspace(globalRoot, request("codex", "global"), { homeDirectory: globalHome }))
-      .rejects.toThrow("global skill path contains a symlink")
+      .rejects.toThrow("global skill path escapes allowed root")
     await expect(access(join(globalOutside, "sf-create-prd"))).rejects.toThrow()
+  })
+
+  test("installs managed skills through an in-root global destination symlink", async () => {
+    const root = await tempRoot()
+    const home = await tempRoot("spec-finder-home-")
+    const realSkills = join(home, "dotfiles", "claude", "skills")
+    await mkdir(realSkills, { recursive: true })
+    await mkdir(join(home, ".claude"), { recursive: true })
+    await symlink(realSkills, join(home, ".claude", "skills"), "dir")
+
+    const result = await setupWorkspace(root, request("claude", "global"), { homeDirectory: home })
+
+    expect(await realpath(result.skillRoot)).toBe(await realpath(realSkills))
+    await access(join(realSkills, "sf-execute-task", "SKILL.md"))
+    await access(join(home, ".claude", "skills", "sf-execute-task", "SKILL.md"))
   })
 
   test("serializes every provider and scope through one workspace transaction lock", async () => {
@@ -283,7 +298,7 @@ describe("setup", () => {
       throw new Error(`setup CLI exited ${code}\nstdout:\n${stdout}\nstderr:\n${stderr}`)
     }
     expect(stdout).toContain("scope: global")
-    expect(stdout).toContain(`skill root: ${join(home, ".agents/skills")}`)
+    expect(stdout).toContain(`skill root: ${await realpath(join(home, ".agents/skills"))}`)
     await access(join(home, ".agents", "skills", "sf-execute-task", "SKILL.md"))
     await expect(access(join(cwd, ".agents", "skills", "sf-execute-task", "SKILL.md"))).rejects.toThrow()
   })
