@@ -5,7 +5,7 @@
 
 A skill-driven specification framework with a local ACP cockpit, heavily inspired by Compozy. It brings back the compact workflow that made pre-0.3 Compozy useful—idea → PRD → TechSpec → executable tasks—without adding a daemon or a second source of truth.
 
-Specifications stay in the repository. Skills are portable Agent Skills. Claude, Codex, Cursor, Grok Build, and Pi run through their own ACP harnesses while Spec Finder owns task ordering, lifecycle state, permissions, and evidence reports.
+Task packets stay local in `.spec-finder/tasks/` and `.spec-finder/tasks_done/`. Setup writes `.spec-finder/.gitignore` so committed specs cannot poison later agent context. Skills are portable Agent Skills. Claude, Codex, Cursor, Grok Build, and Pi run through their own ACP harnesses while Spec Finder owns task ordering, lifecycle state, permissions, and evidence reports.
 
 ## Features
 
@@ -33,9 +33,12 @@ spec-finder run my-feature
 
 ```text
 .spec-finder/
+├── .gitignore
 ├── config.json
 └── tasks/
 ```
+
+`.spec-finder/.gitignore` ignores `tasks/` and `tasks_done/` when those entries are missing. Packet files stay out of git. The workspace root `.gitignore` is left alone. `.spec-finder/config.json` remains eligible to commit.
 
 In an interactive terminal, `setup` resolves exactly one provider and asks for its installation scope, model, and speed. Use `↑`/`↓` to move, `Enter` to confirm, and `Esc` to cancel; the provider and every other choice are single-select. Supplying a flag skips only that choice's picker. `--copy` remains accepted for compatibility and is the only installation mode.
 
@@ -97,7 +100,7 @@ Before selecting Pi in `setup` or running a packet with `--provider pi`:
 
 ### Skill destinations
 
-The `.spec-finder/config.json` and `.spec-finder/tasks/` scaffolding always remain in the current project. Skill destinations are derived from the selected provider and scope:
+The `.spec-finder/config.json` and `.spec-finder/tasks/` scaffolding always remain in the current project. Packet directories are ignored by `.spec-finder/.gitignore`. Skill destinations are derived from the selected provider and scope:
 
 | Provider | Curated setup models | Default model | Local skills | Global skills |
 |---|---|---|---|---|

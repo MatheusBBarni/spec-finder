@@ -4,6 +4,10 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { DEFAULT_CONFIG, PROVIDERS, loadConfig } from "../src/config.ts"
 import {
+  PACKET_GITIGNORE_COMMENT,
+  PACKET_GITIGNORE_PATHS,
+} from "../src/gitignore.ts"
+import {
   SPEC_FINDER_SKILLS,
   SetupTransactionError,
   setupLockPath,
@@ -81,8 +85,70 @@ describe("setup", () => {
     const raw = JSON.parse(await readFile(join(root, ".spec-finder", "config.json"), "utf8"))
     expect(raw).toMatchObject({ provider: "codex", model: "auto", speed: "fast", version: 3 })
     expect(result.legacyCursor).toBe("absent")
+    expect(result.gitignoreStatus).toBe("created")
+    expect(result.gitignorePath).toBe(join(root, ".spec-finder", ".gitignore"))
+    expect(await readFile(join(root, ".spec-finder", ".gitignore"), "utf8")).toBe(
+      `${PACKET_GITIGNORE_COMMENT}\n${PACKET_GITIGNORE_PATHS.join("\n")}\n`,
+    )
+    await expect(access(join(root, ".gitignore"))).rejects.toThrow()
     expect(raw.setup).toEqual({ status: "configured", scope: "local", destination: ".agents/skills" })
     expect(DEFAULT_CONFIG.reasoning).toBe("high")
+  })
+
+  test("appends packet ignore rules without rewriting unrelated spec-finder gitignore content", async () => {
+    const root = await tempRoot()
+    await mkdir(join(root, ".spec-finder"), { recursive: true })
+    await writeFile(join(root, ".spec-finder", ".gitignore"), "*.tmp\n")
+    await writeFile(join(root, ".gitignore"), "node_modules/\n")
+    const result = await setupWorkspace(root, request("codex"))
+
+    expect(result.gitignoreStatus).toBe("updated")
+    expect(await readFile(join(root, ".spec-finder", ".gitignore"), "utf8")).toBe(
+      `*.tmp\n\n${PACKET_GITIGNORE_COMMENT}\n${PACKET_GITIGNORE_PATHS.join("\n")}\n`,
+    )
+    expect(await readFile(join(root, ".gitignore"), "utf8")).toBe("node_modules/\n")
+  })
+
+  test("leaves an already complete packet gitignore unchanged on rerun", async () => {
+    const root = await tempRoot()
+    const first = await setupWorkspace(root, request("codex"))
+    const ignore = await readFile(join(root, ".spec-finder", ".gitignore"), "utf8")
+    const second = await setupWorkspace(root, request("codex"))
+
+    expect(first.gitignoreStatus).toBe("created")
+    expect(second.gitignoreStatus).toBe("unchanged")
+    expect(await readFile(join(root, ".spec-finder", ".gitignore"), "utf8")).toBe(ignore)
+  })
+
+  test("does not change gitignore when config commit fails", async () => {
+    const root = await tempRoot()
+    await mkdir(join(root, ".spec-finder"), { recursive: true })
+    await writeFile(join(root, ".spec-finder", ".gitignore"), "*.tmp\n")
+    await writeFile(join(root, ".spec-finder", "config.json"), JSON.stringify({
+      ...DEFAULT_CONFIG,
+      model: "saved-model",
+    }))
+
+    await expect(setupWorkspace(root, request("codex"), { failAt: "config" })).rejects.toThrow("setup failed during commit")
+    expect(await readFile(join(root, ".spec-finder", ".gitignore"), "utf8")).toBe("*.tmp\n")
+  })
+
+  test("rolls back a created gitignore when gitignore promotion fails", async () => {
+    const root = await tempRoot()
+    await expect(setupWorkspace(root, request("codex"), { failAt: "gitignore" })).rejects.toThrow("setup failed during commit")
+    await expect(access(join(root, ".spec-finder", ".gitignore"))).rejects.toThrow()
+    await expect(access(join(root, ".spec-finder", "config.json"))).rejects.toThrow()
+  })
+
+  test("fails closed before writes when the packet gitignore is a symlink", async () => {
+    const root = await tempRoot()
+    const outside = await tempRoot("spec-finder-ignore-outside-")
+    await mkdir(join(root, ".spec-finder"), { recursive: true })
+    await writeFile(join(outside, "ignore"), "outside\n")
+    await symlink(join(outside, "ignore"), join(root, ".spec-finder", ".gitignore"))
+    await expect(setupWorkspace(root, request("codex"))).rejects.toThrow("packet gitignore path contains a symlink")
+    await expect(access(join(root, ".agents", "skills", "sf-create-prd"))).rejects.toThrow()
+    expect(await readFile(join(outside, "ignore"), "utf8")).toBe("outside\n")
   })
 
   test("uses auto reasoning for fresh and changed-to-Grok setup without overwriting saved Grok intent", async () => {

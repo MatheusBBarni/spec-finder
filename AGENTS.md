@@ -38,4 +38,4 @@ Follow the concise Conventional Commit style: `fix: scope transcript turns` or `
 
 ## Security & Configuration
 
-Treat `.spec-finder/config.json` as strict user configuration: validate changes and never weaken workspace-path protections. Do not commit credentials, provider tokens, or private task data. ACP behavior must fail safely with actionable errors.
+Treat `.spec-finder/config.json` as strict user configuration: validate changes and never weaken workspace-path protections. Do not commit credentials, provider tokens, or private task data. `.spec-finder/.gitignore` keeps `tasks/` and `tasks_done/` out of git so packet specs cannot poison later agent context. ACP behavior must fail safely with actionable errors.

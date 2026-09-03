@@ -323,6 +323,8 @@ describe("setup command options", () => {
           scope: request.scope,
           installed: [".agents/skills/sf-task-report"],
           legacyCursor: "preserved",
+          gitignorePath: join(root, ".spec-finder", ".gitignore"),
+          gitignoreStatus: "created",
         }),
       })
       expect(code).toBe(0)
@@ -331,6 +333,7 @@ describe("setup command options", () => {
       expect(terminal.text()).toContain("destination: .agents/skills")
       expect(terminal.text()).toContain(`skill root: ${join(root, ".agents/skills")}`)
       expect(terminal.text()).toContain("legacy Cursor skills: preserved (not migrated)")
+      expect(terminal.text()).toContain("packet gitignore: created")
     } finally {
       await rm(root, { recursive: true, force: true })
     }

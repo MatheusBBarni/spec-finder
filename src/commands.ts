@@ -169,6 +169,7 @@ export async function setupCommand(args: string[], commandOptions: SetupCommandO
   output.write(`scope: ${result.scope}\n`)
   output.write(`installed managed skills: ${result.installed.length}\n`)
   output.write(`legacy Cursor skills: ${result.legacyCursor === "preserved" ? "preserved (not migrated)" : "absent (not migrated)"}\n`)
+  output.write(`packet gitignore: ${result.gitignoreStatus}\n`)
   return 0
 }
 

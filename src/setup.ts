@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { cp, lstat, mkdir, open, realpath, rename, rm, writeFile } from "node:fs/promises"
+import { cp, lstat, mkdir, open, readFile, realpath, rename, rm, writeFile } from "node:fs/promises"
 import type { FileHandle } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
@@ -20,6 +20,11 @@ import {
   isCuratedSetupModel,
   type SetupDestination,
 } from "./setup-profile.ts"
+import {
+  GITIGNORE_FILE,
+  mergeWorkspaceGitignore,
+  type GitignoreStatus,
+} from "./gitignore.ts"
 import { CONFIG_FILE, SPEC_DIR, TASKS_DIR, bundledSkillsPath } from "./paths.ts"
 
 export const SKILL_TARGETS = {
@@ -79,6 +84,8 @@ export interface SetupResult {
   scope: SetupScope
   installed: string[]
   legacyCursor: "preserved" | "absent"
+  gitignorePath: string
+  gitignoreStatus: GitignoreStatus
 }
 
 export type SetupFailurePhase =
@@ -87,6 +94,7 @@ export type SetupFailurePhase =
   | "promote"
   | "config"
   | "config-commit"
+  | "gitignore"
   | "rollback"
   | "cleanup"
 
@@ -135,6 +143,9 @@ interface TransactionPaths {
   configPath: string
   configStagePath: string
   configBackupPath: string
+  gitignorePath: string
+  gitignoreStagePath: string
+  gitignoreBackupPath: string
   lockPath: string
 }
 
@@ -143,6 +154,8 @@ interface TransactionState {
   promoted: string[]
   configBackedUp: boolean
   configPromoted: boolean
+  gitignoreBackedUp: boolean
+  gitignorePromoted: boolean
 }
 
 export function isSkillTarget(value: string): value is SkillTarget {
@@ -175,6 +188,7 @@ export async function setupWorkspace(
   const profile = getSetupProfile(request.provider)
   const base = request.scope === "global" ? homeDirectory : workspace
   const configPath = join(workspace, SPEC_DIR, CONFIG_FILE)
+  const gitignorePath = join(workspace, SPEC_DIR, GITIGNORE_FILE)
   let targetRoot: string
   try {
     targetRoot = await resolveSkillTargetRoot(
@@ -185,7 +199,7 @@ export async function setupWorkspace(
   } catch (error) {
     throw new SetupTransactionError(errorMessage(error), "preflight")
   }
-  await preflightPaths(workspace, base, targetRoot, configPath, request.scope)
+  await preflightPaths(workspace, base, targetRoot, configPath, gitignorePath, request.scope)
   const previousConfig = await loadPreviousConfig(workspace)
   const candidate = createConfigCandidate(previousConfig.config, request, profile.destination)
   const legacyCursor = await readLegacyStatus(base)
@@ -264,11 +278,15 @@ async function preflightPaths(
   base: string,
   targetRoot: string,
   configPath: string,
+  gitignorePath: string,
   scope: SetupScope,
 ): Promise<void> {
   try {
     await assertPathAncestors(workspace, configPath, "workspace config path")
     await assertExistingPathNotSymlink(configPath, "workspace config path")
+    await assertPathAncestors(workspace, gitignorePath, "packet gitignore path")
+    await assertExistingPathNotSymlink(gitignorePath, "packet gitignore path")
+    await assertExistingPathNotDirectory(gitignorePath, "packet gitignore path")
     await assertManagedEntries(targetRoot, base, `${scope} skill path`)
   } catch (error) {
     if (error instanceof SetupTransactionError) throw error
@@ -371,6 +389,16 @@ async function assertExistingPathNotSymlink(path: string, label: string): Promis
   }
 }
 
+async function assertExistingPathNotDirectory(path: string, label: string): Promise<void> {
+  try {
+    const status = await lstat(path)
+    if (status.isDirectory()) throw new Error(`${label} is a directory: ${path}`)
+  } catch (error) {
+    if (isMissingPath(error)) return
+    throw error
+  }
+}
+
 async function assertManagedEntries(targetRoot: string, allowedRoot: string, label: string): Promise<void> {
   let canonicalBase: string
   try {
@@ -447,10 +475,14 @@ class SetupTransaction {
     promoted: [],
     configBackedUp: false,
     configPromoted: false,
+    gitignoreBackedUp: false,
+    gitignorePromoted: false,
   }
   private readonly failure: SetupFailureInjection | SetupFailureHook | undefined
   private readonly phaseCounts = new Map<SetupFailurePhase, number>()
   private lock: FileHandle | undefined
+  private gitignoreChanged = false
+  private gitignoreExisted = false
 
   constructor(private readonly input: {
     workspace: string
@@ -463,6 +495,7 @@ class SetupTransaction {
     options: SetupWorkspaceOptions
   }) {
     const { targetRoot, configPath } = input
+    const gitignorePath = join(input.workspace, SPEC_DIR, GITIGNORE_FILE)
     this.paths = {
       targetRoot,
       targetParent: dirname(targetRoot),
@@ -471,6 +504,9 @@ class SetupTransaction {
       configPath,
       configStagePath: `${configPath}.sf-stage-${this.id}`,
       configBackupPath: `${configPath}.sf-backup-${this.id}`,
+      gitignorePath,
+      gitignoreStagePath: `${gitignorePath}.sf-stage-${this.id}`,
+      gitignoreBackupPath: `${gitignorePath}.sf-backup-${this.id}`,
       lockPath: setupLockPath(input.workspace),
     }
     this.failure = input.options.failure
@@ -517,6 +553,10 @@ class SetupTransaction {
           skill,
         )),
         legacyCursor: this.input.legacyCursor,
+        gitignorePath: this.paths.gitignorePath,
+        gitignoreStatus: this.gitignoreChanged
+          ? (this.gitignoreExisted ? "updated" : "created")
+          : "unchanged",
       }
     } catch (error) {
       if (error instanceof SetupTransactionError && error.recoveryPaths.length > 0) throw error
@@ -564,6 +604,13 @@ class SetupTransaction {
       }
     }
     await writeFile(this.paths.configStagePath, serializeConfig(this.input.candidate), { flag: "wx" })
+    const existingGitignore = await readTextIfPresent(this.paths.gitignorePath)
+    this.gitignoreExisted = existingGitignore !== undefined
+    const mergedGitignore = mergeWorkspaceGitignore(existingGitignore)
+    this.gitignoreChanged = mergedGitignore.changed
+    if (mergedGitignore.changed) {
+      await writeFile(this.paths.gitignoreStagePath, mergedGitignore.content, { flag: "wx" })
+    }
   }
 
   private async commit(): Promise<void> {
@@ -590,11 +637,29 @@ class SetupTransaction {
     }
     await rename(this.paths.configStagePath, this.paths.configPath)
     this.state.configPromoted = true
+
+    if (this.gitignoreChanged) {
+      await this.maybeFail("gitignore", this.paths.gitignorePath)
+      if (await pathExists(this.paths.gitignorePath)) {
+        await rename(this.paths.gitignorePath, this.paths.gitignoreBackupPath)
+        this.state.gitignoreBackedUp = true
+      }
+      await rename(this.paths.gitignoreStagePath, this.paths.gitignorePath)
+      this.state.gitignorePromoted = true
+    }
   }
 
   private async rollback(cause: unknown): Promise<void> {
     try {
       await this.maybeFail("rollback", errorMessage(cause))
+      if (this.state.gitignorePromoted) {
+        await rm(this.paths.gitignorePath, { force: true })
+        this.state.gitignorePromoted = false
+      }
+      if (this.state.gitignoreBackedUp && await pathExists(this.paths.gitignoreBackupPath)) {
+        await rename(this.paths.gitignoreBackupPath, this.paths.gitignorePath)
+        this.state.gitignoreBackedUp = false
+      }
       if (this.state.configPromoted) {
         await rm(this.paths.configPath, { recursive: true, force: true })
         this.state.configPromoted = false
@@ -623,6 +688,8 @@ class SetupTransaction {
     await rm(this.paths.backupRoot, { recursive: true, force: true })
     await rm(this.paths.configStagePath, { force: true })
     await rm(this.paths.configBackupPath, { force: true })
+    await rm(this.paths.gitignoreStagePath, { force: true })
+    await rm(this.paths.gitignoreBackupPath, { force: true })
   }
 
   private async releaseLock(): Promise<void> {
@@ -656,6 +723,8 @@ class SetupTransaction {
       this.paths.backupRoot,
       this.paths.configStagePath,
       this.paths.configBackupPath,
+      this.paths.gitignoreStagePath,
+      this.paths.gitignoreBackupPath,
     ]
     const retained: string[] = []
     for (const path of paths) {
@@ -688,6 +757,15 @@ async function pathExists(path: string): Promise<boolean> {
     return true
   } catch (error) {
     if (isMissingPath(error)) return false
+    throw error
+  }
+}
+
+async function readTextIfPresent(path: string): Promise<string | undefined> {
+  try {
+    return await readFile(path, "utf8")
+  } catch (error) {
+    if (isMissingPath(error)) return undefined
     throw error
   }
 }
