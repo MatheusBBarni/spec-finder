@@ -1,6 +1,6 @@
 # Spec Finder Tasks Report
 
-Generated: 2026-08-17
+Generated: 2026-09-03
 
 Completion is determined by the canonical `status:` field in every `task_NN.md`. A packet moves to `.spec-finder/tasks_done/` only when it contains at least one task, every task is exactly `completed`, and no completed task has `checkpoint.state: blocked`. A blocked checkpoint remains recoverable in the active packet.
 
@@ -9,7 +9,7 @@ Completion is determined by the canonical `status:` field in every `task_NN.md`.
 | Location | Packets | Task files |
 |---|---:|---:|
 | Remaining (`.spec-finder/tasks/`) | 2 | 0/7 |
-| Archived (`.spec-finder/tasks_done/`) | 10 | 57/57 |
+| Archived (`.spec-finder/tasks_done/`) | 11 | 62/62 |
 
 - Moved this run: 1 packet (5 tasks)
 - Report-only: no
@@ -31,7 +31,9 @@ No checkpoint-delivery blockers or early-stage packets were reported.
 
 | Packet | Title | Tasks | Destination |
 |---|---|---:|---|
-| `tdd-skill-pack` | Parallel TDD Skill Pack - Product Requirements Document | 5 | `.spec-finder/tasks_done/tdd-skill-pack` |
+| `pi-acp-provider` | Pi as a packet-only ACP provider Product Requirements Document | 5 | `.spec-finder/tasks_done/pi-acp-provider` |
+
+`pi-acp-provider` titles: Add Pi provider registries and packet launch recipe; Apply Pi session-config policy and ACP fixtures; Expose Pi in setup/run UX and auto-on-switch; Document packet-only Pi; Record live Pi packet evidence.
 
 ## Previously Archived
 
@@ -45,6 +47,7 @@ No checkpoint-delivery blockers or early-stage packets were reported.
 | `read-only-progress-navigator` | Read-Only Progress Navigator with Integrated Task Timer — Product Requirements Document | 7 |
 | `single-provider-setup` | Single-provider setup Product Requirements Document | 3 |
 | `task-report-outcome` | Task-Report Outcomes Product Requirements Document | 5 |
+| `tdd-skill-pack` | Parallel TDD Skill Pack - Product Requirements Document | 5 |
 | `visible-task-run-errors` | Keep Task-Run Errors Visible in the ACP Cockpit — Product Requirements Document | 5 |
 
 ## Warnings and Skips
