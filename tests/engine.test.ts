@@ -1152,6 +1152,86 @@ dependencies: []
     ))).toBeTrue()
     expect(await access(fixture.promptLog).then(() => true, () => false)).toBeFalse()
   })
+
+  test("omitted loopFeedback keeps the current implementation prompt contract", async () => {
+    const fixture = await createRetryFixture("Loop feedback omitted")
+    const taskPath = join(fixture.root, ".spec-finder", "tasks", "demo", "task_01.md")
+
+    const result = await runTaskPacket({
+      root: fixture.root,
+      slug: "demo",
+      config: fixture.config,
+      signal: new AbortController().signal,
+      emit: () => undefined,
+      interactivePermissions: false,
+      providerLaunch: {
+        command: process.execPath,
+        args: [fixture.agent],
+        env: { SPEC_FINDER_TEST_PROMPT_LOG: fixture.promptLog },
+        authMethod: null,
+      },
+    })
+
+    expect(result).toEqual({ ok: true, completed: 1, failed: 0, blocked: 0 })
+    const prompts = await readFile(fixture.promptLog, "utf8")
+    expect(prompts).toContain(`Use the sf-execute-task skill to execute ${taskPath}.`)
+    expect(prompts).not.toContain("Loop feedback:")
+  })
+
+  test("non-empty loopFeedback prefixes implementation and report prompts", async () => {
+    const fixture = await createRetryFixture("Loop feedback present")
+    const taskPath = join(fixture.root, ".spec-finder", "tasks", "demo", "task_01.md")
+    const summary = "Previous pass failed because focused tests were still red."
+
+    const result = await runTaskPacket({
+      root: fixture.root,
+      slug: "demo",
+      config: fixture.config,
+      signal: new AbortController().signal,
+      emit: () => undefined,
+      interactivePermissions: false,
+      loopFeedback: summary,
+      providerLaunch: {
+        command: process.execPath,
+        args: [fixture.agent],
+        env: { SPEC_FINDER_TEST_PROMPT_LOG: fixture.promptLog },
+        authMethod: null,
+      },
+    })
+
+    expect(result).toEqual({ ok: true, completed: 1, failed: 0, blocked: 0 })
+    const prompts = await readFile(fixture.promptLog, "utf8")
+    expect(prompts).toContain(summary)
+    expect(occurrences(prompts, `Loop feedback:\n${summary}`)).toBe(2)
+    expect(prompts).toContain(`Use the sf-execute-task skill to execute ${taskPath}.`)
+    expect(prompts).toContain("Use the sf-task-report skill if it is installed.")
+  })
+
+  test("empty loopFeedback matches the omitted prompt contract", async () => {
+    const fixture = await createRetryFixture("Loop feedback empty")
+    const taskPath = join(fixture.root, ".spec-finder", "tasks", "demo", "task_01.md")
+
+    const result = await runTaskPacket({
+      root: fixture.root,
+      slug: "demo",
+      config: fixture.config,
+      signal: new AbortController().signal,
+      emit: () => undefined,
+      interactivePermissions: false,
+      loopFeedback: "",
+      providerLaunch: {
+        command: process.execPath,
+        args: [fixture.agent],
+        env: { SPEC_FINDER_TEST_PROMPT_LOG: fixture.promptLog },
+        authMethod: null,
+      },
+    })
+
+    expect(result).toEqual({ ok: true, completed: 1, failed: 0, blocked: 0 })
+    const prompts = await readFile(fixture.promptLog, "utf8")
+    expect(prompts).toContain(`Use the sf-execute-task skill to execute ${taskPath}.`)
+    expect(prompts).not.toContain("Loop feedback:")
+  })
 })
 
 function recordingCheckpointService(timeline: string[]): CheckpointServiceContract {

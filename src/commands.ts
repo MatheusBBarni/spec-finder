@@ -25,7 +25,13 @@ import {
   type CheckpointServiceContract,
 } from "./checkpoints.ts"
 import { runTaskPacket, type RunOptions, type RunResult } from "./engine.ts"
-import { type RunEventListener } from "./events.ts"
+import { type RunEvent, type RunEventListener } from "./events.ts"
+import {
+  runLoop,
+  type LoopResult,
+  type LoopRunOptions,
+} from "./loop.ts"
+import { LoopStateError, type LoopTerminal } from "./loop-state.ts"
 import { runExec, type ExecRunOptions } from "./exec.ts"
 import {
   type ExecRuntimeOverrides,
@@ -87,6 +93,52 @@ export interface ExecParseFailure {
 
 export type ExecArguments = ParsedExecArguments | ExecParseFailure
 
+export type LoopParseErrorCode =
+  | "missing_slug"
+  | "invalid_slug"
+  | "extra_positional"
+  | "unknown_option"
+  | "missing_value"
+  | "option_like_value"
+  | "multiple_unsupported"
+  | "invalid_integer"
+
+export interface LoopParseError {
+  code: LoopParseErrorCode
+  message: string
+  argument?: string
+  index?: number
+}
+
+export interface ParsedLoopArguments {
+  mode: "loop"
+  slug: string
+  dryRun: boolean
+  resetState: boolean
+  maxIterations?: number
+  noProgressWindow?: number
+}
+
+export interface LoopParseFailure {
+  mode: "error"
+  error: LoopParseError
+}
+
+export type LoopArguments = ParsedLoopArguments | LoopParseFailure
+
+export const LOOP_USAGE = "usage: spec-finder loop <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE] [--max-iterations N] [--no-progress-window N] [--dry-run] [--reset-state]"
+
+const LOOP_VALUE_OPTIONS = new Set([
+  "--provider",
+  "--model",
+  "--reasoning",
+  "--speed",
+  "--max-iterations",
+  "--no-progress-window",
+])
+const LOOP_BOOLEAN_OPTIONS = new Set(["--no-ui", "--dry-run", "--reset-state"])
+const POSITIVE_INTEGER = /^[1-9]\d*$/
+
 export class ExecInvocationError extends Error {
   readonly code: ExecParseErrorCode
   readonly argument: string | undefined
@@ -132,6 +184,11 @@ export interface RunCommandOptions {
   startCockpit?: typeof startCockpit
   /** Force no-UI mode in tests; otherwise flags or non-TTY streams select it. */
   noUi?: boolean
+}
+
+export interface LoopCommandOptions extends RunCommandOptions {
+  /** Override the loop coordinator while preserving lock and exit mapping. */
+  runLoop?: (options: LoopRunOptions) => Promise<LoopResult>
 }
 
 export interface CheckpointCommandOptions {
@@ -339,6 +396,85 @@ export function parseExecArgumentsOrThrow(args: readonly string[]): ParsedExecAr
 }
 
 export const parseExecArgsOrThrow = parseExecArgumentsOrThrow
+
+export function parseLoopArgs(args: readonly string[]): LoopArguments {
+  let slug: string | undefined
+  let dryRun = false
+  let resetState = false
+  let maxIterations: number | undefined
+  let noProgressWindow: number | undefined
+
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]!
+
+    if (argument === "--multiple") {
+      return loopParseFailure("multiple_unsupported", "loop does not support --multiple; drive one packet per invocation", argument, index)
+    }
+    if (LOOP_BOOLEAN_OPTIONS.has(argument)) {
+      if (argument === "--dry-run") dryRun = true
+      if (argument === "--reset-state") resetState = true
+      continue
+    }
+    if (LOOP_VALUE_OPTIONS.has(argument)) {
+      const value = args[index + 1]
+      if (value === undefined || value.length === 0) {
+        return loopParseFailure("missing_value", `${argument} requires a non-empty value`, argument, index)
+      }
+      if (value.startsWith("-")) {
+        return loopParseFailure("option_like_value", `${argument} value cannot be option-like: ${value}`, value, index + 1)
+      }
+      if (argument === "--max-iterations" || argument === "--no-progress-window") {
+        if (!POSITIVE_INTEGER.test(value)) {
+          return loopParseFailure("invalid_integer", `${argument} must be a positive integer`, value, index + 1)
+        }
+        const parsed = Number.parseInt(value, 10)
+        if (argument === "--max-iterations") maxIterations = parsed
+        else noProgressWindow = parsed
+      }
+      index += 1
+      continue
+    }
+    if (argument.startsWith("-")) {
+      return loopParseFailure("unknown_option", `unsupported loop option: ${argument}`, argument, index)
+    }
+    if (slug !== undefined) {
+      return loopParseFailure("extra_positional", `loop accepts exactly one packet slug; unexpected positional argument: ${argument}`, argument, index)
+    }
+    if (!isValidTaskSlug(argument)) {
+      return loopParseFailure("invalid_slug", `invalid task slug: ${argument}`, argument, index)
+    }
+    slug = argument
+  }
+
+  if (slug === undefined) {
+    return loopParseFailure("missing_slug", "loop requires exactly one packet slug", undefined, args.length)
+  }
+  return {
+    mode: "loop",
+    slug,
+    dryRun,
+    resetState,
+    ...(maxIterations === undefined ? {} : { maxIterations }),
+    ...(noProgressWindow === undefined ? {} : { noProgressWindow }),
+  }
+}
+
+function loopParseFailure(
+  code: LoopParseErrorCode,
+  message: string,
+  argument: string | undefined,
+  index: number,
+): LoopParseFailure {
+  return {
+    mode: "error",
+    error: {
+      code,
+      message,
+      index,
+      ...(argument === undefined ? {} : { argument }),
+    },
+  }
+}
 
 /**
  * Route one packet-free turn through the signal and stream boundary. The
@@ -686,6 +822,79 @@ export async function runCommand(args: string[], options: RunCommandOptions = {}
   if (parsed.mode === "error") throw new Error(parsed.error.message)
   if (parsed.mode === "batch") return runBatchCommand(parsed, options)
   return runSingleCommand(parsed.args, options)
+}
+
+export async function loopCommand(args: readonly string[], options: LoopCommandOptions = {}): Promise<number> {
+  const output = options.output ?? process.stdout
+  const parsed = parseLoopArgs(args)
+  if (parsed.mode === "error") {
+    output.write(`${parsed.error.message}\n${LOOP_USAGE}\n`)
+    return 2
+  }
+
+  const input = options.input ?? process.stdin
+  const root = options.root ?? await findWorkspaceRoot()
+  const lease = await acquireRunLock(root)
+  const load = options.loadConfig ?? loadConfig
+  const lifecycle = createCommandLifecycle(args, options, input, output)
+  try {
+    let config = await load(root)
+    config = applyRunOverrides(config, args)
+    const store = new CockpitStore()
+    const consoleListener = createSingleConsoleListener(output)
+    const emit = wrapLoopEmit(lifecycle.noUi ? consoleListener : store.listener)
+    await lifecycle.startCockpit(store)
+    const run = options.runLoop ?? runLoop
+    const result = await run({
+      root,
+      slug: parsed.slug,
+      config,
+      signal: lifecycle.controller.signal,
+      emit,
+      interactivePermissions: !lifecycle.noUi,
+      dryRun: parsed.dryRun,
+      resetState: parsed.resetState,
+      ...(parsed.maxIterations === undefined ? {} : { maxIterations: parsed.maxIterations }),
+      ...(parsed.noProgressWindow === undefined ? {} : { noProgressWindow: parsed.noProgressWindow }),
+    })
+    if (parsed.dryRun) return 0
+    if (result.terminal === "no_op") await lifecycle.waitForNoWork()
+    await lifecycle.waitForDismissal(result.terminal !== "done" && result.terminal !== "no_op" && result.terminal !== "cancelled")
+    return loopExitCode(result.terminal)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    output.write(`${message}\n`)
+    if (error instanceof ConfigError) return 2
+    if (
+      error instanceof LoopStateError
+      || message.includes("task packet is invalid")
+      || message.includes("no task_XX.md")
+      || message.includes("invalid task slug")
+    ) {
+      return 2
+    }
+    return 1
+  } finally {
+    lifecycle.close()
+    await lease.release()
+  }
+}
+
+function wrapLoopEmit(listener: RunEventListener): RunEventListener {
+  let seenRunStarted = false
+  return (event: RunEvent) => {
+    if (event.type === "run_started") {
+      if (seenRunStarted) return
+      seenRunStarted = true
+    }
+    listener(event)
+  }
+}
+
+function loopExitCode(terminal: LoopTerminal): number {
+  if (terminal === "done" || terminal === "no_op") return 0
+  if (terminal === "cancelled") return 130
+  return 1
 }
 
 function parseCheckpointArguments(args: readonly string[]): { phase: CheckpointPhase; slug: string; taskId: string } {

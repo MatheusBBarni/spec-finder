@@ -6,7 +6,9 @@ import { PassThrough } from "node:stream"
 import type { SessionUpdate } from "@agentclientprotocol/sdk"
 import { DEFAULT_CONFIG, parseConfig, type SpecFinderConfig } from "../src/config.ts"
 import type { CheckpointServiceContract } from "../src/checkpoints.ts"
-import { checkpointCommand, runCommand, resolveSetupOptions, setupCommand } from "../src/commands.ts"
+import { checkpointCommand, loopCommand, runCommand, resolveSetupOptions, setupCommand } from "../src/commands.ts"
+import { describeLoopPaths } from "../src/loop-state.ts"
+import { CockpitStore } from "../src/ui/store.ts"
 import type { BatchResult } from "../src/batch.ts"
 import { parseTask, type TaskFile } from "../src/tasks.ts"
 import type { SetupPickerInput } from "../src/ui/setup-picker.ts"
@@ -1262,5 +1264,248 @@ Checkpoint bridge fixture.
 
     expect(result).toBe(0)
     expect(output.text()).toContain("checkpoint begin skipped for demo/task_01: Git HEAD is missing; continuing without checkpoints")
+  })
+})
+
+function loopTask(id: string, title: string): TaskFile {
+  return parseTask(`${id}.md`, `---
+status: pending
+title: ${title}
+type: chore
+complexity: low
+dependencies: []
+---
+
+# Task ${id.replace("task_", "")}: ${title}
+`)
+}
+
+describe("loop command", () => {
+  test("injected done and no_op exit 0 and print loop: terminal", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-loop-cmd-"))
+    try {
+      for (const terminal of ["done", "no_op"] as const) {
+        const output = commandOutput()
+        const code = await loopCommand(["demo", "--no-ui"], {
+          root,
+          output: output.output,
+          loadConfig: async () => DEFAULT_CONFIG,
+          runLoop: async ({ emit }) => {
+            emit({ type: "activity", message: `loop: terminal ${terminal}: ok` })
+            return { terminal, reason: "ok", iteration: 0, slug: "demo" }
+          },
+        })
+        expect(code).toBe(0)
+        expect(output.text()).toContain("loop: terminal")
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("dry-run exits 0 even when the plan names a non-success terminal", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-loop-dry-"))
+    try {
+      const code = await loopCommand(["demo", "--dry-run", "--no-ui"], {
+        root,
+        output: commandOutput().output,
+        loadConfig: async () => DEFAULT_CONFIG,
+        runLoop: async () => ({ terminal: "failed", reason: "dry-run: would execute", iteration: 0, slug: "demo" }),
+      })
+      expect(code).toBe(0)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("invalid runtime overrides exit 2 before the coordinator", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-loop-override-"))
+    try {
+      let called = false
+      const code = await loopCommand(["demo", "--no-ui", "--provider", "nope"], {
+        root,
+        output: commandOutput().output,
+        loadConfig: async () => DEFAULT_CONFIG,
+        runLoop: async () => {
+          called = true
+          return { terminal: "done", reason: "ok", iteration: 0, slug: "demo" }
+        },
+      })
+      expect(called).toBe(false)
+      expect(code).toBe(2)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("injected named stops exit 1 and cancelled exits 130", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-loop-exit-"))
+    try {
+      for (const terminal of ["blocked", "failed", "exhausted", "stalled"] as const) {
+        const code = await loopCommand(["demo", "--no-ui"], {
+          root,
+          output: commandOutput().output,
+          loadConfig: async () => DEFAULT_CONFIG,
+          runLoop: async () => ({ terminal, reason: terminal, iteration: 1, slug: "demo" }),
+        })
+        expect(code).toBe(1)
+      }
+      const cancelled = await loopCommand(["demo", "--no-ui"], {
+        root,
+        output: commandOutput().output,
+        loadConfig: async () => DEFAULT_CONFIG,
+        runLoop: async () => ({ terminal: "cancelled", reason: "abort", iteration: 0, slug: "demo" }),
+      })
+      expect(cancelled).toBe(130)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("invalid flags exit 2 before writing a ledger", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-loop-parse-"))
+    const packet = join(root, ".spec-finder", "tasks", "demo")
+    await mkdir(packet, { recursive: true })
+    await writeFile(join(packet, "task_01.md"), `---
+status: pending
+title: Demo
+type: chore
+complexity: low
+dependencies: []
+---
+
+# Task 01: Demo
+`)
+    try {
+      const code = await loopCommand(["demo", "--multiple"], {
+        root,
+        output: commandOutput().output,
+        loadConfig: async () => DEFAULT_CONFIG,
+      })
+      expect(code).toBe(2)
+      expect(await Bun.file(describeLoopPaths(packet).directory).exists()).toBe(false)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("invalid ledger without reset-state exits 2", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-loop-ledger-"))
+    const packet = join(root, ".spec-finder", "tasks", "demo")
+    await mkdir(join(packet, "loop"), { recursive: true })
+    await writeFile(join(packet, "task_01.md"), `---
+status: pending
+title: Demo
+type: chore
+complexity: low
+dependencies: []
+---
+
+# Task 01: Demo
+`)
+    await writeFile(join(packet, "loop", "state.json"), `${JSON.stringify({ surprise: true })}\n`)
+    try {
+      const code = await loopCommand(["demo", "--no-ui"], {
+        root,
+        output: commandOutput().output,
+        loadConfig: async () => DEFAULT_CONFIG,
+      })
+      expect(code).toBe(2)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("loop and run refuse each other while a lock is held", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-loop-lock-"))
+    let finishRun: ((result: { ok: boolean; completed: number; failed: number; blocked: number }) => void) | undefined
+    const runResult = new Promise<{ ok: boolean; completed: number; failed: number; blocked: number }>((resolve) => {
+      finishRun = resolve
+    })
+    let runStarted: (() => void) | undefined
+    const startedRun = new Promise<void>((resolve) => {
+      runStarted = resolve
+    })
+    try {
+      const firstRun = runCommand(["alpha", "--no-ui"], {
+        root,
+        output: commandOutput().output,
+        loadConfig: async () => DEFAULT_CONFIG,
+        runTaskPacket: async () => {
+          runStarted?.()
+          return runResult
+        },
+      })
+      await startedRun
+      await expect(loopCommand(["beta", "--no-ui"], {
+        root,
+        output: commandOutput().output,
+        loadConfig: async () => DEFAULT_CONFIG,
+        runLoop: async () => ({ terminal: "done", reason: "ok", iteration: 0, slug: "beta" }),
+      })).rejects.toThrow("another Spec Finder run is active")
+      finishRun?.({ ok: true, completed: 1, failed: 0, blocked: 0 })
+      expect(await firstRun).toBe(0)
+
+      let finishLoop: ((result: { terminal: "done"; reason: string; iteration: number; slug: string }) => void) | undefined
+      const loopResult = new Promise<{ terminal: "done"; reason: string; iteration: number; slug: string }>((resolve) => {
+        finishLoop = resolve
+      })
+      let loopStarted: (() => void) | undefined
+      const startedLoop = new Promise<void>((resolve) => {
+        loopStarted = resolve
+      })
+      const firstLoop = loopCommand(["alpha", "--no-ui"], {
+        root,
+        output: commandOutput().output,
+        loadConfig: async () => DEFAULT_CONFIG,
+        runLoop: async () => {
+          loopStarted?.()
+          return loopResult
+        },
+      })
+      await startedLoop
+      await expect(runCommand(["beta", "--no-ui"], {
+        root,
+        output: commandOutput().output,
+        loadConfig: async () => DEFAULT_CONFIG,
+        runTaskPacket: async () => ({ ok: true, completed: 1, failed: 0, blocked: 0 }),
+      })).rejects.toThrow("another Spec Finder run is active")
+      finishLoop?.({ terminal: "done", reason: "ok", iteration: 0, slug: "alpha" })
+      expect(await firstLoop).toBe(0)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("emit wrapper keeps only the first run_started on the cockpit store", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-loop-emit-"))
+    const output = commandOutput(true)
+    let store: CockpitStore | undefined
+    try {
+      const code = await loopCommand(["demo"], {
+        root,
+        input: { isTTY: true },
+        output: output.output,
+        loadConfig: async () => DEFAULT_CONFIG,
+        startCockpit: async (next) => {
+          store = next
+          return {
+            close() {},
+            waitForDismissal: async () => undefined,
+            waitForExit: async () => undefined,
+          }
+        },
+        runLoop: async ({ emit }) => {
+          emit({ type: "run_started", slug: "first", config: DEFAULT_CONFIG, tasks: [loopTask("task_01", "First")] })
+          emit({ type: "run_started", slug: "second", config: DEFAULT_CONFIG, tasks: [loopTask("task_02", "Second")] })
+          return { terminal: "done", reason: "ok", iteration: 1, slug: "demo" }
+        },
+      })
+      expect(code).toBe(0)
+      expect(store?.getSnapshot().slug).toBe("first")
+      expect(store?.getSnapshot().tasks.map((task) => task.id)).toEqual(["task_01"])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })

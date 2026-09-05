@@ -4,6 +4,7 @@ import {
   checkpointCommand,
   configCommand,
   execCommand,
+  loopCommand,
   runCommand,
   setupCommand,
   upgradeCommand,
@@ -17,6 +18,7 @@ Usage:
   spec-finder upgrade
   spec-finder run <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
   spec-finder run --multiple <slug1,slug2,...> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
+  spec-finder loop <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE] [--max-iterations N] [--no-progress-window N] [--dry-run] [--reset-state]
   spec-finder exec "<prompt>" [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
   spec-finder checkpoint begin <task_slug> <task_id>
   spec-finder checkpoint complete <task_slug> <task_id>
@@ -49,6 +51,18 @@ Batch mode:
   Resolve the issue and rerun manually.
   Batch mode adds no persistence, rollback, resume, parallelism, or telemetry.
 
+Loop mode:
+  spec-finder loop <task_slug> is the continuous driver for one packet. spec-finder run remains a
+  single pass. Loop shares the workspace run-lock and the same runtime flags: --no-ui, --provider NAME,
+  --model ID, --reasoning LEVEL, and --speed MODE.
+  Loop-only flags: --dry-run, --reset-state, --max-iterations N, --no-progress-window N.
+  --dry-run prints pending and recovery actions and writes nothing.
+  Defaults are --max-iterations 50 and --no-progress-window 3.
+  Named terminals: done, no_op, blocked, failed, exhausted, stalled, and cancelled.
+  Exits: 0 done/no_op; 1 blocked/failed/exhausted/stalled; 2 invalid invocation/packet/ledger; 130 cancelled.
+  loop does not support --multiple and adds no required loop config key.
+  Cockpit iteration meters, a portable loop skill, QA/review/ship, continue-on-error, and multi-packet loop are later.
+
   Checkpoint mode:
   checkpoint begin|complete uses only .spec-finder/config.json auto_commit: true and the shared local Git service.
   It creates local recovery checkpoints only; it never pushes, opens a PR, or implies review or merge.
@@ -79,6 +93,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     case "setup": return setupCommand(args)
     case "upgrade": return upgradeCommand()
     case "run": return runCommand(args)
+    case "loop": return loopCommand(args)
     case "checkpoint": return checkpointCommand(args)
     case "exec": return execCommand(args)
     case "config": return configCommand()
