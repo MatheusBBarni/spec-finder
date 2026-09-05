@@ -167,4 +167,32 @@ describe("CLI help", () => {
     expect(help).toContain("never pushes")
     expect(help).toContain("Legacy auto-commit=true|false invocation tokens are rejected")
   })
+
+  test("documents spec-finder loop grammar, terminals, and flags", async () => {
+    const help = await captureHelp()
+    expect(help).toContain("spec-finder loop <task_slug>")
+    for (const flag of ["--dry-run", "--reset-state", "--max-iterations", "--no-progress-window"]) {
+      expect(help).toContain(flag)
+    }
+    for (const terminal of ["done", "no_op", "blocked", "failed", "exhausted", "stalled", "cancelled"]) {
+      expect(help).toContain(terminal)
+    }
+  })
+
+  test("keeps help and README aligned on loop vs run, exits, and dry-run", async () => {
+    const help = await captureHelp()
+    for (const text of [help, README]) {
+      expect(text).toContain("spec-finder loop <task_slug>")
+      expect(text).toContain("spec-finder run")
+      expect(text).toContain("writes nothing")
+      expect(text).toContain("0")
+      expect(text).toContain("1")
+      expect(text).toContain("2")
+      expect(text).toContain("130")
+    }
+    expect(help).not.toContain("loop --multiple")
+    expect(README).not.toContain("loop --multiple")
+    expect(help).toContain("no required loop config key")
+    expect(README).toContain("no required `loop` key")
+  })
 })

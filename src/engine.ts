@@ -50,6 +50,8 @@ export interface RunOptions {
   providerLaunch?: ProviderLaunch
   /** Injectable runtime seam for deterministic checkpoint lifecycle tests. */
   checkpointService?: CheckpointServiceContract
+  /** Optional previous-failure summary prepended to implementation and report prompts. */
+  loopFeedback?: string
 }
 
 export interface RunResult {
@@ -240,7 +242,7 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
                 emit: options.emit,
                 run: async (attempt) => {
                   const implementation = await session.runTurn(
-                    implementationPrompt(options.root, packet.directory, current, attempt),
+                    implementationPrompt(options.root, packet.directory, current, attempt, options.loopFeedback),
                     "implementation",
                   )
                   assertSuccessfulStop("implementation", implementation.stopReason)
@@ -275,6 +277,7 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
                     reportPath,
                     attempt,
                     resumingReportHandoff || attempts["final report"] > 1,
+                    options.loopFeedback,
                   ),
                   "report",
                 )
@@ -524,7 +527,24 @@ async function reloadTask(task: TaskFile): Promise<TaskFile> {
   return parseTask(task.path, await readFile(task.path, "utf8"))
 }
 
-function implementationPrompt(root: string, packetDirectory: string, task: TaskFile, attempt: number): string {
+const LOOP_FEEDBACK_HEADING = "Loop feedback:"
+const MAX_LOOP_FEEDBACK_CHARS = 4096
+const LOOP_FEEDBACK_CONTROL_CHARS = /[\u0000-\u001f\u007f]/g
+
+function sanitizeLoopFeedback(value: string | undefined): string | undefined {
+  if (value === undefined || value.length === 0) return undefined
+  const stripped = value.replace(LOOP_FEEDBACK_CONTROL_CHARS, "")
+  if (stripped.length === 0) return undefined
+  return stripped.length <= MAX_LOOP_FEEDBACK_CHARS ? stripped : stripped.slice(0, MAX_LOOP_FEEDBACK_CHARS)
+}
+
+function withLoopFeedback(feedback: string | undefined, body: string): string {
+  const sanitized = sanitizeLoopFeedback(feedback)
+  if (!sanitized) return body
+  return `${LOOP_FEEDBACK_HEADING}\n${sanitized}\n\n${body}`
+}
+
+function implementationPrompt(root: string, packetDirectory: string, task: TaskFile, attempt: number, loopFeedback?: string): string {
   const prd = join(packetDirectory, "_prd.md")
   const techspec = join(packetDirectory, "_techspec.md")
   const memory = taskMemoryPaths(packetDirectory, task.id)
@@ -533,7 +553,7 @@ function implementationPrompt(root: string, packetDirectory: string, task: TaskF
 This is continuation attempt ${attempt}/${TASK_PHASE_ATTEMPTS}. Preserve and inspect the task-owned edits, test output, and memory from the preceding attempt. Resume only incomplete requirements; do not restart the task or treat those edits as unrelated work.
 `
     : ""
-  return `You are executing a Spec Finder implementation task in ${root}.
+  return withLoopFeedback(loopFeedback, `You are executing a Spec Finder implementation task in ${root}.
 
 Use the sf-execute-task skill to execute ${task.path}. Follow the skill's hard gates and lifecycle contract. If the skill is unavailable, stop and report that blocker instead of silently substituting a generic workflow.
 
@@ -545,7 +565,7 @@ Implement only this task. Preserve unrelated work. Run the task's required focus
 ${continuation}
 
 Task:
-${task.source}`
+${task.source}`)
 }
 
 function reportPrompt(
@@ -555,6 +575,7 @@ function reportPrompt(
   reportPath: string,
   attempt: number,
   resumed: boolean,
+  loopFeedback?: string,
 ): string {
   const memory = taskMemoryPaths(packetDirectory, task.id)
   const retry = attempt > 1
@@ -562,7 +583,7 @@ function reportPrompt(
     : resumed
       ? "A prior ACP run completed the implementation phase and persisted this report handoff. Use the task memory, current diff, and exact terminal results as evidence. Do not rerun implementation or verification that is already fresh and complete."
       : "The implementation phase completed immediately before this prompt in the same ACP session. Treat its task memory and exact terminal results as the handoff evidence. Do not repeat implementation or rerun verification that is already fresh and complete."
-  return `You are the final-report phase for ${task.id} in ${root}.
+  return withLoopFeedback(loopFeedback, `You are the final-report phase for ${task.id} in ${root}.
 
 ${retry}
 
@@ -570,7 +591,7 @@ Read ${task.path}, ${join(packetDirectory, "_prd.md")}, ${join(packetDirectory, 
 
 Write the final report to ${reportPath}. The report MUST include: task and outcome; files changed; requirements satisfied; tests and exact results; unresolved risks or follow-ups; and a final verdict of completed, failed, or blocked. Be factual and never claim a test passed without terminal evidence. Do not change the task frontmatter status; Spec Finder owns it.
 
-Use the sf-task-report skill if it is installed.`
+Use the sf-task-report skill if it is installed.`)
 }
 
 function successfulStop(reason: string): boolean {

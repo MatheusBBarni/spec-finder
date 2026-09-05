@@ -14,6 +14,7 @@ Task packets stay local in `.spec-finder/tasks/` and `.spec-finder/tasks_done/`.
 - **Read-only cockpit** — watch provider, task graph, ACP activity, and tool calls without extra UI chrome.
 - **One session per task** — implementation and the final report share one ACP session.
 - **Ordered batch runs** — `spec-finder run --multiple slug1,slug2` is serial and fail-fast.
+- **Continuous packet loop** — `spec-finder loop <task_slug>` keeps driving one packet through recoveries until a named terminal; `run` stays a single pass.
 - **Local checkpoints** — optional `auto_commit` writes recovery commits after verified tasks; never pushes.
 - **Optional TDD pack** — red-before-green skills when a task changes product behavior.
 - **Packet-free `exec`** — one-turn ACP prompt (currently uncertified for every real provider).
@@ -54,6 +55,8 @@ Fresh setup defaults to Codex, `gpt-5.6-luna`, `normal` speed, and local scope. 
 ```bash
 spec-finder run my-feature --no-ui
 spec-finder run my-feature --provider pi --model auto --reasoning auto
+spec-finder loop my-feature --dry-run
+spec-finder loop my-feature
 ```
 
 ## Supported providers
@@ -157,6 +160,23 @@ For logs without the cockpit:
 ```bash
 spec-finder run my-feature --no-ui
 ```
+
+### Continuous loop vs run
+
+`spec-finder run` is one dependency-safe pass. `spec-finder loop <task_slug>` is the opt-in continuous driver for **one packet**. It shares the workspace run-lock and the same runtime flags (`--no-ui`, `--provider`, `--model`, `--reasoning`, `--speed`), then keeps recovering report handoffs and pending checkpoint delivery and executing remaining work until a named terminal. After process death, rerun the same `loop` command; completed work is not redone.
+
+```bash
+spec-finder loop my-feature
+spec-finder loop my-feature --no-ui --max-iterations 20 --no-progress-window 3
+spec-finder loop my-feature --dry-run
+spec-finder loop my-feature --reset-state
+```
+
+`--dry-run` prints pending and recovery actions and writes nothing. `--reset-state` rewrites the packet-local `loop/state.json` bootstrap after packet validation. Defaults are 50 iterations and a no-progress window of 3. Loop rejects `--multiple` and adds no required `loop` key in `.spec-finder/config.json`.
+
+Every invocation ends as one of: `done`, `no_op`, `blocked`, `failed`, `exhausted`, `stalled`, or cancelled. Exits are `0` (`done`/`no_op`), `1` (`blocked`/`failed`/`exhausted`/`stalled`), `2` (invalid invocation, packet, or ledger), and `130` (cancelled). `run` still exits `0`/`1` only.
+
+Cockpit iteration meters, a portable loop skill, QA/review/ship-as-done, continue-on-error, and multi-packet loop are later.
 
 ### Ordered batch runs
 
@@ -347,6 +367,7 @@ spec-finder setup [--agent claude|codex|cursor|grok|pi] [--model auto|CURATED] [
 spec-finder upgrade
 spec-finder run <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
 spec-finder run --multiple <slug1,slug2,...> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
+spec-finder loop <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE] [--max-iterations N] [--no-progress-window N] [--dry-run] [--reset-state]
 spec-finder exec "<prompt>" [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
 spec-finder checkpoint begin <task_slug> <task_id>
 spec-finder checkpoint complete <task_slug> <task_id>
