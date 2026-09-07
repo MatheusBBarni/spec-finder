@@ -252,7 +252,7 @@ Key behavior:
 - `model`: `auto` or a provider model ID. Claude uses `ANTHROPIC_MODEL`; Cursor receives `--model`; Codex uses advertised ACP session options. Grok Build and Pi leave `auto` to provider defaults and apply an explicit model through an advertised ACP session option or fail clearly.
 - `reasoning`: `auto`, `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`. Grok Build and Pi leave `auto` to provider defaults and apply an explicit choice through an advertised ACP session option or fail clearly; other providers apply it only when advertised.
 - `speed`: `auto`, `normal`, or `fast`. Unsupported providers continue with a truthful `unsupported` cockpit outcome.
-- `permissions`: `prompt` cancels permission requests in the read-only cockpit with a visible notice; with `--no-ui`, it prompts in an interactive terminal and cancels when input is unavailable. `approve-all` automatically chooses an allow option; `deny` automatically chooses a reject option.
+- `permissions`: cockpit `prompt` waits for allow-once / reject-once (`a` / `r`) and shows `Waiting for permission`. The decision applies to that request only and is not remembered. `--no-ui` still prompts in an interactive terminal and cancels when input is unavailable. `approve-all` automatically chooses an allow option; `deny` automatically chooses a reject option.
 - `auto_commit`: `false` by default. Set it to `true` to enable one local recovery checkpoint after each task that passes implementation, verification, report, and status gates. The setting is configuration-only; invocation tokens such as `auto-commit=true|false` are rejected.
 
 ### Local checkpoint recovery

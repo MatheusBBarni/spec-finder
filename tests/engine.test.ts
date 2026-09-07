@@ -732,7 +732,7 @@ dependencies: []
     expect(events).toContainEqual({ type: "run_finished", ok: false, message: "run cancelled" })
   })
 
-  test("retries once before emitting the final read-only permission failure", async () => {
+  test("waits on cockpit prompt instead of retrying a read-only permission cancel", async () => {
     const root = await mkdtemp(join(tmpdir(), "spec-finder-engine-"))
     const packet = join(root, ".spec-finder", "tasks", "demo")
     await mkdir(packet, { recursive: true })
@@ -756,12 +756,13 @@ dependencies: []
       permissions: "prompt",
     })
     const events: RunEvent[] = []
+    const controller = new AbortController()
 
-    const result = await runTaskPacket({
+    const running = runTaskPacket({
       root,
       slug: "demo",
       config,
-      signal: new AbortController().signal,
+      signal: controller.signal,
       emit: (event) => events.push(event),
       interactivePermissions: true,
       providerLaunch: {
@@ -772,25 +773,32 @@ dependencies: []
       },
     })
 
-    expect(result).toEqual({ ok: false, completed: 0, failed: 1, blocked: 0 })
-    const noticeIndex = events.findIndex((event) =>
+    await Promise.race([
+      waitForRunEvent(events, "permission_prompt"),
+      running.then(() => {
+        throw new Error("packet finished before permission_prompt")
+      }),
+    ])
+    expect(events.some((event) =>
       event.type === "activity" && event.message.includes("cockpit is read-only")
-    )
-    const retryIndex = events.findIndex((event) =>
-      event.type === "activity" && event.message.includes("retrying attempt 2/2")
-    )
-    const failureIndex = events.findIndex((event) =>
-      event.type === "activity" && event.message === "implementation stopped: refusal"
-    )
-    expect(noticeIndex).toBeGreaterThan(-1)
-    expect(retryIndex).toBeGreaterThan(noticeIndex)
-    expect(failureIndex).toBeGreaterThan(retryIndex)
-    expect(events.filter((event) =>
-      event.type === "activity" && event.message.includes("cockpit is read-only")
-    )).toHaveLength(2)
+    )).toBe(false)
+    expect(events.some((event) =>
+      event.type === "activity" && event.message.includes("retrying attempt")
+    )).toBe(false)
     expect(events.some((event) => event.type === "permission_requested")).toBe(false)
-    expect(events.some((event) => event.type === "task_status" && event.reportReference !== undefined)).toBeFalse()
-  })
+
+    controller.abort()
+    const result = await running
+    expect(result.ok).toBe(false)
+    expect(events).toContainEqual({
+      type: "permission_settled",
+      taskId: "task_01",
+      decision: "cancelled",
+    })
+    expect(events.some((event) =>
+      event.type === "activity" && event.message.includes("cockpit is read-only")
+    )).toBe(false)
+  }, 10_000)
 
   test("branches on auto_commit and orders begin before in_progress and complete after completed", async () => {
     const fixture = await createRetryFixture("Checkpoint ordering")
@@ -1233,6 +1241,20 @@ dependencies: []
     expect(prompts).not.toContain("Loop feedback:")
   })
 })
+
+async function waitForRunEvent<T extends RunEvent["type"]>(
+  events: RunEvent[],
+  type: T,
+  timeoutMs = 8_000,
+): Promise<Extract<RunEvent, { type: T }>> {
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    const event = events.find((candidate): candidate is Extract<RunEvent, { type: T }> => candidate.type === type)
+    if (event) return event
+    await Bun.sleep(10)
+  }
+  throw new Error(`timed out waiting for ${type}`)
+}
 
 function recordingCheckpointService(timeline: string[]): CheckpointServiceContract {
   return {

@@ -198,9 +198,10 @@ function adaptNeutralError(error: unknown, signal: AbortSignal): Error {
   return error instanceof Error ? error : new Error(String(error))
 }
 
-class PacketPermissionBroker implements PermissionBroker {
+export class PacketPermissionBroker implements PermissionBroker {
   readonly #options: AcpSessionOptions
   readonly #pending = new Set<(outcome: PermissionOutcome) => void>()
+  #cockpitWait = false
 
   constructor(options: AcpSessionOptions) {
     this.#options = options
@@ -220,12 +221,7 @@ class PacketPermissionBroker implements PermissionBroker {
     }
 
     if (this.#options.interactivePermissions) {
-      this.#options.emit({
-        type: "activity",
-        taskId: this.#options.taskId,
-        message: "Permission request cancelled because the cockpit is read-only; configure permissions before rerunning.",
-      })
-      return { decision: "cancelled" }
+      return this.requestCockpitPrompt(request)
     }
     if (!process.stdin.isTTY) return { decision: "cancelled" }
 
@@ -244,6 +240,56 @@ class PacketPermissionBroker implements PermissionBroker {
 
   async cancelPending(): Promise<void> {
     for (const settle of [...this.#pending]) settle({ decision: "cancelled" })
+  }
+
+  private async requestCockpitPrompt(request: RequestPermissionRequest): Promise<PermissionOutcome> {
+    if (this.#cockpitWait) return { decision: "cancelled" }
+
+    const title = sanitizePermissionTitle(request.toolCall.title ?? "")
+    const allowOnce = request.options.some((option) => option.kind === "allow_once")
+    const rejectOnce = request.options.some((option) => option.kind === "reject_once")
+    this.#cockpitWait = true
+    try {
+      return await new Promise<PermissionOutcome>((resolve) => {
+        let settled = false
+        const finish = (outcome: PermissionOutcome, decision: "allowed" | "denied" | "cancelled") => {
+          if (settled) return
+          settled = true
+          this.#pending.delete(cancelSettle)
+          this.#options.emit({
+            type: "permission_settled",
+            taskId: this.#options.taskId,
+            decision,
+          })
+          resolve(outcome)
+        }
+        const cancelSettle = (outcome: PermissionOutcome) => {
+          finish(outcome, "cancelled")
+        }
+        const operatorSettle = (decision: "allowed" | "denied") => {
+          if (decision === "allowed") {
+            const selected = request.options.find((option) => option.kind === "allow_once")
+            if (selected === undefined) return
+            finish({ decision: "allowed", optionId: selected.optionId }, "allowed")
+            return
+          }
+          const selected = request.options.find((option) => option.kind === "reject_once")
+          if (selected === undefined) return
+          finish({ decision: "denied", optionId: selected.optionId }, "denied")
+        }
+        this.#pending.add(cancelSettle)
+        this.#options.emit({
+          type: "permission_prompt",
+          taskId: this.#options.taskId,
+          title,
+          allowOnce,
+          rejectOnce,
+          settle: operatorSettle,
+        })
+      })
+    } finally {
+      this.#cockpitWait = false
+    }
   }
 
   private async prompt(request: RequestPermissionRequest): Promise<PermissionOutcome> {
@@ -278,6 +324,14 @@ function createPacketWorkspaceAccess(root: string): WorkspaceAccess {
       await writeFile(path, content)
     },
   }
+}
+
+export function sanitizePermissionTitle(value: string): string {
+  return value
+    .replace(/[\u0000-\u001F\u007F]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 160) || "(unnamed)"
 }
 
 export function toPacketPermissionResponse(outcome: PermissionOutcome): RequestPermissionResponse {

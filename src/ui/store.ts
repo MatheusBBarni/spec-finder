@@ -72,6 +72,13 @@ export interface CockpitFinishedState {
   readonly reason?: NoWorkReason
 }
 
+export interface PendingPermission {
+  readonly taskId: string
+  readonly title: string
+  readonly allowOnce: boolean
+  readonly rejectOnce: boolean
+}
+
 export type CockpitBatchStatus = BatchEventStatus | null
 
 export interface CockpitState {
@@ -93,6 +100,7 @@ export interface CockpitState {
   readonly taskFailureDetails: Readonly<Record<string, string>>
   readonly runActivity: readonly TranscriptEntry[]
   readonly runtimeOptions: Readonly<Partial<Record<RuntimeOptionName, RuntimeOptionOutcome>>>
+  readonly pendingPermission: PendingPermission | null
   readonly finished: Readonly<CockpitFinishedState> | null
   readonly batchStatus: CockpitBatchStatus
   readonly packetSummaries: readonly PacketSummary[]
@@ -123,6 +131,7 @@ function createInitialState(): CockpitState {
     taskFailureDetails: {},
     runActivity: [],
     runtimeOptions: {},
+    pendingPermission: null,
     finished: null,
     batchStatus: null,
     packetSummaries: [],
@@ -140,6 +149,7 @@ export class CockpitStore {
   private state: CockpitState = createInitialState()
   private listeners = new Set<() => void>()
   private sequence = 0
+  private pendingSettle: ((decision: "allowed" | "denied") => void) | null = null
 
   getSnapshot = (): CockpitState => this.state
   subscribe = (listener: () => void): (() => void) => {
@@ -153,6 +163,10 @@ export class CockpitStore {
     for (const listener of this.listeners) listener()
   }
 
+  private dropPendingPermission(): void {
+    this.pendingSettle = null
+  }
+
   listener: RunEventListener = (event) => this.consume(event)
 
   consume(event: RunEvent): void {
@@ -161,6 +175,7 @@ export class CockpitStore {
         // A packet engine nested inside a batch still emits its legacy
         // lifecycle events. They must not reset the batch projection.
         if (this.state.batchStatus !== null) break
+        this.dropPendingPermission()
         this.sequence = 0
         const tasks = event.tasks.map(toCockpitTask)
         const visibleTaskIds = unfinishedTasks(tasks).map((task) => task.id)
@@ -218,9 +233,27 @@ export class CockpitStore {
         break
       }
       case "permission_requested":
-        // TUI permission prompts are cancelled before reaching the read-only store.
-        // Preserve the raw event contract for non-TUI consumers without creating
-        // a second permission-control path in the cockpit.
+        // ACP permission_requested remains unused by the packet adapter.
+        // Cockpit wait is projected through permission_prompt instead.
+        break
+      case "permission_prompt": {
+        if (this.state.pendingPermission !== null) break
+        this.pendingSettle = event.settle
+        this.set({
+          ...this.state,
+          pendingPermission: {
+            taskId: event.taskId,
+            title: event.title,
+            allowOnce: event.allowOnce,
+            rejectOnce: event.rejectOnce,
+          },
+        })
+        break
+      }
+      case "permission_settled":
+        this.dropPendingPermission()
+        if (this.state.pendingPermission === null) break
+        this.set({ ...this.state, pendingPermission: null })
         break
       case "run_finished": {
         if (this.state.batchStatus !== null) break
@@ -234,10 +267,12 @@ export class CockpitStore {
           ...(event.outcome === undefined ? {} : { outcome: event.outcome }),
           ...(event.reason === undefined ? {} : { reason: event.reason }),
         }
+        this.dropPendingPermission()
         this.set({
           ...this.state,
           finished,
           activeTaskId: null,
+          pendingPermission: null,
         })
         break
       }
@@ -279,6 +314,7 @@ export class CockpitStore {
       this.nextSequence(),
     )
 
+    this.dropPendingPermission()
     this.set({
       ...this.state,
       slug: firstSlug ?? "",
@@ -294,6 +330,7 @@ export class CockpitStore {
       taskFailureDetails: {},
       runActivity,
       runtimeOptions: {},
+      pendingPermission: null,
       finished: null,
       batchStatus: "running",
       packetSummaries,
@@ -333,6 +370,7 @@ export class CockpitStore {
         : summary
     ))
 
+    this.dropPendingPermission()
     this.set({
       ...this.state,
       slug,
@@ -350,6 +388,7 @@ export class CockpitStore {
       taskFailureDetails,
       taskTimers: {},
       runtimeOptions: {},
+      pendingPermission: null,
       finished: null,
       batchStatus: "running",
       packetSummaries,
@@ -377,9 +416,11 @@ export class CockpitStore {
           outcome,
         }
       : this.state.stoppingPacket
+    this.dropPendingPermission()
     this.set({
       ...this.state,
       activeTaskId: null,
+      pendingPermission: null,
       packetSummaries,
       stoppingPacket,
       notStartedPackets: packetSummaries.filter((summary) => summary.outcome === "not_started"),
@@ -407,6 +448,7 @@ export class CockpitStore {
     const message = blockedDelivery && event.ok
       ? `${baseMessage}; checkpoint delivery blocked`
       : baseMessage
+    this.dropPendingPermission()
     this.set({
       ...this.state,
       batchStatus: status,
@@ -415,6 +457,7 @@ export class CockpitStore {
       notStartedPackets: packetSummaries.filter((summary) => summary.outcome === "not_started"),
       finished: { ok: event.ok && !blockedDelivery, message },
       activeTaskId: null,
+      pendingPermission: null,
     })
   }
 
@@ -469,6 +512,18 @@ export class CockpitStore {
 
   toggleHelp(): void {
     this.set({ ...this.state, helpOpen: !this.state.helpOpen })
+  }
+
+  allowPendingPermission(): void {
+    const pending = this.state.pendingPermission
+    if (pending === null || !pending.allowOnce) return
+    this.pendingSettle?.("allowed")
+  }
+
+  rejectPendingPermission(): void {
+    const pending = this.state.pendingPermission
+    if (pending === null || !pending.rejectOnce) return
+    this.pendingSettle?.("denied")
   }
 
   tick(nowMs?: number): void {

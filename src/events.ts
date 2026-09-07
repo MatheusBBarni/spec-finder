@@ -68,6 +68,21 @@ export type CheckpointEvent =
   | { type: "checkpoint"; taskId: string; state: "created"; commit?: string }
   | { type: "checkpoint"; taskId: string; state: "blocked"; reason: string }
 
+export type PermissionPromptEvent = {
+  type: "permission_prompt"
+  taskId: string
+  title: string
+  allowOnce: boolean
+  rejectOnce: boolean
+  settle: (decision: "allowed" | "denied") => void
+}
+
+export type PermissionSettledEvent = {
+  type: "permission_settled"
+  taskId: string
+  decision: "allowed" | "denied" | "cancelled"
+}
+
 export type RunEvent =
   | { type: "run_started"; slug: string; config: SpecFinderConfig; tasks: TaskFile[] }
   | { type: "task_status"; taskId: string; status: TaskStatus; reportReference?: string }
@@ -76,6 +91,8 @@ export type RunEvent =
   | { type: "session_update"; taskId: string; sessionId: string; phase?: AcpTurnPhase; update: SessionUpdate }
   | { type: "runtime_option"; name: "model" | "reasoning" | "speed"; requested: string; outcome: "applied" | "default" | "unsupported"; detail?: string }
   | { type: "permission_requested"; request: RequestPermissionRequest; respond: (response: RequestPermissionResponse) => void }
+  | PermissionPromptEvent
+  | PermissionSettledEvent
   | {
       type: "run_finished"
       ok: boolean

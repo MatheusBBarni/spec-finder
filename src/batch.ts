@@ -528,6 +528,8 @@ function scopePacketTaskEvent(slug: string, event: RunEvent): RunEvent {
   switch (event.type) {
     case "task_status":
     case "session_update":
+    case "permission_prompt":
+    case "permission_settled":
       return { ...event, taskId: qualifyTaskId(slug, event.taskId) }
     case "checkpoint":
       return { ...event, taskId: qualifyTaskId(slug, event.taskId) }

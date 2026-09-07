@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtemp, readFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { runAcpTurn } from "../src/acp-client.ts"
+import { PacketPermissionBroker, runAcpTurn, sanitizePermissionTitle } from "../src/acp-client.ts"
 import { DEFAULT_CONFIG, parseConfig } from "../src/config.ts"
 import type { AcpTurnPhase, RunEvent } from "../src/events.ts"
 import {
@@ -11,6 +11,7 @@ import {
   normalizeGrokSessionConfigOptions,
 } from "../src/providers.ts"
 import { GROK_BUILD_1_0_SESSION_CONFIG_METADATA } from "./fixtures/grok-session-config.ts"
+import { CockpitStore } from "../src/ui/store.ts"
 
 describe("ACP client", () => {
   test("leaves auto Grok runtime choices to provider defaults", async () => {
@@ -788,27 +789,221 @@ describe("ACP client", () => {
     expect(updates.every((event) => event.phase === "report")).toBeTrue()
   })
 
-  test("cancels prompt permission requests in the TUI without emitting an interactive event", async () => {
-    const { events, result } = await runPermissionTurn({
-      phase: "report",
-      permissions: "prompt",
+  test("waits on cockpit prompt instead of auto-cancelling", async () => {
+    const events: RunEvent[] = []
+    const controller = new AbortController()
+    const turn = runCockpitPermissionTurn(events, controller.signal)
+
+    const prompt = await Promise.race([
+      waitForRunEvent(events, "permission_prompt"),
+      turn.then(() => {
+        throw new Error("turn finished before permission_prompt")
+      }),
+    ])
+
+    expect(prompt).toMatchObject({
+      type: "permission_prompt",
+      taskId: "task_01",
+      title: "Mock edit",
+      allowOnce: true,
+      rejectOnce: true,
+    })
+    expect(typeof prompt.settle).toBe("function")
+    expect(events.some((event) =>
+      event.type === "activity" && event.message.includes("cockpit is read-only")
+    )).toBe(false)
+    expect(events.some((event) => event.type === "permission_requested")).toBe(false)
+    expect(events.some((event) => event.type === "permission_settled")).toBe(false)
+
+    await Bun.sleep(50)
+    expect(events.some((event) => event.type === "permission_settled")).toBe(false)
+
+    controller.abort()
+    await turn
+    expect(events).toContainEqual({
+      type: "permission_settled",
+      taskId: "task_01",
+      decision: "cancelled",
+    })
+  }, 10_000)
+
+  test("cancels an overlapping cockpit prompt without claiming operator reject", async () => {
+    const events: RunEvent[] = []
+    const broker = new PacketPermissionBroker({
+      root: "/tmp",
+      config: parseConfig({ ...DEFAULT_CONFIG, permissions: "prompt" }),
+      taskId: "task_01",
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
       interactivePermissions: true,
     })
-
-    expect(result.stopReason).toBe("refusal")
+    const request = {
+      sessionId: "s1",
+      toolCall: { toolCallId: "t1", title: "  \u0007Write\nfile  ", status: "pending" as const },
+      options: [
+        { optionId: "allow", name: "Allow", kind: "allow_once" as const },
+        { optionId: "reject", name: "Reject", kind: "reject_once" as const },
+      ],
+    }
+    const first = broker.request(request)
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "permission_prompt",
+      title: sanitizePermissionTitle("  \u0007Write\nfile  "),
+      allowOnce: true,
+      rejectOnce: true,
+    }))
+    expect(await broker.request(request)).toEqual({ decision: "cancelled" })
+    expect(events.filter((event) => event.type === "permission_prompt")).toHaveLength(1)
+    expect(events.some((event) => event.type === "permission_settled")).toBe(false)
+    await broker.cancelPending()
+    await expect(first).resolves.toEqual({ decision: "cancelled" })
     expect(events).toContainEqual({
-      type: "activity",
+      type: "permission_settled",
       taskId: "task_01",
-      message: "Permission request cancelled because the cockpit is read-only; configure permissions before rerunning.",
+      decision: "cancelled",
     })
-    expect(events.some((event) => event.type === "permission_requested")).toBe(false)
+  })
+
+  test("maps cockpit settle to once-options only", async () => {
+    const events: RunEvent[] = []
+    const broker = new PacketPermissionBroker({
+      root: "/tmp",
+      config: parseConfig({ ...DEFAULT_CONFIG, permissions: "prompt" }),
+      taskId: "task_01",
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: true,
+    })
+    const request = {
+      sessionId: "s1",
+      toolCall: { toolCallId: "t1", title: "Edit", status: "pending" as const },
+      options: [
+        { optionId: "allow-always", name: "Always", kind: "allow_always" as const },
+        { optionId: "allow", name: "Allow", kind: "allow_once" as const },
+        { optionId: "reject", name: "Reject", kind: "reject_once" as const },
+      ],
+    }
+    const allowed = broker.request(request)
+    const prompt = events.find((event) => event.type === "permission_prompt")
+    if (prompt?.type !== "permission_prompt") throw new Error("missing permission_prompt")
+    prompt.settle("allowed")
+    await expect(allowed).resolves.toEqual({ decision: "allowed", optionId: "allow" })
+    expect(events).toContainEqual({
+      type: "permission_settled",
+      taskId: "task_01",
+      decision: "allowed",
+    })
+
+    const deniedEvents: RunEvent[] = []
+    const denyBroker = new PacketPermissionBroker({
+      root: "/tmp",
+      config: parseConfig({ ...DEFAULT_CONFIG, permissions: "prompt" }),
+      taskId: "task_01",
+      signal: new AbortController().signal,
+      emit: (event) => deniedEvents.push(event),
+      interactivePermissions: true,
+    })
+    const denied = denyBroker.request(request)
+    const denyPrompt = deniedEvents.find((event) => event.type === "permission_prompt")
+    if (denyPrompt?.type !== "permission_prompt") throw new Error("missing permission_prompt")
+    denyPrompt.settle("denied")
+    await expect(denied).resolves.toEqual({ decision: "denied", optionId: "reject" })
+  })
+
+  test("allows a cockpit prompt once and continues the turn", async () => {
+    const store = new CockpitStore()
+    const events: RunEvent[] = []
+    const turn = runCockpitPermissionTurn(events, new AbortController().signal, {
+      emit: (event) => {
+        events.push(event)
+        store.consume(event)
+      },
+    })
+    await Promise.race([
+      waitForRunEvent(events, "permission_prompt"),
+      turn.then(() => {
+        throw new Error("turn finished before permission_prompt")
+      }),
+    ])
+    store.allowPendingPermission()
+    const result = await turn
+    expect(result.stopReason).toBe("end_turn")
+    expect(events).toContainEqual({
+      type: "permission_settled",
+      taskId: "task_01",
+      decision: "allowed",
+    })
     expect(events).toContainEqual(expect.objectContaining({
       type: "session_update",
       update: expect.objectContaining({
-        content: { type: "text", text: "permission response: cancelled" },
+        content: { type: "text", text: "permission response: allow" },
       }),
     }))
-  })
+    expect(events.some((event) =>
+      event.type === "activity" && event.message.includes("cockpit is read-only")
+    )).toBe(false)
+    expect(store.getSnapshot().pendingPermission).toBeNull()
+  }, 10_000)
+
+  test("rejects a cockpit prompt once without auto-cancelling the run", async () => {
+    const store = new CockpitStore()
+    const events: RunEvent[] = []
+    const turn = runCockpitPermissionTurn(events, new AbortController().signal, {
+      expectedPermission: "reject",
+      emit: (event) => {
+        events.push(event)
+        store.consume(event)
+      },
+    })
+    await Promise.race([
+      waitForRunEvent(events, "permission_prompt"),
+      turn.then(() => {
+        throw new Error("turn finished before permission_prompt")
+      }),
+    ])
+    store.rejectPendingPermission()
+    const result = await turn
+    expect(result.stopReason).toBe("end_turn")
+    expect(events).toContainEqual({
+      type: "permission_settled",
+      taskId: "task_01",
+      decision: "denied",
+    })
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "session_update",
+      update: expect.objectContaining({
+        content: { type: "text", text: "permission response: reject" },
+      }),
+    }))
+    expect(events.some((event) =>
+      event.type === "activity" && event.message.includes("cockpit is read-only")
+    )).toBe(false)
+  }, 10_000)
+
+  test("asks again for a later cockpit permission request", async () => {
+    const store = new CockpitStore()
+    const events: RunEvent[] = []
+    const turn = runCockpitPermissionTurn(events, new AbortController().signal, {
+      permissionRounds: "2",
+      emit: (event) => {
+        events.push(event)
+        store.consume(event)
+      },
+    })
+    await Promise.race([
+      waitForRunEvent(events, "permission_prompt"),
+      turn.then(() => {
+        throw new Error("turn finished before permission_prompt")
+      }),
+    ])
+    store.allowPendingPermission()
+    await waitForRunEventCount(events, "permission_prompt", 2)
+    expect(store.getSnapshot().pendingPermission?.title).toBe("Mock edit 2")
+    store.allowPendingPermission()
+    const result = await turn
+    expect(result.stopReason).toBe("end_turn")
+    expect(events.filter((event) => event.type === "permission_prompt")).toHaveLength(2)
+  }, 10_000)
 
   test("preserves non-UI prompt cancellation when stdin is not interactive", async () => {
     const { events, result } = await runPermissionTurn({
@@ -903,6 +1098,75 @@ async function processExited(pid: number): Promise<boolean> {
     await Bun.sleep(10)
   }
   return false
+}
+
+async function runCockpitPermissionTurn(
+  events: RunEvent[],
+  signal: AbortSignal,
+  options: {
+    emit?: (event: RunEvent) => void
+    permissionRounds?: string
+    expectedPermission?: string
+  } = {},
+) {
+  const root = await mkdtemp(join(tmpdir(), "spec-finder-acp-"))
+  const fixture = join(import.meta.dir, "fixtures", "mock-agent.ts")
+  const config = parseConfig({
+    ...DEFAULT_CONFIG,
+    provider: "cursor",
+    model: "auto",
+    reasoning: "auto",
+    speed: "auto",
+    permissions: "prompt",
+  })
+  const env: Record<string, string> = {
+    SPEC_FINDER_TEST_REQUEST_PERMISSION: options.permissionRounds ?? "1",
+  }
+  if (options.expectedPermission) env.SPEC_FINDER_TEST_EXPECT_PERMISSION = options.expectedPermission
+  return runAcpTurn({
+    root,
+    config,
+    prompt: "Run the mock permission turn",
+    taskId: "task_01",
+    phase: "report",
+    signal,
+    emit: options.emit ?? ((event) => events.push(event)),
+    interactivePermissions: true,
+    providerLaunch: {
+      command: process.execPath,
+      args: [fixture],
+      env,
+      authMethod: null,
+    },
+  })
+}
+
+async function waitForRunEvent<T extends RunEvent["type"]>(
+  events: RunEvent[],
+  type: T,
+  timeoutMs = 8_000,
+): Promise<Extract<RunEvent, { type: T }>> {
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    const event = events.find((candidate): candidate is Extract<RunEvent, { type: T }> => candidate.type === type)
+    if (event) return event
+    await Bun.sleep(10)
+  }
+  throw new Error(`timed out waiting for ${type}`)
+}
+
+async function waitForRunEventCount<T extends RunEvent["type"]>(
+  events: RunEvent[],
+  type: T,
+  count: number,
+  timeoutMs = 8_000,
+): Promise<void> {
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    if (events.filter((event) => event.type === type).length >= count) return
+    await Bun.sleep(10)
+  }
+  throw new Error(`timed out waiting for ${count} ${type} events`)
 }
 
 async function runPermissionTurn(options: {

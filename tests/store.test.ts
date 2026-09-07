@@ -693,9 +693,10 @@ describe("cockpit store", () => {
     ])
   })
 
-  test("keeps permission events outside the final read-only view state", () => {
+  test("keeps ACP permission_requested unused while projecting one pending snapshot", () => {
     const store = startedStore([task(1, "Demo")])
     let responded = false
+    let settled = false
     store.consume({
       type: "permission_requested",
       request: {
@@ -712,12 +713,117 @@ describe("cockpit store", () => {
     })
 
     expect(responded).toBeFalse()
-    expect("permission" in store.getSnapshot()).toBeFalse()
-    expect("activity" in store.getSnapshot()).toBeFalse()
-    expect(store.getSnapshot().taskTimers).toEqual({})
+    expect(store.getSnapshot().pendingPermission).toBeNull()
+
+    store.consume({
+      type: "permission_prompt",
+      taskId: "task_01",
+      title: "Write file",
+      allowOnce: true,
+      rejectOnce: true,
+      settle: () => {
+        settled = true
+      },
+    })
+
+    const snapshot = store.getSnapshot()
+    expect(snapshot.pendingPermission).toEqual({
+      taskId: "task_01",
+      title: "Write file",
+      allowOnce: true,
+      rejectOnce: true,
+    })
+    expect("settle" in (snapshot.pendingPermission ?? {})).toBeFalse()
+    expect(JSON.parse(JSON.stringify(snapshot)).pendingPermission).not.toHaveProperty("settle")
+    expect(settled).toBeFalse()
     expect("movePermission" in store).toBeFalse()
     expect("selectPermission" in store).toBeFalse()
     expect("cancelPermission" in store).toBeFalse()
+  })
+
+  test("clears pending permission on settled and run finished", () => {
+    const store = startedStore([task(1, "Demo")])
+    store.consume({
+      type: "permission_prompt",
+      taskId: "task_01",
+      title: "Write file",
+      allowOnce: true,
+      rejectOnce: false,
+      settle: () => {},
+    })
+    expect(store.getSnapshot().pendingPermission?.title).toBe("Write file")
+
+    store.consume({ type: "permission_settled", taskId: "task_01", decision: "cancelled" })
+    expect(store.getSnapshot().pendingPermission).toBeNull()
+
+    store.consume({
+      type: "permission_prompt",
+      taskId: "task_01",
+      title: "Write file",
+      allowOnce: true,
+      rejectOnce: true,
+      settle: () => {},
+    })
+    store.consume({ type: "run_finished", ok: false, message: "run cancelled" })
+    expect(store.getSnapshot().pendingPermission).toBeNull()
+
+    const next = startedStore([task(1, "Demo")])
+    next.consume({
+      type: "permission_prompt",
+      taskId: "task_01",
+      title: "Write file",
+      allowOnce: true,
+      rejectOnce: true,
+      settle: () => {},
+    })
+    next.consume({
+      type: "run_started",
+      slug: "demo",
+      config: DEFAULT_CONFIG,
+      tasks: [task(1, "Demo")],
+    })
+    expect(next.getSnapshot().pendingPermission).toBeNull()
+  })
+
+  test("allows or rejects a pending permission only when the matching once-flag is true", () => {
+    const store = startedStore([task(1, "Demo")])
+    const decisions: string[] = []
+    store.consume({
+      type: "permission_prompt",
+      taskId: "task_01",
+      title: "Write file",
+      allowOnce: true,
+      rejectOnce: true,
+      settle: (decision) => decisions.push(decision),
+    })
+
+    store.moveTask(1)
+    store.toggleHelp()
+    store.toggleFocusedPane()
+    expect(decisions).toEqual([])
+
+    store.allowPendingPermission()
+    expect(decisions).toEqual(["allowed"])
+    store.consume({ type: "permission_settled", taskId: "task_01", decision: "allowed" })
+    expect(store.getSnapshot().pendingPermission).toBeNull()
+    store.allowPendingPermission()
+    expect(decisions).toEqual(["allowed"])
+
+    const rejected: string[] = []
+    store.consume({
+      type: "permission_prompt",
+      taskId: "task_01",
+      title: "Write file",
+      allowOnce: false,
+      rejectOnce: true,
+      settle: (decision) => rejected.push(decision),
+    })
+    store.allowPendingPermission()
+    expect(rejected).toEqual([])
+    store.rejectPendingPermission()
+    expect(rejected).toEqual(["denied"])
+    store.consume({ type: "permission_settled", taskId: "task_01", decision: "denied" })
+    expect(store.getSnapshot().pendingPermission).toBeNull()
   })
 
   test("starts a batch projection without applying the singular store reset", () => {

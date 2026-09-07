@@ -1275,6 +1275,81 @@ describe("read-only progress cockpit", () => {
     }
   })
 
+  test("shows waiting for permission with the sanitized title and no auto-cancel notice", async () => {
+    const store = startedStore([task(1, "Demo")])
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    store.consume({
+      type: "permission_prompt",
+      taskId: "task_01",
+      title: "Mock edit",
+      allowOnce: true,
+      rejectOnce: true,
+      settle: () => {},
+    })
+    const screen = await render(store, 120, 40)
+    try {
+      const frame = screen.captureCharFrame()
+      expect(frame).toContain("Waiting for permission")
+      expect(frame).toContain("Mock edit")
+      expect(frame).toContain("a allow · r reject")
+      expect(frame).not.toContain("cockpit is read-only")
+      expect(frame).not.toContain("configure permissions before rerunning")
+      assertNoControls(frame)
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+  test("settles a waiting permission with a or r and ignores navigation keys", async () => {
+    const store = startedStore([task(1, "Demo"), task(2, "Next")])
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+    const decisions: string[] = []
+    store.consume({
+      type: "permission_prompt",
+      taskId: "task_01",
+      title: "Mock edit",
+      allowOnce: true,
+      rejectOnce: true,
+      settle: (decision) => decisions.push(decision),
+    })
+    const screen = await render(store, 120, 40)
+    try {
+      await press(screen, "j")
+      await press(screen, "k")
+      await press(screen, "?")
+      expect(decisions).toEqual([])
+      expect(store.getSnapshot().helpOpen).toBeTrue()
+      await press(screen, "?")
+      await press(screen, "a")
+      expect(decisions).toEqual(["allowed"])
+    } finally {
+      await destroy(screen)
+    }
+
+    const rejectStore = startedStore([task(1, "Demo")])
+    const rejected: string[] = []
+    rejectStore.consume({
+      type: "permission_prompt",
+      taskId: "task_01",
+      title: "Mock edit",
+      allowOnce: false,
+      rejectOnce: true,
+      settle: (decision) => rejected.push(decision),
+    })
+    const rejectScreen = await render(rejectStore, 120, 40)
+    try {
+      const frame = rejectScreen.captureCharFrame()
+      expect(frame).toContain("allow unavailable")
+      expect(frame).toContain("r reject")
+      await press(rejectScreen, "a")
+      expect(rejected).toEqual([])
+      await press(rejectScreen, "r")
+      expect(rejected).toEqual(["denied"])
+    } finally {
+      await destroy(rejectScreen)
+    }
+  })
+
   test("toggles contextual help and preserves q and Ctrl+C as the only terminal escape hatches", async () => {
     const store = startedStore([task(1, "Demo")])
     const screen = await render(store, 120, 40)
@@ -1286,6 +1361,7 @@ describe("read-only progress cockpit", () => {
       expect(help).toContain("Shift+Tab")
       expect(help).toContain("PageUp / PageDown")
       expect(help).toContain("View only")
+      expect(help).toContain("a allow once / r reject once")
       expect(help).toContain("observation, not an automatic stall verdict")
       assertNoControls(help)
 

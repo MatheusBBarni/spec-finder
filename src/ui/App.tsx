@@ -120,6 +120,16 @@ export function App({ store, onCancel, onDismiss, onExit = () => {} }: AppProps)
       requestExit(onCancel)
       return
     }
+    if (state.pendingPermission !== null && !key.ctrl && !key.meta) {
+      if (key.name === "a") {
+        store.allowPendingPermission()
+        return
+      }
+      if (key.name === "r") {
+        store.rejectPendingPermission()
+        return
+      }
+    }
     if (key.name === "?") {
       store.toggleHelp()
       return
@@ -737,6 +747,22 @@ function TaskHeader({
 }
 
 function TaskStatusStrip({ state, task }: { state: CockpitState; task: CockpitTask | undefined }) {
+  const pending = state.pendingPermission
+  if (pending) {
+    const hint = pending.allowOnce && pending.rejectOnce
+      ? "a allow · r reject"
+      : [
+          pending.allowOnce ? "a allow" : "allow unavailable",
+          pending.rejectOnce ? "r reject" : "reject unavailable",
+        ].join(" · ")
+    return (
+      <box height={5} borderStyle="single" borderColor={colors.warning} backgroundColor={colors.panel} paddingLeft={1} paddingRight={1}>
+        <text fg={colors.warning} wrapMode="none"><strong>Waiting for permission</strong></text>
+        <text fg={colors.textStrong} wrapMode="none">{fit(pending.title, 120)}</text>
+        <text fg={colors.muted} wrapMode="none">{fit(hint, 120)}</text>
+      </box>
+    )
+  }
   const reason = task ? selectTaskReason(state, task.id) : undefined
   const label = task ? taskStatusText(task.status) : "Waiting for task"
   const color = task ? statusColor(task.status) : colors.muted
@@ -929,8 +955,9 @@ function HelpOverlay({ width, height, batchMode }: { width: number; height: numb
       <text fg={colors.text}>Home / End         Jump to transcript start / live tail</text>
       <text fg={colors.text}>? / Esc            Close this help</text>
       <text fg={colors.text}>q / Ctrl+C         Cancel the run and leave the terminal UI</text>
+      <text fg={colors.text}>a allow once / r reject once  Answer only the waiting permission</text>
       <text fg={colors.muted} marginTop={1}>Timer: elapsed time is an observation, not an automatic stall verdict.</text>
-      <text fg={colors.muted}>View only: navigation, scrolling, help, and terminal cancellation.</text>
+      <text fg={colors.muted}>View only except that decision: navigation and help are not answers.</text>
     </box>
   )
 }
@@ -946,6 +973,7 @@ function workflowStatusText(state: CockpitState): string {
     if (state.batchStatus === "completed") {
       return hasCheckpointBlocked(state) ? "● batch FAILED · CHECKPOINT BLOCKED" : "● batch COMPLETE"
     }
+    if (state.pendingPermission) return "Waiting for permission"
     if (state.batchStatus === "running") return "● batch RUNNING"
     return "● batch PREPARING"
   }
@@ -954,6 +982,7 @@ function workflowStatusText(state: CockpitState): string {
     return hasCheckpointBlocked(state) ? "● workflow FAILED · CHECKPOINT BLOCKED" : "● workflow FAILED"
   }
   if (hasCheckpointBlocked(state)) return "● workflow CHECKPOINT BLOCKED"
+  if (state.pendingPermission) return "Waiting for permission"
   return state.activeTaskId ? "● workflow RUNNING" : "● workflow PREPARING"
 }
 
@@ -961,6 +990,7 @@ function workflowStatusColor(state: CockpitState): string {
   if (state.batchStatus === "cancelled") return colors.warning
   if (state.batchStatus === "failed" || state.batchStatus === "preflight_failed" || state.finished?.ok === false || hasCheckpointBlocked(state)) return colors.danger
   if (state.batchStatus === "completed" || state.finished) return colors.success
+  if (state.pendingPermission) return colors.warning
   return state.packetSummaries.length > 0 ? colors.active : state.activeTaskId ? colors.active : colors.muted
 }
 
