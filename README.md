@@ -5,11 +5,12 @@
 
 A skill-driven specification framework with a local ACP cockpit, heavily inspired by Compozy. It brings back the compact workflow that made pre-0.3 Compozy useful—idea → PRD → TechSpec → executable tasks—without adding a daemon or a second source of truth.
 
-Task packets stay local in `.spec-finder/tasks/` and `.spec-finder/tasks_done/`. Setup writes `.spec-finder/.gitignore` so committed specs cannot poison later agent context. Skills are portable Agent Skills. Claude, Codex, Cursor, Grok Build, and Pi run through their own ACP harnesses while Spec Finder owns task ordering, lifecycle state, permissions, and evidence reports.
+Task packets stay local in `.spec-finder/tasks/` and `.spec-finder/tasks_done/`. Simplified-path specs stay local in `.spec-finder/specs/`. Setup writes `.spec-finder/.gitignore` so committed specs cannot poison later agent context. Skills are portable Agent Skills. Claude, Codex, Cursor, Grok Build, and Pi run through their own ACP harnesses while Spec Finder owns task ordering, lifecycle state, permissions, and evidence reports.
 
 ## Features
 
 - **Closed specification pipeline** — idea, PRD, TechSpec, and numbered tasks live in `.spec-finder/tasks/<slug>/`.
+- **Simplified spec path** - `sf-write-spec` writes `.spec-finder/specs/<slug>-spec.md` for an agent to execute, plus the same runner packet, in one research-and-approve pass.
 - **Five ACP providers** — Claude, Codex, Cursor, plus packet-only Grok Build and Pi.
 - **Read-only cockpit** — watch provider, task graph, ACP activity, and tool calls without extra UI chrome.
 - **One session per task** — implementation and the final report share one ACP session.
@@ -36,10 +37,11 @@ spec-finder run my-feature
 .spec-finder/
 ├── .gitignore
 ├── config.json
+├── specs/
 └── tasks/
 ```
 
-`.spec-finder/.gitignore` ignores `tasks/` and `tasks_done/` when those entries are missing. Packet files stay out of git. The workspace root `.gitignore` is left alone. `.spec-finder/config.json` remains eligible to commit.
+`.spec-finder/.gitignore` ignores `tasks/`, `tasks_done/`, and `specs/` when those entries are missing. Packet and spec files stay out of git. The workspace root `.gitignore` is left alone. `.spec-finder/config.json` remains eligible to commit.
 
 In an interactive terminal, `setup` resolves exactly one provider and asks for its installation scope, model, and speed. Use `↑`/`↓` to move, `Enter` to confirm, and `Esc` to cancel; the provider and every other choice are single-select. Supplying a flag skips only that choice's picker. `--copy` remains accepted for compatibility and is the only installation mode.
 
@@ -103,7 +105,7 @@ Before selecting Pi in `setup` or running a packet with `--provider pi`:
 
 ### Skill destinations
 
-The `.spec-finder/config.json` and `.spec-finder/tasks/` scaffolding always remain in the current project. Packet directories are ignored by `.spec-finder/.gitignore`. Skill destinations are derived from the selected provider and scope:
+The `.spec-finder/config.json`, `.spec-finder/tasks/`, and `.spec-finder/specs/` scaffolding always remain in the current project. Packet and spec directories are ignored by `.spec-finder/.gitignore`. Skill destinations are derived from the selected provider and scope:
 
 | Provider | Curated setup models | Default model | Local skills | Global skills |
 |---|---|---|---|---|
@@ -125,6 +127,7 @@ Setup does not launch a provider or perform live capability discovery. Completio
 
 | Skill | Artifact |
 |---|---|
+| `sf-write-spec` | Simplified path: `.spec-finder/specs/<slug>-spec.md` (agent-executable spec) plus the runner packet (`_prd.md`, `_techspec.md`, `_tasks.md`, `task_NN.md`) |
 | `sf-idea-factory` | `.spec-finder/tasks/<slug>/_idea.md` |
 | `sf-create-prd` | `.spec-finder/tasks/<slug>/_prd.md` |
 | `sf-create-techspec` | `.spec-finder/tasks/<slug>/_techspec.md` |
@@ -140,6 +143,10 @@ Setup does not launch a provider or perform live capability discovery. Completio
 | `sf-archive-tasks` | completed-packet archival and reports |
 
 Every stage keeps the approval gates from the original Compozy skills. Research and interactive decisions happen before artifacts are saved. Tasks form an acyclic dependency graph and carry their own tests.
+
+Use `sf-write-spec` when a feature request is clear enough for one research-and-approve pass.
+It writes `.spec-finder/specs/<slug>-spec.md` so an agent can execute from one file, and still writes the runner packet.
+Keep using idea, PRD, TechSpec, and tasks when you need discovery, a product-only PRD, a design-only TechSpec, or task regeneration.
 
 ### When to use TDD versus core
 

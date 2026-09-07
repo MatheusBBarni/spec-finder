@@ -25,7 +25,7 @@ import {
   mergeWorkspaceGitignore,
   type GitignoreStatus,
 } from "./gitignore.ts"
-import { CONFIG_FILE, SPEC_DIR, TASKS_DIR, bundledSkillsPath } from "./paths.ts"
+import { CONFIG_FILE, SPEC_DIR, SPECS_DIR, TASKS_DIR, bundledSkillsPath } from "./paths.ts"
 
 export const SKILL_TARGETS = {
   claude: getSetupProfile("claude").destination,
@@ -48,6 +48,7 @@ export const SPEC_FINDER_SKILLS = [
   "sf-create-prd",
   "sf-create-techspec",
   "sf-create-tasks",
+  "sf-write-spec",
   "sf-memory",
   "sf-execute-task",
   "sf-task-report",
@@ -592,6 +593,7 @@ class SetupTransaction {
     await this.maybeFail("stage", this.paths.stageRoot)
     await mkdir(dirname(this.paths.configPath), { recursive: true })
     await mkdir(join(this.input.workspace, SPEC_DIR, TASKS_DIR), { recursive: true })
+    await mkdir(join(this.input.workspace, SPEC_DIR, SPECS_DIR), { recursive: true })
     await mkdir(this.paths.targetParent, { recursive: true })
     await mkdir(this.paths.stageRoot, { recursive: true })
     const sourceRoot = bundledSkillsPath()

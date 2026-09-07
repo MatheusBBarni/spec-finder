@@ -4,7 +4,7 @@
 
 `src/` contains the Bun/TypeScript CLI and runtime. Keep CLI parsing in `cli.tsx`/`commands.ts`, task and ACP lifecycle behavior in `engine.ts`, `tasks.ts`, and `acp-client.ts`, and terminal UI code in `src/ui/`. Tests in `tests/` mirror their source surface.
 
-Portable workflow skills belong in `skills/sf-*/`; `.spec-finder/` contains repository configuration and task packets. Packet artifacts follow fixed names such as `_idea.md`, `_prd.md`, `_techspec.md`, `task_01.md`, `memory/MEMORY.md`, and `reports/task_01.md`.
+Portable workflow skills belong in `skills/sf-*/`; `.spec-finder/` contains repository configuration and task packets. Packet artifacts follow fixed names such as `_idea.md`, `_prd.md`, `_techspec.md`, `task_01.md`, `memory/MEMORY.md`, and `reports/task_01.md`. Simplified-path specs live at `.spec-finder/specs/<slug>-spec.md`.
 
 ## Build, Test, and Development Commands
 
@@ -38,4 +38,4 @@ Follow the concise Conventional Commit style: `fix: scope transcript turns` or `
 
 ## Security & Configuration
 
-Treat `.spec-finder/config.json` as strict user configuration: validate changes and never weaken workspace-path protections. Do not commit credentials, provider tokens, or private task data. `.spec-finder/.gitignore` keeps `tasks/` and `tasks_done/` out of git so packet specs cannot poison later agent context. ACP behavior must fail safely with actionable errors.
+Treat `.spec-finder/config.json` as strict user configuration: validate changes and never weaken workspace-path protections. Do not commit credentials, provider tokens, or private task data. `.spec-finder/.gitignore` keeps `tasks/`, `tasks_done/`, and `specs/` out of git so packet specs cannot poison later agent context. ACP behavior must fail safely with actionable errors.

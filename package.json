@@ -1,6 +1,6 @@
 {
   "name": "spec-finder",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A skill-driven specification framework and ACP cockpit",
   "type": "module",
   "bin": {

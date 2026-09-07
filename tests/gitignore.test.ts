@@ -23,24 +23,27 @@ describe("packet gitignore", () => {
     )
   })
 
-  test("adds only the missing packet path when the other is already ignored", () => {
-    const merged = mergeWorkspaceGitignore("/tasks/\n")
+  test("adds only the missing ignore paths when some are already ignored", () => {
+    const merged = mergeWorkspaceGitignore("/tasks/\n/tasks_done/\n")
     expect(merged.changed).toBe(true)
     expect(merged.content).toContain("/tasks/\n")
     expect(merged.content).toContain("/tasks_done/\n")
+    expect(merged.content).toContain("/specs/\n")
     expect(merged.content.match(/\/tasks\//g)).toHaveLength(1)
+    expect(merged.content.match(/\/specs\//g)).toHaveLength(1)
   })
 
   test("leaves an already complete gitignore byte-for-byte unchanged", () => {
-    const existing = "*.tmp\n/tasks/\n/tasks_done/\n"
+    const existing = "*.tmp\n/tasks/\n/tasks_done/\n/specs/\n"
     expect(mergeWorkspaceGitignore(existing)).toEqual({ content: existing, changed: false })
   })
 
-  test("treats unanchored tasks/ as already covering the packet dir", () => {
+  test("treats unanchored tasks/, tasks_done/, and specs/ as already covering those dirs", () => {
     expect(gitignoreCovers("tasks/\n", "/tasks/")).toBe(true)
     expect(gitignoreCovers("/tasks_done/\n", "/tasks_done/")).toBe(true)
-    expect(mergeWorkspaceGitignore("tasks/\ntasks_done/\n")).toEqual({
-      content: "tasks/\ntasks_done/\n",
+    expect(gitignoreCovers("specs/\n", "/specs/")).toBe(true)
+    expect(mergeWorkspaceGitignore("tasks/\ntasks_done/\nspecs/\n")).toEqual({
+      content: "tasks/\ntasks_done/\nspecs/\n",
       changed: false,
     })
   })

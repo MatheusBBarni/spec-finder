@@ -37,12 +37,13 @@ async function tempRoot(prefix = "spec-finder-setup-"): Promise<string> {
 }
 
 describe("setup", () => {
-  test("installs thirteen managed skills including the TDD pack at every provider-derived local/global destination", async () => {
+  test("installs fourteen managed skills including the simplified write-spec path and the TDD pack at every provider-derived local/global destination", async () => {
     expect(SPEC_FINDER_SKILLS).toEqual([
       "sf-idea-factory",
       "sf-create-prd",
       "sf-create-techspec",
       "sf-create-tasks",
+      "sf-write-spec",
       "sf-memory",
       "sf-execute-task",
       "sf-task-report",
@@ -53,7 +54,7 @@ describe("setup", () => {
       "sf-tdd-batch",
       "sf-archive-tasks",
     ])
-    expect(SPEC_FINDER_SKILLS).toHaveLength(13)
+    expect(SPEC_FINDER_SKILLS).toHaveLength(14)
     for (const provider of PROVIDERS) {
       for (const scope of ["local", "global"] as const) {
         const root = await tempRoot()
@@ -68,8 +69,13 @@ describe("setup", () => {
         expect(await realpath(result.skillRoot)).toBe(await realpath(join(base, destination)))
         expect(result.installed).toHaveLength(SPEC_FINDER_SKILLS.length)
         for (const skill of SPEC_FINDER_SKILLS) {
-          await access(join(base, destination, skill, "SKILL.md"))
+          const skillMd = await readFile(join(base, destination, skill, "SKILL.md"), "utf8")
+          expect(skillMd.trim().length).toBeGreaterThan(0)
         }
+        const writeSpec = await readFile(join(base, destination, "sf-write-spec", "SKILL.md"), "utf8")
+        expect(writeSpec.trim().length).toBeGreaterThan(0)
+        await access(join(base, destination, "sf-write-spec", "references", "doctrine.md"))
+        await access(join(base, destination, "sf-write-spec", "references", "spec-template.md"))
         const config = await loadConfig(root)
         expect(config.setup).toEqual({ status: "configured", scope, destination })
       }
@@ -82,6 +88,7 @@ describe("setup", () => {
     const result = await setupWorkspace(root, setupRequest)
 
     await access(join(root, ".spec-finder", "tasks"))
+    await access(join(root, ".spec-finder", "specs"))
     const raw = JSON.parse(await readFile(join(root, ".spec-finder", "config.json"), "utf8"))
     expect(raw).toMatchObject({ provider: "codex", model: "auto", speed: "fast", version: 3 })
     expect(result.legacyCursor).toBe("absent")
