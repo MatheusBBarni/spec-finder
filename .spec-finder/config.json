@@ -5,5 +5,5 @@
   "reasoning": "xhigh",
   "speed": "normal",
   "permissions": "prompt",
-  "auto_commit": true
+  "auto_commit": false
 }
