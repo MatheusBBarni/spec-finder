@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "provider": "grok",
-  "model": "auto",
-  "reasoning": "auto",
+  "provider": "pi",
+  "model": "xai/grok-4.6",
+  "reasoning": "xhigh",
   "speed": "normal",
   "permissions": "prompt",
   "auto_commit": true
