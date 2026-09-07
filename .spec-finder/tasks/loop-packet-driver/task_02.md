@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Implement pure loop detect and classification
 type: backend
 complexity: medium
@@ -51,11 +51,11 @@ Add a pure `detectLoopAction` that derives the next recover, execute, or named t
 
 ## Subtasks
 
-- [ ] 02.1 Define the detect action and terminal result types on top of task_01 ledger types.
-- [ ] 02.2 Implement recover-first ordering from handoff and checkpoint helpers already in `src/tasks.ts`.
-- [ ] 02.3 Implement done, no_op, failed, blocked-with-blocker, exhausted, and stalled outcomes.
-- [ ] 02.4 Treat in-progress-after-kill as execute and keep detect free of filesystem writes.
-- [ ] 02.5 Add a detect matrix in focused tests using in-memory task snapshots.
+- [x] 02.1 Define the detect action and terminal result types on top of task_01 ledger types.
+- [x] 02.2 Implement recover-first ordering from handoff and checkpoint helpers already in `src/tasks.ts`.
+- [x] 02.3 Implement done, no_op, failed, blocked-with-blocker, exhausted, and stalled outcomes.
+- [x] 02.4 Treat in-progress-after-kill as execute and keep detect free of filesystem writes.
+- [x] 02.5 Add a detect matrix in focused tests using in-memory task snapshots.
 
 ## Implementation Details
 
@@ -88,15 +88,15 @@ Use `.spec-finder/tasks/loop-packet-driver/_techspec.md` Data and Control Flow. 
 
 ### Unit Tests
 
-- [ ] Given a completed packet with no handoff or checkpoint, when detect runs on a fresh ledger, then the action is `no_op`.
-- [ ] Given all tasks completed with reports and no pending delivery/handoff after prior iterations, when detect runs, then the action is `done`.
-- [ ] Given one task with `handoff.phase === "report"`, when detect runs, then the action is recover-handoff, not execute.
-- [ ] Given a completed task with pending checkpoint delivery, when detect runs, then the action is recover-checkpoint.
-- [ ] Given any task `status: failed`, when detect runs, then the result is terminal `failed` even if later tasks are pending.
-- [ ] Given `blocker` set and no recoverable handoff/checkpoint or pending eligible work, when detect runs, then the result is terminal `blocked`.
-- [ ] Given `iteration >= max_iterations` before another pass, when detect runs, then the result is `exhausted`.
-- [ ] Given an unchanged progress fingerprint for `no_progress_window` consecutive recorded iterations, when detect runs, then the result is `stalled`.
-- [ ] Given a task `status: in_progress` after a simulated kill, when detect runs, then the action is execute.
+- [x] Given a completed packet with no handoff or checkpoint, when detect runs on a fresh ledger, then the action is `no_op`.
+- [x] Given all tasks completed with reports and no pending delivery/handoff after prior iterations, when detect runs, then the action is `done`.
+- [x] Given one task with `handoff.phase === "report"`, when detect runs, then the action is recover-handoff, not execute.
+- [x] Given a completed task with pending checkpoint delivery, when detect runs, then the action is recover-checkpoint.
+- [x] Given any task `status: failed`, when detect runs, then the result is terminal `failed` even if later tasks are pending.
+- [x] Given `blocker` set and no recoverable handoff/checkpoint or pending eligible work, when detect runs, then the result is terminal `blocked`.
+- [x] Given `iteration >= max_iterations` before another pass, when detect runs, then the result is `exhausted`.
+- [x] Given an unchanged progress fingerprint for `no_progress_window` consecutive recorded iterations, when detect runs, then the result is `stalled`.
+- [x] Given a task `status: in_progress` after a simulated kill, when detect runs, then the action is execute.
 
 ### Integration Tests
 

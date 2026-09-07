@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Publish loop vs run help and README
 type: docs
 complexity: medium

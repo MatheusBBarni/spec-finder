@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Wire loop command, lock, and exit mapping
 type: backend
 complexity: high

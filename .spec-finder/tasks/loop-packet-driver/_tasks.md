@@ -6,12 +6,12 @@ The numeric ID is the canonical execution position. Every dependency points to a
 
 | ID | Title | Type | Complexity | Status | Dependencies | Parallelization |
 |---|---|---|---|---|---|---|
-| task_01 | Implement packet-local loop ledger | backend | medium | pending | [] | root; parallelizable with task_03 |
-| task_02 | Implement pure loop detect and classification | backend | medium | pending | task_01 | critical path |
-| task_03 | Add optional engine loop feedback prefix | backend | low | pending | [] | root; parallelizable with task_01 and task_02 |
-| task_04 | Implement loop coordinator with injected engine | backend | high | pending | task_01, task_02, task_03 | critical path |
-| task_05 | Wire loop command, lock, and exit mapping | backend | high | pending | task_04 | critical path |
-| task_06 | Publish loop vs run help and README | docs | medium | pending | task_05 | leaf |
+| task_01 | Implement packet-local loop ledger | backend | medium | completed | [] | root; parallelizable with task_03 |
+| task_02 | Implement pure loop detect and classification | backend | medium | completed | task_01 | critical path |
+| task_03 | Add optional engine loop feedback prefix | backend | low | completed | [] | root; parallelizable with task_01 and task_02 |
+| task_04 | Implement loop coordinator with injected engine | backend | high | completed | task_01, task_02, task_03 | critical path |
+| task_05 | Wire loop command, lock, and exit mapping | backend | high | completed | task_04 | critical path |
+| task_06 | Publish loop vs run help and README | docs | medium | completed | task_05 | leaf |
 
 ## Dependency graph
 

@@ -1,9 +1,29 @@
 ---
-status: pending
+status: completed
 title: Implement packet-local loop ledger
 type: backend
 complexity: medium
 dependencies: []
+checkpoint:
+  base_head: 2d111b69289ff0d39f98160c7fddb2edf61a7c57
+  baseline_digest: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+  paths:
+    - .spec-finder/tasks/loop-packet-driver/_tasks.md
+    - .spec-finder/tasks/loop-packet-driver/memory/MEMORY.md
+    - .spec-finder/tasks/loop-packet-driver/memory/task_01.md
+    - .spec-finder/tasks/loop-packet-driver/task_01.md
+    - src/loop-state.ts
+    - tests/loop-state.test.ts
+  state: blocked
+  error: >-
+    checkpoint blocked: git add failed: The following paths are ignored by one
+    of your .gitignore files:
+
+    .spec-finder/tasks
+
+    hint: Use -f if you really want to add them.
+
+    hint: Disable this message with "git config set advice.addIgnoredFile false"
 ---
 
 # Task 01: Implement packet-local loop ledger
@@ -48,11 +68,11 @@ Create the runtime-owned `loop/state.json` contract: strict schema, load/init/re
 
 ## Subtasks
 
-- [ ] 01.1 Define the version-1 ledger types and Zod-strict parser with actionable issues.
-- [ ] 01.2 Implement init, load, and always-allowed reset that rewrite only `loop/state.json`.
-- [ ] 01.3 Implement same-directory temp-plus-rename writes and refuse partial or unknown-key files.
-- [ ] 01.4 Expose iteration-summary path helpers without treating leftover markdown as the ledger.
-- [ ] 01.5 Add focused ledger tests for init, reject, reset, atomic replace, and non-mutation.
+- [x] 01.1 Define the version-1 ledger types and Zod-strict parser with actionable issues.
+- [x] 01.2 Implement init, load, and always-allowed reset that rewrite only `loop/state.json`.
+- [x] 01.3 Implement same-directory temp-plus-rename writes and refuse partial or unknown-key files.
+- [x] 01.4 Expose iteration-summary path helpers without treating leftover markdown as the ledger.
+- [x] 01.5 Add focused ledger tests for init, reject, reset, atomic replace, and non-mutation.
 
 ## Implementation Details
 
@@ -85,11 +105,11 @@ Follow `.spec-finder/tasks/loop-packet-driver/_techspec.md` Data Models and Life
 
 ### Unit Tests
 
-- [ ] Given a valid packet directory and no `loop/` tree, when init runs, then `loop/state.json` exists with `version: 1`, `iteration: 0`, `terminal: null`, and the fixed V1 goal/definition-of-done strings.
-- [ ] Given a file with an unknown key or invalid `terminal`, when load runs, then it throws an actionable error naming the path and issue and does not rewrite the file.
-- [ ] Given an existing terminal ledger, when reset runs, then the new file is a bootstrap ledger and sibling `task_*.md` bytes are unchanged.
-- [ ] Given a successful write, when the process is simulated to crash after temp create but before rename is observed, then the next load either reads the previous valid file or fails closed; it never parses a truncated JSON object as success.
-- [ ] Given the documented non-mutating helper, when invoked, then no `loop/` directory is created.
+- [x] Given a valid packet directory and no `loop/` tree, when init runs, then `loop/state.json` exists with `version: 1`, `iteration: 0`, `terminal: null`, and the fixed V1 goal/definition-of-done strings.
+- [x] Given a file with an unknown key or invalid `terminal`, when load runs, then it throws an actionable error naming the path and issue and does not rewrite the file.
+- [x] Given an existing terminal ledger, when reset runs, then the new file is a bootstrap ledger and sibling `task_*.md` bytes are unchanged.
+- [x] Given a successful write, when the process is simulated to crash after temp create but before rename is observed, then the next load either reads the previous valid file or fails closed; it never parses a truncated JSON object as success.
+- [x] Given the documented non-mutating helper, when invoked, then no `loop/` directory is created.
 
 ### Integration Tests
 

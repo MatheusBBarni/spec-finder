@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Add optional engine loop feedback prefix
 type: backend
 complexity: low
@@ -45,10 +45,10 @@ Add an optional `loopFeedback` field on existing `RunOptions` so a later loop pa
 
 ## Subtasks
 
-- [ ] 03.1 Add the optional field to `RunOptions` with no required-call-site changes.
-- [ ] 03.2 Prepend non-empty feedback to implementation and report prompt builders.
-- [ ] 03.3 Keep omitted/empty feedback on the current prompt text.
-- [ ] 03.4 Add focused engine tests for omitted versus present prefix.
+- [x] 03.1 Add the optional field to `RunOptions` with no required-call-site changes.
+- [x] 03.2 Prepend non-empty feedback to implementation and report prompt builders.
+- [x] 03.3 Keep omitted/empty feedback on the current prompt text.
+- [x] 03.4 Add focused engine tests for omitted versus present prefix.
 
 ## Implementation Details
 
@@ -79,13 +79,13 @@ Follow `.spec-finder/tasks/loop-packet-driver/_techspec.md` Core Interfaces. Exi
 
 ### Unit Tests
 
-- [ ] Given `RunOptions` without `loopFeedback`, when an implementation prompt is built, then the text matches the current no-feedback contract (includes `sf-execute-task` and excludes a loop-feedback heading).
-- [ ] Given `loopFeedback` set to a known summary string, when implementation and report prompts are built, then both start with or contain that exact bounded summary and still include the existing task path instructions.
-- [ ] Given `loopFeedback` is `""`, when prompts are built, then behavior matches the omitted case.
+- [x] Given `RunOptions` without `loopFeedback`, when an implementation prompt is built, then the text matches the current no-feedback contract (includes `sf-execute-task` and excludes a loop-feedback heading).
+- [x] Given `loopFeedback` set to a known summary string, when implementation and report prompts are built, then both start with or contain that exact bounded summary and still include the existing task path instructions.
+- [x] Given `loopFeedback` is `""`, when prompts are built, then behavior matches the omitted case.
 
 ### Integration Tests
 
-- [ ] Existing engine handoff/retry fixtures still pass with the field omitted.
+- [x] Existing engine handoff/retry fixtures still pass with the field omitted.
 
 ### Platform or Manual Evidence
 

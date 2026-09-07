@@ -2,8 +2,8 @@
 
 ## Current State
 
-- Packet `loop-packet-driver` has approved PRD, TechSpec, ADR-001–004, and an approved six-task graph.
-- Task files `task_01`–`task_06` are pending. No implementation has started.
+- Packet `loop-packet-driver` implementation is complete for task_01–task_06 with reports.
+- `spec-finder loop` is dispatched, documented, and covered by focused tests. Last `bun run verify`: 470 pass.
 
 ## Shared Decisions
 
@@ -15,18 +15,14 @@
 
 ## Shared Learnings
 
-- `RunResult.blocked` is overloaded; do not classify loop terminals from that counter.
-- Failed tasks remain in `executionOrder`; a second engine pass would re-implement them unless detect stops first.
-- Archive `scan-tasks.sh` ignores extra packet directories, so `loop/` does not affect archive verdicts.
-- Single-slug `run` is lenient on unknown flags; loop parsing must stay strict like `exec`/batch.
+- `git add` of tracked files under ignored `.spec-finder/tasks` exits 1, so config `auto_commit` checkpoints cannot complete for this tracked packet.
+- Dry-run continue plans currently surface as `LoopResult.terminal: no_op` with a dry-run reason (exit 0).
 
 ## Open Risks
 
+- Local checkpoint complete remains blocked for this packet while `.spec-finder/tasks` is gitignored and packet files are tracked.
 - Coarse iteration (one remaining engine pass) may make no-progress less precise; accepted for V1.
-- `run` vs loop exit matrices differ; docs must contrast them.
-- Leftover `loop/iterations/*.md` after reset are not ledger authority.
 
 ## Handoffs
 
-- Start at `task_01` (ledger) or parallel `task_03` (engine feedback prefix).
-- Critical path: task_01 → task_02 → task_04 → task_05 → task_06.
+- Implementation files (`src/loop*.ts`, `src/engine.ts`, `src/commands.ts`, `src/cli.tsx`, README, tests) remain uncommitted. Checkpoints were skipped after the blocked complete on task_01.

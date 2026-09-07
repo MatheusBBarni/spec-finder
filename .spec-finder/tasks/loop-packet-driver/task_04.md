@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 title: Implement loop coordinator with injected engine
 type: backend
 complexity: high
@@ -55,12 +55,12 @@ Implement `runLoop` so one invocation detect-iterates remaining work through inj
 
 ## Subtasks
 
-- [ ] 04.1 Add `runLoop` options/result types and the detect → pass → classify loop.
-- [ ] 04.2 Wire injected runner, first-pass-omitted feedback, and recoverable continue.
-- [ ] 04.3 Stop on failed, blocked, exhausted, stalled, done, no_op, and cancelled.
-- [ ] 04.4 Implement dry-run print/plan with zero writes.
-- [ ] 04.5 Write iteration summaries as leftover evidence only; ledger JSON remains authority.
-- [ ] 04.6 Add injected-runner integration tests for the matrix above.
+- [x] 04.1 Add `runLoop` options/result types and the detect → pass → classify loop.
+- [x] 04.2 Wire injected runner, first-pass-omitted feedback, and recoverable continue.
+- [x] 04.3 Stop on failed, blocked, exhausted, stalled, done, no_op, and cancelled.
+- [x] 04.4 Implement dry-run print/plan with zero writes.
+- [x] 04.5 Write iteration summaries as leftover evidence only; ledger JSON remains authority.
+- [x] 04.6 Add injected-runner integration tests for the matrix above.
 
 ## Implementation Details
 
@@ -97,18 +97,18 @@ Do not acquire the run-lock here; that is task_05. Do not parse argv here.
 
 ### Unit Tests
 
-- [ ] Given detect says `no_op` before any pass, when `runLoop` runs, then it returns `no_op` and does not call the runner.
+- [x] Given detect says `no_op` before any pass, when `runLoop` runs, then it returns `no_op` and does not call the runner.
 
 ### Integration Tests
 
-- [ ] Given a packet with a report-only handoff, when the injected runner clears that handoff on pass one and leaves remaining pending work, then `runLoop` calls the runner again and does not require a new process.
-- [ ] Given a packet with pending checkpoint delivery, when the injected runner completes delivery, then the loop continues or reaches `done` without re-invoking implementation for that task.
-- [ ] Given the injected runner leaves a task `failed`, when `runLoop` classifies, then it returns `failed` and the runner call count is 1.
-- [ ] Given `maxIterations: 1` and remaining work after that pass is still recoverable, when `runLoop` finishes, then the terminal is `exhausted` and the reason names the cap.
-- [ ] Given two consecutive passes with an unchanged completed/failed/blocked identity set and `noProgressWindow: 2`, when `runLoop` finishes, then the terminal is `stalled`.
-- [ ] Given the abort signal is fired before or during a pass, when `runLoop` settles, then the terminal is `cancelled`.
-- [ ] Given a second pass is required, when inspecting runner options, then only the second call has non-empty `loopFeedback`.
-- [ ] Given `--dry-run` equivalent `dryRun: true` on a pending packet, when `runLoop` returns, then the runner was not called and a recursive snapshot of the packet directory matches the pre-call snapshot.
+- [x] Given a packet with a report-only handoff, when the injected runner clears that handoff on pass one and leaves remaining pending work, then `runLoop` calls the runner again and does not require a new process.
+- [x] Given a packet with pending checkpoint delivery, when the injected runner completes delivery, then the loop continues or reaches `done` without re-invoking implementation for that task.
+- [x] Given the injected runner leaves a task `failed`, when `runLoop` classifies, then it returns `failed` and the runner call count is 1.
+- [x] Given `maxIterations: 1` and remaining work after that pass is still recoverable, when `runLoop` finishes, then the terminal is `exhausted` and the reason names the cap.
+- [x] Given two consecutive passes with an unchanged completed/failed/blocked identity set and `noProgressWindow: 2`, when `runLoop` finishes, then the terminal is `stalled`.
+- [x] Given the abort signal is fired before or during a pass, when `runLoop` settles, then the terminal is `cancelled`.
+- [x] Given a second pass is required, when inspecting runner options, then only the second call has non-empty `loopFeedback`.
+- [x] Given `--dry-run` equivalent `dryRun: true` on a pending packet, when `runLoop` returns, then the runner was not called and a recursive snapshot of the packet directory matches the pre-call snapshot.
 
 ### Platform or Manual Evidence
 
