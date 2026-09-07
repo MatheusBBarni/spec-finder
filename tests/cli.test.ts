@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, test } from "bun:test"
 import { main } from "../src/cli.tsx"
-import { parseExecArguments } from "../src/commands.ts"
 
 const README = readFileSync(new URL("../README.md", import.meta.url), "utf8")
 
@@ -18,6 +17,29 @@ async function captureHelp(): Promise<string> {
     return output
   } finally {
     process.stdout.write = originalWrite
+  }
+}
+
+async function captureMain(argv: string[]): Promise<{ exit: number; stdout: string; stderr: string }> {
+  const originalStdout = process.stdout.write
+  const originalStderr = process.stderr.write
+  let stdout = ""
+  let stderr = ""
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    stdout += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk)
+    return true
+  }) as typeof originalStdout
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    stderr += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk)
+    return true
+  }) as typeof originalStderr
+
+  try {
+    const exit = await main(argv)
+    return { exit, stdout, stderr }
+  } finally {
+    process.stdout.write = originalStdout
+    process.stderr.write = originalStderr
   }
 }
 
@@ -63,7 +85,6 @@ describe("CLI help", () => {
     expect(README).not.toContain("[--copy|--symlink]")
     expect(README).not.toContain("| Cursor | `.cursor/skills` | `~/.cursor/skills` |")
     expect(help).not.toContain("[--agent claude|codex|cursor|grok|pi]...")
-    expect(help).toContain("--provider is one of claude, codex, cursor, or grok")
   })
 
   test("keeps the single-slug usage and exposes the opt-in batch grammar", async () => {
@@ -92,69 +113,55 @@ describe("CLI help", () => {
     expect(help).not.toContain("--parallel")
   })
 
-  test("documents the packet-free exec contract and its release gates", async () => {
+  test("omits exec from Usage and does not document Exec mode", async () => {
     const help = await captureHelp()
 
-    expect(help).toContain('spec-finder exec "<prompt>"')
-    expect(help).toContain("exactly one non-empty positional prompt")
-    expect(help).toContain("--provider is one of claude, codex, cursor, or grok")
-    expect(help).toContain("--model is non-empty")
-    expect(help).toContain("--reasoning is auto|low|medium|high|xhigh|max|ultra")
-    expect(help).toContain("--speed is auto|normal|fast")
-    expect(help).toContain("CLI flags > nearest repository .spec-finder/config.json > ~/.spec-finder/config.json")
-    expect(help).toContain("exactly one fresh ACP turn")
-    expect(help).toContain("nearest complete repository profile")
-    expect(help).toContain("approval policy, not an OS sandbox")
-    expect(help).toContain("only a successful final answer goes to stdout")
-    expect(help).toContain("Exits: 0 completed; 1 permission/refusal/limit/provider/cleanup failure; 2 invalid invocation/configuration/certification;")
-    expect(help).toContain("exit 130")
-    expect(help).toContain("task 09 certification")
-    expect(help).toContain("all real providers")
-    expect(help).toContain("write-capable access remain unavailable")
-    expect(help).not.toContain("write-capable host access is enabled")
+    expect(help).not.toContain('spec-finder exec "<prompt>"')
+    expect(help).not.toContain("Exec mode:")
+    expect(help).toContain("spec-finder run")
+    expect(help).toContain("spec-finder loop")
   })
 
-  test("keeps README exec examples aligned with the parser and certified boundary", () => {
-    const parsed = parseExecArguments([
-      "summarize the current changes",
-      "--provider", "codex",
-      "--model", "auto",
-      "--reasoning", "high",
-      "--speed", "normal",
-    ])
-    expect(parsed).toMatchObject({
-      mode: "exec",
-      prompt: "summarize the current changes",
-      overrides: { provider: "codex", model: "auto", reasoning: "high", speed: "normal" },
-    })
+  test("treats leftover exec as an unknown command", async () => {
+    const result = await captureMain(["exec"])
 
-    for (const text of [
-      "spec-finder exec \"<prompt>\"",
-      "CLI flags > nearest repository .spec-finder/config.json > ~/.spec-finder/config.json",
-      "read-only",
-      "direct canonical host access",
-      "not a sandbox",
-      "stderr",
-      "stdout",
-      "`0`",
-      "`1`",
-      "`2`",
-      "`130`",
-      "M-01",
-      "M-02",
-      "M-03",
-      "M-04",
-      "M-05",
-      "M-06",
-      "M-07",
-      "telemetry",
-      "task packet",
-    ]) {
-      expect(README).toContain(text)
+    expect(result.exit).toBe(2)
+    expect(result.stdout).toBe("")
+    expect(result.stderr.startsWith("unknown command: exec")).toBe(true)
+    expect(result.stderr).toContain("unknown command: exec")
+    expect(result.stderr).not.toContain('spec-finder exec "<prompt>"')
+    expect(result.stderr).not.toContain("Exec mode:")
+  })
+
+  test("treats leftover exec with a prompt as an unknown command", async () => {
+    const result = await captureMain(["exec", "prompt"])
+
+    expect(result.exit).toBe(2)
+    expect(result.stdout).toBe("")
+    expect(result.stderr.startsWith("unknown command: exec")).toBe(true)
+    expect(result.stderr).toContain("unknown command: exec")
+    expect(result.stderr).not.toContain('spec-finder exec "<prompt>"')
+    expect(result.stderr).not.toContain("Exec mode:")
+  })
+
+  test("keeps README lists honest and stubs leftover exec as not shipped", async () => {
+    const help = await captureHelp()
+
+    expect(README).not.toContain('spec-finder exec "<prompt>"')
+    expect(README).not.toContain("spec-finder exec --provider grok")
+    expect(README).not.toContain("spec-finder exec --provider pi")
+    expect(README).not.toContain("Packet-free `exec`")
+    expect(README).not.toContain("| One-turn `exec` |")
+    expect(README).toContain("not shipped")
+    expect(README).toContain("unavailable")
+    for (const metric of ["M-01", "M-02", "M-03", "M-04", "M-05", "M-06", "M-07"]) {
+      expect(README).not.toContain(metric)
     }
-    expect(README).toContain("Task 09's certification is currently blocked")
-    expect(README).toContain("Optional `session/close` is called only when the provider advertises that capability")
-    expect(README).toContain("The reviewed task 09 certification record")
+    for (const text of [help, README]) {
+      expect(text).not.toContain('spec-finder exec "<prompt>"')
+      expect(text).toContain("spec-finder run")
+      expect(text).toContain("spec-finder loop")
+    }
   })
 
   test("documents config-only local checkpoint phases and legacy-token rejection", async () => {
