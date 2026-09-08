@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { PassThrough } from "node:stream"
 import type { SessionUpdate } from "@agentclientprotocol/sdk"
 import { DEFAULT_CONFIG, parseConfig, type SpecFinderConfig } from "../src/config.ts"
 import type { CheckpointServiceContract } from "../src/checkpoints.ts"
-import { checkpointCommand, loopCommand, runCommand, resolveSetupOptions, setupCommand } from "../src/commands.ts"
+import { checkpointCommand, inspectCommand, INSPECT_USAGE, loopCommand, lsCommand, LS_USAGE, runCommand, resolveSetupOptions, setupCommand } from "../src/commands.ts"
+import { acquireRunLock } from "../src/run-lock.ts"
 import { describeLoopPaths } from "../src/loop-state.ts"
 import { CockpitStore } from "../src/ui/store.ts"
 import type { BatchResult } from "../src/batch.ts"
@@ -1504,6 +1505,250 @@ dependencies: []
       expect(code).toBe(0)
       expect(store?.getSnapshot().slug).toBe("first")
       expect(store?.getSnapshot().tasks.map((task) => task.id)).toEqual(["task_01"])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe("ls command", () => {
+  const secretBody = "SECRET_BODY_PROSE"
+  const secretMemory = "SECRET_MEMORY_PROSE"
+  const secretReport = "SECRET_REPORT_PROSE"
+
+  function glanceTask(number: number, title: string, status = "pending", extra = "", body = "Test task."): string {
+    return `---
+status: ${status}
+title: ${title}
+type: backend
+complexity: low
+dependencies: []
+${extra}---
+
+# Task ${number}: ${title}
+
+## Overview
+${body}
+`
+  }
+
+  test("prints no active packets for an empty tasks directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-ls-empty-"))
+    try {
+      await mkdir(join(root, ".spec-finder", "tasks"), { recursive: true })
+      const stdout = commandOutput()
+      const stderr = commandOutput()
+      const code = await lsCommand([], { root, output: stdout.output, error: stderr.output })
+      expect(code).toBe(0)
+      expect(stdout.text()).toBe("no active packets\n")
+      expect(stderr.text()).toBe("")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("lists mixed packets without writing, locking, or leaking packet prose", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-ls-mixed-"))
+    try {
+      const tasks = join(root, ".spec-finder", "tasks")
+      const remaining = join(tasks, "remaining-work")
+      const blocked = join(tasks, "blocked-checkpoint")
+      const invalid = join(tasks, "invalid-parse")
+      const early = join(tasks, "early-stage")
+      await mkdir(remaining, { recursive: true })
+      await mkdir(blocked, { recursive: true })
+      await mkdir(invalid, { recursive: true })
+      await mkdir(early, { recursive: true })
+      await mkdir(join(remaining, "memory"), { recursive: true })
+      await mkdir(join(remaining, "reports"), { recursive: true })
+      await mkdir(join(root, ".spec-finder", "tasks_done", "archived"), { recursive: true })
+      await writeFile(join(remaining, "task_01.md"), glanceTask(1, "Open work", "pending", "", secretBody))
+      await writeFile(join(remaining, "memory", "MEMORY.md"), secretMemory)
+      await writeFile(join(remaining, "reports", "task_01.md"), secretReport)
+      await writeFile(join(blocked, "task_01.md"), glanceTask(
+        1,
+        "Blocked delivery",
+        "completed",
+        `checkpoint:
+  state: blocked
+  base_head: ${"a".repeat(40)}
+  baseline_digest: ${"b".repeat(64)}
+  paths:
+    - src/example.ts
+  error: gitignore blocked delivery
+`,
+      ))
+      await writeFile(join(invalid, "task_01.md"), "not yaml\n")
+      await writeFile(join(root, ".spec-finder", "TASKS_REPORT.md"), "stale archive report\n")
+      await writeFile(join(root, ".spec-finder", "tasks_done", "archived", "task_01.md"), glanceTask(1, "Archived"))
+
+      const before = {
+        remaining: await readFile(join(remaining, "task_01.md"), "utf8"),
+        blocked: await readFile(join(blocked, "task_01.md"), "utf8"),
+        invalid: await readFile(join(invalid, "task_01.md"), "utf8"),
+        report: await readFile(join(root, ".spec-finder", "TASKS_REPORT.md"), "utf8"),
+      }
+
+      const lease = await acquireRunLock(root)
+      const stdout = commandOutput()
+      const stderr = commandOutput()
+      try {
+        const code = await lsCommand([], { root, output: stdout.output, error: stderr.output })
+        expect(code).toBe(0)
+      } finally {
+        await lease.release()
+      }
+
+      const text = stdout.text()
+      expect(text).toContain("remaining-work remaining 0/1")
+      expect(text).toContain("blocked-checkpoint blocked 0/1")
+      expect(text).toContain("early-stage early-stage 0/0")
+      expect(text).toContain("invalid-parse invalid 0/0")
+      expect(text).toContain("missing YAML frontmatter")
+      expect(text).not.toContain("archived")
+      expect(text).not.toContain(secretBody)
+      expect(text).not.toContain(secretMemory)
+      expect(text).not.toContain(secretReport)
+      expect(stderr.text()).toBe("")
+
+      expect(await readFile(join(remaining, "task_01.md"), "utf8")).toBe(before.remaining)
+      expect(await readFile(join(blocked, "task_01.md"), "utf8")).toBe(before.blocked)
+      expect(await readFile(join(invalid, "task_01.md"), "utf8")).toBe(before.invalid)
+      expect(await readFile(join(root, ".spec-finder", "TASKS_REPORT.md"), "utf8")).toBe(before.report)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("rejects extra args and unknown flags with exit 2 without taking the run lock", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-ls-argv-"))
+    try {
+      await mkdir(join(root, ".spec-finder", "tasks"), { recursive: true })
+      const lease = await acquireRunLock(root)
+      try {
+        for (const args of [["extra"], ["--json"]] as const) {
+          const stdout = commandOutput()
+          const stderr = commandOutput()
+          const code = await lsCommand([...args], { root, output: stdout.output, error: stderr.output })
+          expect(code).toBe(2)
+          expect(stdout.text()).toBe("")
+          expect(stderr.text()).toContain(LS_USAGE)
+        }
+      } finally {
+        await lease.release()
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("exits 2 when tasks/ is missing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-ls-missing-"))
+    try {
+      await mkdir(join(root, ".spec-finder"), { recursive: true })
+      const stdout = commandOutput()
+      const stderr = commandOutput()
+      const code = await lsCommand([], { root, output: stdout.output, error: stderr.output })
+      expect(code).toBe(2)
+      expect(stdout.text()).toBe("")
+      expect(stderr.text()).toContain("cannot read .spec-finder/tasks")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe("inspect command", () => {
+  const secretBody = "SECRET_BODY_PROSE"
+  const secretMemory = "SECRET_MEMORY_PROSE"
+  const secretReport = "SECRET_REPORT_PROSE"
+
+  test("prints remaining work and blocker reason without writing or locking", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-inspect-blocked-"))
+    try {
+      const packet = join(root, ".spec-finder", "tasks", "blocked-work")
+      await mkdir(join(packet, "memory"), { recursive: true })
+      await mkdir(join(packet, "reports"), { recursive: true })
+      const taskPath = join(packet, "task_01.md")
+      const taskSource = `---
+status: completed
+title: Blocked delivery
+type: backend
+complexity: low
+dependencies: []
+checkpoint:
+  state: blocked
+  base_head: ${"a".repeat(40)}
+  baseline_digest: ${"b".repeat(64)}
+  paths:
+    - src/example.ts
+  error: gitignore blocked delivery
+---
+
+# Task 1: Blocked delivery
+
+## Overview
+${secretBody}
+`
+      await writeFile(taskPath, taskSource)
+      await writeFile(join(packet, "memory", "MEMORY.md"), secretMemory)
+      await writeFile(join(packet, "reports", "task_01.md"), secretReport)
+      const before = await readFile(taskPath, "utf8")
+
+      const lease = await acquireRunLock(root)
+      const stdout = commandOutput()
+      const stderr = commandOutput()
+      try {
+        const code = await inspectCommand(["blocked-work"], { root, output: stdout.output, error: stderr.output })
+        expect(code).toBe(0)
+      } finally {
+        await lease.release()
+      }
+
+      const text = stdout.text()
+      expect(text).toContain("blocked-work blocked 0/1")
+      expect(text).toContain("remaining: task_01")
+      expect(text).toContain("task_01 checkpoint: gitignore blocked delivery")
+      expect(text).toContain("loop: absent")
+      expect(text).not.toContain(secretBody)
+      expect(text).not.toContain(secretMemory)
+      expect(text).not.toContain(secretReport)
+      expect(stderr.text()).toBe("")
+      expect(await readFile(taskPath, "utf8")).toBe(before)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("exits 2 for a missing slug", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-inspect-missing-"))
+    try {
+      await mkdir(join(root, ".spec-finder", "tasks"), { recursive: true })
+      const stdout = commandOutput()
+      const stderr = commandOutput()
+      const code = await inspectCommand(["no-such"], { root, output: stdout.output, error: stderr.output })
+      expect(code).toBe(2)
+      expect(stdout.text()).toBe("")
+      expect(stderr.text()).toContain("packet is missing: no-such")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("exits 2 for extra args or invalid slug", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-inspect-argv-"))
+    try {
+      await mkdir(join(root, ".spec-finder", "tasks"), { recursive: true })
+      const extra = commandOutput()
+      const extraErr = commandOutput()
+      expect(await inspectCommand(["one", "two"], { root, output: extra.output, error: extraErr.output })).toBe(2)
+      expect(extraErr.text()).toContain(INSPECT_USAGE)
+
+      const invalid = commandOutput()
+      const invalidErr = commandOutput()
+      expect(await inspectCommand(["Invalid_Slug"], { root, output: invalid.output, error: invalidErr.output })).toBe(2)
+      expect(invalidErr.text()).toContain("invalid task slug")
+      expect(invalidErr.text()).toContain(INSPECT_USAGE)
     } finally {
       await rm(root, { recursive: true, force: true })
     }

@@ -37,6 +37,7 @@ import {
   type ExecRuntimeOverrides,
 } from "./exec-config.ts"
 import { CONFIG_FILE, SPEC_DIR, findWorkspaceRoot } from "./paths.ts"
+import { inspectPacket, listActivePackets } from "./packet-inspect.ts"
 import { acquireRunLock } from "./run-lock.ts"
 import {
   setupWorkspace,
@@ -1190,6 +1191,92 @@ export async function upgradeCommand(): Promise<number> {
 
 export function versionCommand(): number {
   process.stdout.write(`${VERSION}\n`)
+  return 0
+}
+
+export const LS_USAGE = "usage: spec-finder ls"
+
+export interface LsCommandOptions {
+  root?: string
+  output?: Writable
+  error?: Writable
+}
+
+export async function lsCommand(args: readonly string[], options: LsCommandOptions = {}): Promise<number> {
+  const output = options.output ?? process.stdout
+  const error = options.error ?? process.stderr
+  if (args.length > 0) {
+    const argument = args[0]!
+    const message = argument.startsWith("-")
+      ? `unsupported ls option: ${argument}`
+      : `ls accepts no arguments; unexpected positional argument: ${argument}`
+    error.write(`${message}\n${LS_USAGE}\n`)
+    return 2
+  }
+
+  const root = options.root ?? await findWorkspaceRoot()
+  const result = await listActivePackets(root)
+  if (!result.ok) {
+    error.write(`${result.message}\n`)
+    return 2
+  }
+  if (result.rows.length === 0) {
+    output.write("no active packets\n")
+    return 0
+  }
+  for (const row of result.rows) {
+    const detail = row.kind === "invalid" && row.detail !== undefined ? ` ${row.detail}` : ""
+    output.write(`${row.slug} ${row.kind} ${row.completed}/${row.total}${detail}\n`)
+  }
+  return 0
+}
+
+export const INSPECT_USAGE = "usage: spec-finder inspect <task_slug>"
+
+export interface InspectCommandOptions {
+  root?: string
+  output?: Writable
+  error?: Writable
+}
+
+export async function inspectCommand(args: readonly string[], options: InspectCommandOptions = {}): Promise<number> {
+  const output = options.output ?? process.stdout
+  const error = options.error ?? process.stderr
+  const argument = args[0]
+  if (argument === undefined) {
+    error.write(`inspect requires exactly one packet slug\n${INSPECT_USAGE}\n`)
+    return 2
+  }
+  if (argument.startsWith("-")) {
+    error.write(`unsupported inspect option: ${argument}\n${INSPECT_USAGE}\n`)
+    return 2
+  }
+  if (args.length > 1) {
+    error.write(`inspect accepts exactly one packet slug; unexpected positional argument: ${args[1]}\n${INSPECT_USAGE}\n`)
+    return 2
+  }
+
+  const root = options.root ?? await findWorkspaceRoot()
+  const result = await inspectPacket(root, argument)
+  if (!result.ok) {
+    const issues = result.issues?.map((issue) => `- ${issue}`).join("\n")
+    error.write(issues === undefined ? `${result.message}\n` : `${result.message}\n${issues}\n`)
+    if (result.code === "invalid_invocation" || result.code === "invalid_slug") {
+      error.write(`${INSPECT_USAGE}\n`)
+    }
+    return 2
+  }
+
+  const remaining = result.remaining.map((task) => task.id).join(" ")
+  output.write(`${result.slug} ${result.kind} ${result.completed}/${result.total}\n`)
+  output.write(`remaining: ${remaining}\n`)
+  for (const blocker of result.blockers) {
+    output.write(`${blocker.taskId} ${blocker.kind}: ${blocker.message}\n`)
+  }
+  if (result.loop.state === "absent") output.write("loop: absent\n")
+  else if (result.loop.state === "none") output.write("loop: none\n")
+  else if (result.loop.state === "terminal") output.write(`loop: terminal ${result.loop.terminal}\n`)
+  else output.write(`loop: ledger invalid: ${result.loop.message}\n`)
   return 0
 }
 

@@ -151,6 +151,21 @@ Keep using idea, PRD, TechSpec, and tasks when you need discovery, a product-onl
 
 The four `sf-tdd-*` skills are an optional pack for honest red-before-green work. Use them when a task adds or changes product behavior and you need a failing public-seam test before production code. Keep using core `sf-execute-task`, `sf-task-report`, and `sf-batch-tasks` for research, docs, chore, config-only, or any packet that does not need a red phase. `spec-finder run` stays on the core skills until a separate opt-in design; invoking TDD skills is a manual choice.
 
+## Packet inspection
+
+Glance active packets, then inspect one slug, without starting `run` or `loop`:
+
+```bash
+spec-finder ls
+spec-finder inspect my-feature
+```
+
+`spec-finder ls` lists active packets as remaining, early-stage, blocked, or invalid in plain text. Empty ls succeeds with no active packets. Invalid rows do not fail the command.
+
+`spec-finder inspect <task_slug>` shows remaining task ids, checkpoint and report-handoff blockers, and loop state when a ledger exists. Missing or invalid packets exit 2.
+
+Inspection exits 0 or 2 only. It starts no provider, takes no run-lock, and writes nothing. It is not archive-ready.
+
 ## Run tasks
 
 ```bash
@@ -289,6 +304,8 @@ spec-finder run --multiple <slug1,slug2,...> [--no-ui] [--provider NAME] [--mode
 spec-finder loop <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE] [--max-iterations N] [--no-progress-window N] [--dry-run] [--reset-state]
 spec-finder checkpoint begin <task_slug> <task_id>
 spec-finder checkpoint complete <task_slug> <task_id>
+spec-finder ls
+spec-finder inspect <task_slug>
 spec-finder config
 spec-finder version
 ```

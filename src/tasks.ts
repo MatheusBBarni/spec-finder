@@ -113,16 +113,21 @@ export function parseTask(path: string, source: string): TaskFile {
   return { id: `task_${nameMatch[1]}`, number, path, body, source, frontmatter: parsed.data }
 }
 
-export async function loadTaskPacket(root: string, slug: string): Promise<{ directory: string; tasks: TaskFile[] }> {
+export async function snapshotTaskPacket(root: string, slug: string): Promise<{ directory: string; tasks: TaskFile[] }> {
   if (!isValidTaskSlug(slug)) throw new Error(`invalid task slug: ${slug}`)
   const directory = specPath(root, TASKS_DIR, slug)
   const files = (await readdir(directory)).filter((name) => TASK_PATTERN.test(name)).sort()
-  if (files.length === 0) throw new Error(`no task_XX.md files found in ${directory}`)
   const tasks = await Promise.all(files.map(async (name) => {
     const path = join(directory, name)
     return parseTask(path, await readFile(path, "utf8"))
   }))
   return { directory, tasks: tasks.sort((a, b) => a.number - b.number) }
+}
+
+export async function loadTaskPacket(root: string, slug: string): Promise<{ directory: string; tasks: TaskFile[] }> {
+  const packet = await snapshotTaskPacket(root, slug)
+  if (packet.tasks.length === 0) throw new Error(`no task_XX.md files found in ${packet.directory}`)
+  return packet
 }
 
 function normalizeDependency(value: string): string {

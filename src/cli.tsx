@@ -3,7 +3,9 @@ import { ConfigError } from "./config.ts"
 import {
   checkpointCommand,
   configCommand,
+  inspectCommand,
   loopCommand,
+  lsCommand,
   runCommand,
   setupCommand,
   upgradeCommand,
@@ -20,6 +22,8 @@ Usage:
   spec-finder loop <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE] [--max-iterations N] [--no-progress-window N] [--dry-run] [--reset-state]
   spec-finder checkpoint begin <task_slug> <task_id>
   spec-finder checkpoint complete <task_slug> <task_id>
+  spec-finder ls
+  spec-finder inspect <task_slug>
   spec-finder config
   spec-finder version
 
@@ -65,6 +69,13 @@ Loop mode:
   checkpoint begin|complete uses only .spec-finder/config.json auto_commit: true and the shared local Git service.
   It creates local recovery checkpoints only; it never pushes, opens a PR, or implies review or merge.
   Legacy auto-commit=true|false invocation tokens are rejected; configure auto_commit in JSON and rerun.
+
+Inspection:
+  spec-finder ls glances active packets. Kinds are remaining, early-stage, blocked, or invalid in plain text.
+  Empty ls succeeds with no active packets. Invalid rows do not fail the command.
+  spec-finder inspect <task_slug> shows remaining task ids, blockers, and loop state.
+  Missing or invalid packets exit 2. Inspection exits 0 or 2 only.
+  Inspection starts no provider, takes no run-lock, and writes nothing. It is not archive-ready.
 `
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
@@ -75,6 +86,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     case "run": return runCommand(args)
     case "loop": return loopCommand(args)
     case "checkpoint": return checkpointCommand(args)
+    case "ls": return lsCommand(args)
+    case "inspect": return inspectCommand(args)
     case "config": return configCommand()
     case "version":
     case "--version":
