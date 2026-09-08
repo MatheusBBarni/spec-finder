@@ -318,7 +318,7 @@ export class CheckpointService implements CheckpointServiceContract {
 
       const after = await this.captureSnapshot(repository.root)
       const changed = pathSet(after.entries.flatMap((entry) => entry.paths))
-      if (!changed.has(repository.taskRelativePath) || [...changed].some((path) => (
+      if ([...changed].some((path) => (
         path !== repository.taskRelativePath
         && !baseline.paths.has(path)
         && !this.allowedBaselinePaths.has(path)
@@ -438,7 +438,9 @@ export class CheckpointService implements CheckpointServiceContract {
         ? validateCandidatePaths(record.paths)
         : validateCandidatePaths(flattenEntryPaths(candidateEntries))
       if (candidatePaths.length === 0) throw new CheckpointFailure("no task changes were found for checkpoint delivery")
-      if ((record.state === "active" || beginOnlyBlockedPaths) && !candidatePaths.includes(context.taskRelativePath)) {
+      const taskVisibleInGit = flattenEntryPaths(before.entries).includes(context.taskRelativePath)
+        || flattenEntryPaths(snapshot.entries).includes(context.taskRelativePath)
+      if ((record.state === "active" || beginOnlyBlockedPaths) && taskVisibleInGit && !candidatePaths.includes(context.taskRelativePath)) {
         throw new CheckpointFailure("task metadata path is missing from the temporal candidate delta")
       }
       if (record.state === "blocked" && !beginOnlyBlockedPaths) {
