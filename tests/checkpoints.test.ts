@@ -129,6 +129,33 @@ describe("safe Git checkpoint service", () => {
     expect((await readTask(fixture.taskPath)).frontmatter.checkpoint).toBeUndefined()
   })
 
+  test("preserves recovery state when the task file is gitignored", async () => {
+    const fixture = await createIgnoredPacketFixture()
+    const service = new CheckpointService({ enabled: true })
+
+    expect((await service.begin(fixture.input)).state).toBe("created")
+    await writeFile(join(fixture.root, "src", "implementation.ts"), "export const delivered = true\n")
+
+    const preserve = await service.preserve({
+      ...fixture.input,
+      task: await readTask(fixture.taskPath),
+    })
+    expect(preserve.state).toBe("created")
+    const record = (await readTask(fixture.taskPath)).frontmatter.checkpoint
+    expect(record?.state).toBe("active")
+    expect(record?.paths).toContain("src/implementation.ts")
+    expect(record?.paths).not.toContain(".spec-finder/tasks/demo/task_01.md")
+
+    await writeEvidenceAndComplete(fixture)
+    const complete = await service.complete({
+      ...fixture.input,
+      task: await readTask(fixture.taskPath),
+    })
+    expect(complete.state).toBe("created")
+    expect((await readTask(fixture.taskPath)).frontmatter.checkpoint).toBeUndefined()
+  })
+
+
   test("still fail-closes begin when git-visible paths appear during capture", async () => {
     const fixture = await createIgnoredPacketFixture()
     let statusCalls = 0

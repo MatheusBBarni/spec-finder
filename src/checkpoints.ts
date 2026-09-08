@@ -359,10 +359,14 @@ export class CheckpointService implements CheckpointServiceContract {
       this.assertBaseHead(record, snapshot)
       const baseline = this.resolveBaseline(context, record, snapshot)
       this.assertBaselineUnchanged(record, snapshot, baseline)
-      const candidatePaths = validateCandidatePaths(flattenEntryPaths(this.candidateEntries(snapshot.entries, baseline)))
-      if (!candidatePaths.includes(context.taskRelativePath)) {
+      const livePaths = flattenEntryPaths(this.candidateEntries(snapshot.entries, baseline))
+      const taskVisibleInGit = flattenEntryPaths(snapshot.entries).includes(context.taskRelativePath)
+      if (taskVisibleInGit && !livePaths.includes(context.taskRelativePath)) {
         throw new CheckpointFailure("task metadata path is missing from the temporal candidate delta")
       }
+      const candidatePaths = livePaths.length > 0
+        ? validateCandidatePaths(livePaths)
+        : validateCandidatePaths(record.paths)
 
       await updateTaskCheckpoint(currentTask, {
         state: "active",

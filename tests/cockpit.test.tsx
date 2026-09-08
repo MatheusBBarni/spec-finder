@@ -1491,6 +1491,41 @@ describe("read-only progress cockpit", () => {
     }
   })
 
+
+  test("presents pre-pass loop failed as named stop chrome not empty FailureReview", async () => {
+    const store = new CockpitStore()
+    store.consume({
+      type: "loop_started",
+      slug: "demo",
+      iteration: 0,
+      maxIterations: 50,
+      noProgressWindow: 3,
+    })
+    store.consume({
+      type: "loop_finished",
+      slug: "demo",
+      terminal: "failed",
+      reason: "unrecoverable task failure: task_01",
+      iteration: 0,
+      maxIterations: 50,
+      noProgressWindow: 3,
+    })
+    const screen = await render(store, 80, 24)
+    try {
+      const frame = screen.captureCharFrame()
+      expect(frame).toContain("LOOP.STATUS")
+      expect(frame).toContain("LOOP FAILED")
+      expect(frame).toContain("unrecoverable task failure: task_01")
+      expect(frame).toContain("DISMISS")
+      expect(frame).not.toContain("FAIL unavailable")
+      expect(frame).not.toContain("No surfaced task error was provided")
+      expect(frame).not.toContain("RUN.FAILURES")
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+
   test("uses cancellation language for loop cancelled and leaves run overlays unchanged", async () => {
     const cancelledStore = loopFinishedStore("cancelled")
     const cancelledScreen = await render(cancelledStore, 80, 24)

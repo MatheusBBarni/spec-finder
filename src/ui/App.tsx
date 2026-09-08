@@ -911,7 +911,7 @@ function LoopStopSummary({ state, width }: { state: CockpitState; width: number 
   const titleColor = noOp || terminal === "done" ? colors.accent : capStop || cancelled ? colors.warning : colors.danger
   const footer = noOp
     ? <text fg={colors.muted} wrapMode="none">[<span fg={colors.accent}>Q</span>/<span fg={colors.accent}>CTRL+C</span>] EXIT</text>
-    : capStop || blocked
+    : capStop || blocked || terminal === "failed"
       ? <text fg={colors.muted} wrapMode="none">[<span fg={colors.accent}>ESC</span>/<span fg={colors.accent}>Q</span>/<span fg={colors.accent}>CTRL+C</span>] DISMISS</text>
       : <text fg={colors.muted} wrapMode="none">[<span fg={colors.accent}>Q</span>] QUIT</text>
   return (
@@ -1298,7 +1298,7 @@ function isBatchCockpit(state: CockpitState): boolean {
 }
 
 function isRetainedFailureReview(state: CockpitState): boolean {
-  if (state.loopSession?.terminal === "failed") return true
+  if (state.loopSession?.terminal === "failed") return hasSurfacedCockpitFailure(state)
   if (state.loopSession?.terminal) return false
   if (state.finished?.ok !== false) return false
   return state.batchStatus !== "cancelled" && state.batchStatus !== "preflight_failed"
@@ -1319,9 +1319,18 @@ function isLoopNoOp(state: CockpitState): boolean {
   return loopStopTerminal(state) === "no_op" && state.finished?.ok === true
 }
 
+function hasSurfacedCockpitFailure(state: CockpitState): boolean {
+  const packetIndex = state.stoppingPacket?.index ?? state.activePacket?.index ?? 0
+  const taskState = state.batchStatus === null ? state : selectPacketTaskView(state, packetIndex, 0)
+  return taskState.tasks.some((task) => (
+    task.status === "failed" || task.status === "blocked" || task.checkpoint?.state === "blocked"
+  ))
+}
+
 function isRetainedLoopDismiss(state: CockpitState): boolean {
   const terminal = loopStopTerminal(state)
   return terminal === "blocked" || terminal === "exhausted" || terminal === "stalled"
+    || (terminal === "failed" && !hasSurfacedCockpitFailure(state))
 }
 
 
