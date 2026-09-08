@@ -72,6 +72,14 @@ Loop mode:
   loop does not support --multiple and adds no required loop config key.
   Cockpit iteration meters, a portable loop skill, QA/review/ship, continue-on-error, and multi-packet loop are later.
 
+TDD opt-in:
+  spec-finder run, loop, and --multiple default to core execute/report.
+  Opt in with packet-local tdd.json: { "version": 1, "packet": "tdd" } for every task,
+  or { "version": 1, "tasks": ["task_02"] } for listed tasks. { "version": 1 } means all core.
+  Clear the choice by deleting tdd.json or removing the packet / tasks marks.
+  Leftover task frontmatter execution/tdd keys are ignored.
+  sf-tdd-batch remains the manual TDD path and is not the cockpit driver. There is no spec-finder tdd command.
+
   Checkpoint mode:
   checkpoint begin|complete uses only .spec-finder/config.json auto_commit: true and the shared local Git service.
   It creates local recovery checkpoints only; it never pushes, opens a PR, or implies review or merge.

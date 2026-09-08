@@ -240,4 +240,23 @@ describe("CLI help", () => {
     expect(help).toContain("no required loop config key")
     expect(README).toContain("no required `loop` key")
   })
+
+  test("keeps help and README aligned on runtime TDD opt-in", async () => {
+    const help = await captureHelp()
+    for (const text of [help, README]) {
+      expect(text).toContain("tdd.json")
+      expect(text).toContain("default to")
+      expect(text).toContain("core")
+      expect(text).toContain(`{ "version": 1, "packet": "tdd" }`)
+      expect(text).toContain(`{ "version": 1, "tasks": ["task_02"] }`)
+      expect(text).toContain(`{ "version": 1 }`)
+      expect(text).toContain("Clear the choice by deleting")
+      expect(text).toContain("sf-tdd-batch")
+      expect(text).toContain("manual TDD path")
+    }
+    const usage = help.split("Usage:")[1]?.split("Setup mode:")[0] ?? ""
+    expect(usage).not.toContain("spec-finder tdd")
+    expect(help).toContain("There is no spec-finder tdd command")
+    expect(README).toContain("there is no `spec-finder tdd` command")
+  })
 })

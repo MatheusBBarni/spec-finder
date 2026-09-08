@@ -152,7 +152,23 @@ Keep using idea, PRD, TechSpec, and tasks when you need discovery, a product-onl
 
 ### When to use TDD versus core
 
-The four `sf-tdd-*` skills are an optional pack for honest red-before-green work. Use them when a task adds or changes product behavior and you need a failing public-seam test before production code. Keep using core `sf-execute-task`, `sf-task-report`, and `sf-batch-tasks` for research, docs, chore, config-only, or any packet that does not need a red phase. `spec-finder run` stays on the core skills until a separate opt-in design; invoking TDD skills is a manual choice.
+The four `sf-tdd-*` skills are an optional pack for honest red-before-green work. Use them when a task adds or changes product behavior and you need a failing public-seam test before production code. Keep using core `sf-execute-task`, `sf-task-report`, and `sf-batch-tasks` for research, docs, chore, config-only, or any packet that does not need a red phase.
+
+`spec-finder run`, `spec-finder loop`, and `--multiple` default to those core skills. Opt in with a packet-local `tdd.json` (operator-edited; there is no `spec-finder tdd` command). A task uses TDD execute/report if the packet is marked or that task id is listed; unmarked work stays on core. Leftover task frontmatter `execution` / `tdd` keys are ignored. `sf-tdd-batch` remains the manual TDD path and is not the cockpit driver.
+
+Packet-wide:
+
+```json
+{ "version": 1, "packet": "tdd" }
+```
+
+One or more tasks (packet unmarked):
+
+```json
+{ "version": 1, "tasks": ["task_02"] }
+```
+
+`{ "version": 1 }` is valid and means all core. Clear the choice by deleting `tdd.json` or removing the `packet` / `tasks` marks.
 
 ## Run tasks
 
