@@ -972,6 +972,132 @@ describe("cockpit store", () => {
     expect(store.getSnapshot()).toBe(terminalState)
     expect(selectSelectedTranscript(store.getSnapshot()).map((entry) => entry.text)).not.toContain("late terminal output")
   })
+
+  test("projects loop start and progress into an ephemeral session", () => {
+    const store = new CockpitStore()
+    store.consume({
+      type: "loop_started",
+      slug: "demo",
+      iteration: 0,
+      maxIterations: 50,
+      noProgressWindow: 3,
+    })
+    store.consume({
+      type: "loop_progress",
+      slug: "demo",
+      iteration: 1,
+      maxIterations: 50,
+      noProgressWindow: 3,
+      phase: "recover",
+    })
+    expect(store.getSnapshot().loopSession).toEqual({
+      slug: "demo",
+      iteration: 1,
+      maxIterations: 50,
+      noProgressWindow: 3,
+      phase: "recover",
+      terminal: null,
+      reason: null,
+    })
+  })
+
+  test("preserves a live loop session across the first run_started", () => {
+    const store = new CockpitStore()
+    store.consume({
+      type: "loop_started",
+      slug: "demo",
+      iteration: 0,
+      maxIterations: 50,
+      noProgressWindow: 3,
+    })
+    store.consume({
+      type: "loop_progress",
+      slug: "demo",
+      iteration: 2,
+      maxIterations: 50,
+      noProgressWindow: 3,
+      phase: "execute",
+    })
+    store.consume({
+      type: "run_started",
+      slug: "demo",
+      config: DEFAULT_CONFIG,
+      tasks: [task(1, "Seeded")],
+    })
+    const snapshot = store.getSnapshot()
+    expect(snapshot.tasks.map((item) => item.id)).toEqual(["task_01"])
+    expect(snapshot.loopSession).toMatchObject({
+      slug: "demo",
+      iteration: 2,
+      phase: "execute",
+      terminal: null,
+    })
+  })
+
+  test("ignores nested run_finished while the loop session is live", () => {
+    const store = new CockpitStore()
+    store.consume({
+      type: "loop_started",
+      slug: "demo",
+      iteration: 0,
+      maxIterations: 50,
+      noProgressWindow: 3,
+    })
+    store.consume({ type: "run_started", slug: "demo", config: DEFAULT_CONFIG, tasks: [task(1, "Live")] })
+    store.consume({ type: "run_finished", ok: true, message: "pass complete" })
+    expect(store.getSnapshot().finished).toBeNull()
+    expect(store.getSnapshot().loopSession?.terminal).toBeNull()
+  })
+
+  test("run and batch snapshots have no loop session", () => {
+    const runStore = startedStore([task(1, "Single")])
+    expect(runStore.getSnapshot().loopSession).toBeNull()
+
+    const batchStore = new CockpitStore()
+    batchStore.consume({ type: "batch_started", slugs: ["alpha", "beta"] })
+    expect(batchStore.getSnapshot().loopSession).toBeNull()
+  })
+
+  test("ignores malformed loop events", () => {
+    const store = new CockpitStore()
+    store.consume({
+      type: "loop_started",
+      slug: "",
+      iteration: 0,
+      maxIterations: 50,
+      noProgressWindow: 3,
+    })
+    store.consume({
+      type: "loop_started",
+      slug: "demo",
+      iteration: 0,
+      maxIterations: 0,
+      noProgressWindow: 3,
+    })
+    expect(store.getSnapshot().loopSession).toBeNull()
+  })
+
+  test("stores loop_finished terminal without opening run finished chrome", () => {
+    const store = new CockpitStore()
+    store.consume({
+      type: "loop_started",
+      slug: "demo",
+      iteration: 0,
+      maxIterations: 50,
+      noProgressWindow: 3,
+    })
+    store.consume({
+      type: "loop_finished",
+      slug: "demo",
+      terminal: "no_op",
+      reason: "nothing pending",
+      iteration: 0,
+      maxIterations: 50,
+      noProgressWindow: 3,
+    })
+    expect(store.getSnapshot().loopSession?.terminal).toBe("no_op")
+    expect(store.getSnapshot().finished).toBeNull()
+  })
 })
 
 function startedStore(tasks: TaskFile[]): CockpitStore {

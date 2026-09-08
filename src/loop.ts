@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { relative } from "node:path"
 import type { SpecFinderConfig } from "./config.ts"
 import { runTaskPacket, type RunOptions, type RunResult } from "./engine.ts"
-import type { RunEventListener } from "./events.ts"
+import type { LoopPhase, RunEventListener } from "./events.ts"
 import {
   DEFAULT_MAX_ITERATIONS,
   DEFAULT_NO_PROGRESS_WINDOW,
@@ -187,9 +187,9 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopResult> {
     : await initLoopState(packet.directory, bootstrapInput)
   ledger = withInvocationCaps(ledger, options)
   await writeLoopState(packet.directory, ledger)
+  emitLoopStarted(options, ledger)
 
   const runner = options.runTaskPacket ?? runTaskPacket
-
   for (;;) {
     if (options.signal.aborted) {
       return persistTerminal(packet.directory, options, ledger, "cancelled", "operator or ACP abort")
@@ -202,6 +202,14 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopResult> {
     }
 
     const passNumber = ledger.iteration + 1
+    options.emit({
+      type: "loop_progress",
+      slug: options.slug,
+      iteration: passNumber,
+      maxIterations: ledger.max_iterations,
+      noProgressWindow: ledger.no_progress_window,
+      phase: loopPhase(detected.action),
+    })
     options.emit({
       type: "activity",
       message: `loop: iteration ${passNumber}/${ledger.max_iterations} ${detected.action}`,
@@ -319,6 +327,7 @@ async function persistTerminal(
   })
   await writeLoopState(packetDirectory, next)
   options.emit({ type: "activity", message: `loop: terminal ${terminal}: ${reason}` })
+  emitLoopFinished(options, next, terminal, reason)
   return {
     terminal,
     reason,
@@ -347,6 +356,37 @@ function activityForAction(action: LoopDetectAction): string {
   if (action === "recover_checkpoint") return "loop: recovering checkpoint delivery"
   if (action === "execute") return "loop: executing remaining work"
   return `loop: ${action}`
+}
+
+function loopPhase(action: LoopDetectAction): LoopPhase {
+  return action === "execute" ? "execute" : "recover"
+}
+
+function emitLoopStarted(options: LoopRunOptions, ledger: LoopState): void {
+  options.emit({
+    type: "loop_started",
+    slug: options.slug,
+    iteration: 0,
+    maxIterations: ledger.max_iterations,
+    noProgressWindow: ledger.no_progress_window,
+  })
+}
+
+function emitLoopFinished(
+  options: LoopRunOptions,
+  ledger: LoopState,
+  terminal: LoopTerminal,
+  reason: string,
+): void {
+  options.emit({
+    type: "loop_finished",
+    slug: options.slug,
+    terminal,
+    reason: boundedText(reason),
+    iteration: ledger.iteration,
+    maxIterations: ledger.max_iterations,
+    noProgressWindow: ledger.no_progress_window,
+  })
 }
 
 async function writeIterationSummary(

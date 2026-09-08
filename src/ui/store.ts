@@ -5,11 +5,16 @@ import type {
   BatchPacketFinishedEvent,
   BatchPacketStartedEvent,
   BatchStartedEvent,
+  LoopFinishedEvent,
+  LoopPhase,
+  LoopProgressEvent,
+  LoopStartedEvent,
   NoWorkReason,
   RunEvent,
   RunEventListener,
 } from "../events.ts"
 import type { PacketOutcome, PacketSummary } from "../batch.ts"
+import type { LoopTerminal } from "../loop-state.ts"
 import type { CheckpointRecord, TaskFile, TaskStatus } from "../tasks.ts"
 import {
   appendTranscriptLines,
@@ -74,6 +79,16 @@ export interface CockpitFinishedState {
 
 export type CockpitBatchStatus = BatchEventStatus | null
 
+export type CockpitLoopSession = {
+  readonly slug: string
+  readonly iteration: number
+  readonly maxIterations: number
+  readonly noProgressWindow: number
+  readonly phase: LoopPhase | null
+  readonly terminal: LoopTerminal | null
+  readonly reason: string | null
+}
+
 export interface CockpitState {
   readonly slug: string
   readonly config: Readonly<SpecFinderConfig> | null
@@ -103,6 +118,7 @@ export interface CockpitState {
   readonly activePacket: ActivePacketContext | null
   readonly stoppingPacket: StoppingPacketContext | null
   readonly notStartedPackets: readonly PacketSummary[]
+  readonly loopSession: CockpitLoopSession | null
 }
 
 function createInitialState(): CockpitState {
@@ -131,6 +147,7 @@ function createInitialState(): CockpitState {
     activePacket: null,
     stoppingPacket: null,
     notStartedPackets: [],
+    loopSession: null,
   }
 }
 
@@ -161,6 +178,7 @@ export class CockpitStore {
         // A packet engine nested inside a batch still emits its legacy
         // lifecycle events. They must not reset the batch projection.
         if (this.state.batchStatus !== null) break
+        const loopSession = this.state.loopSession
         this.sequence = 0
         const tasks = event.tasks.map(toCockpitTask)
         const visibleTaskIds = unfinishedTasks(tasks).map((task) => task.id)
@@ -178,6 +196,7 @@ export class CockpitStore {
           checkpointOutcomes,
           taskReasons: checkpointReasons(tasks),
           runActivity,
+          loopSession,
         })
         break
       }
@@ -224,6 +243,7 @@ export class CockpitStore {
         break
       case "run_finished": {
         if (this.state.batchStatus !== null) break
+        if (this.state.loopSession !== null && this.state.loopSession.terminal === null) break
         const blockedDelivery = hasCheckpointBlocked(this.state)
         const message = blockedDelivery && event.ok
           ? `${event.message}; checkpoint delivery blocked`
@@ -241,7 +261,63 @@ export class CockpitStore {
         })
         break
       }
+      case "loop_started":
+        this.consumeLoopStarted(event)
+        break
+      case "loop_progress":
+        this.consumeLoopProgress(event)
+        break
+      case "loop_finished":
+        this.consumeLoopFinished(event)
+        break
     }
+  }
+
+  private consumeLoopStarted(event: LoopStartedEvent): void {
+    if (!acceptedLoopMetrics(event)) return
+    this.set({
+      ...this.state,
+      loopSession: {
+        slug: event.slug,
+        iteration: 0,
+        maxIterations: event.maxIterations,
+        noProgressWindow: event.noProgressWindow,
+        phase: null,
+        terminal: null,
+        reason: null,
+      },
+    })
+  }
+
+  private consumeLoopProgress(event: LoopProgressEvent): void {
+    if (!acceptedLoopMetrics(event) || this.state.loopSession === null) return
+    this.set({
+      ...this.state,
+      loopSession: {
+        ...this.state.loopSession,
+        slug: event.slug,
+        iteration: event.iteration,
+        maxIterations: event.maxIterations,
+        noProgressWindow: event.noProgressWindow,
+        phase: event.phase,
+      },
+    })
+  }
+
+  private consumeLoopFinished(event: LoopFinishedEvent): void {
+    if (!acceptedLoopMetrics(event) || this.state.loopSession === null) return
+    this.set({
+      ...this.state,
+      loopSession: {
+        ...this.state.loopSession,
+        slug: event.slug,
+        iteration: event.iteration,
+        maxIterations: event.maxIterations,
+        noProgressWindow: event.noProgressWindow,
+        terminal: event.terminal,
+        reason: event.reason,
+      },
+    })
   }
 
   private consumeBatchStarted(event: BatchStartedEvent): void {
@@ -1037,4 +1113,12 @@ function hasCheckpointBlocked(
 ): boolean {
   return state.tasks.some((task) => task.checkpoint?.state === "blocked")
     || Object.values(state.checkpointOutcomes).some((checkpoint) => checkpoint.state === "blocked")
+}
+
+function acceptedLoopMetrics(event: { slug: string; maxIterations: number; noProgressWindow: number }): boolean {
+  return event.slug.trim().length > 0
+    && Number.isFinite(event.maxIterations)
+    && event.maxIterations > 0
+    && Number.isFinite(event.noProgressWindow)
+    && event.noProgressWindow > 0
 }

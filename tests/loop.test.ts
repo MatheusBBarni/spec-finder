@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DEFAULT_CONFIG } from "../src/config.ts"
 import type { RunOptions, RunResult } from "../src/engine.ts"
+import type { RunEvent } from "../src/events.ts"
 import { detectLoopAction, runLoop } from "../src/loop.ts"
 import {
   createBootstrapLoopState,
@@ -404,6 +405,79 @@ describe("runLoop", () => {
     expect(await snapshotTree(packet)).toEqual(before)
     expect(await Bun.file(describeLoopPaths(packet).directory).exists()).toBe(false)
   })
+
+  test("emits started then progress then finished and maps recover actions to recover", async () => {
+    const { root, packet } = await createLoopPacket({
+      "task_01.md": diskTask("task_01", "completed", "Deliver", checkpointYaml),
+      "task_02.md": diskTask("task_02", "pending", "Next"),
+    })
+    const events: RunEvent[] = []
+    const result = await runLoop({
+      root,
+      slug: "demo-packet",
+      config: DEFAULT_CONFIG,
+      signal: new AbortController().signal,
+      emit: (event) => { events.push(event) },
+      interactivePermissions: false,
+      runTaskPacket: async () => {
+        const latest = events.filter((event) => event.type === "loop_progress").at(-1)
+        if (latest?.phase === "recover") {
+          await writeFile(join(packet, "task_01.md"), diskTask("task_01", "completed", "Deliver"))
+        }
+        if (latest?.phase === "execute") {
+          await writeFile(join(packet, "task_02.md"), diskTask("task_02", "completed", "Next"))
+        }
+        return okResult
+      },
+    })
+    expect(result.terminal).toBe("done")
+    const types = events.map((event) => event.type)
+    expect(types[0]).toBe("loop_started")
+    expect(types).toContain("loop_progress")
+    expect(types.at(-1)).toBe("loop_finished")
+    expect(types.indexOf("loop_started")).toBeLessThan(types.indexOf("loop_progress"))
+    expect(types.lastIndexOf("loop_progress")).toBeLessThan(types.lastIndexOf("loop_finished"))
+    expect(events.filter((event) => event.type === "loop_progress").map((event) => event.phase)).toEqual(["recover", "execute"])
+    expect(events.some((event) => event.type === "activity" && event.message.startsWith("loop: iteration"))).toBe(true)
+    expect(events.some((event) => event.type === "activity" && event.message.startsWith("loop: terminal"))).toBe(true)
+  })
+
+  test("dry-run does not emit loop session events", async () => {
+    const { root } = await createLoopPacket({
+      "task_01.md": diskTask("task_01", "pending", "Plan"),
+    })
+    const events: RunEvent[] = []
+    await runLoop({
+      root,
+      slug: "demo-packet",
+      config: DEFAULT_CONFIG,
+      signal: new AbortController().signal,
+      emit: (event) => { events.push(event) },
+      interactivePermissions: false,
+      dryRun: true,
+      runTaskPacket: async () => okResult,
+    })
+    expect(events.every((event) => event.type === "activity")).toBe(true)
+    expect(events.some((event) => event.type === "loop_started" || event.type === "loop_progress" || event.type === "loop_finished")).toBe(false)
+  })
+
+  test("immediate no_op emits started then finished without progress", async () => {
+    const { root } = await createLoopPacket({
+      "task_01.md": diskTask("task_01", "completed", "Already done"),
+    })
+    const events: RunEvent[] = []
+    await runLoop({
+      root,
+      slug: "demo-packet",
+      config: DEFAULT_CONFIG,
+      signal: new AbortController().signal,
+      emit: (event) => { events.push(event) },
+      interactivePermissions: false,
+      runTaskPacket: async () => okResult,
+    })
+    expect(events.map((event) => event.type).filter((type) => type.startsWith("loop_"))).toEqual(["loop_started", "loop_finished"])
+  })
+
 
   test("resume from mid-loop ledger skips completed work", async () => {
     const { root, packet } = await createLoopPacket({

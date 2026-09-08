@@ -497,6 +497,8 @@ function TitleBar({ state, width }: { state: CockpitState; width: number }) {
   const title = `SPEC FINDER · ${state.slug || "cockpit"} · ACP COCKPIT`
   const titleLimit = Math.max(12, contentWidth - statusText.length - 1)
   const identity = runtimeIdentityParts(state).join(" - ")
+  const liveLoop = state.loopSession !== null && state.loopSession.terminal === null
+  const secondary = liveLoop ? loopHeaderText(state.loopSession, contentWidth) : identity
   return (
     <box height={2} paddingLeft={1} paddingRight={1} flexDirection="column" backgroundColor={colors.background}>
       <box height={1} flexDirection="row" alignItems="center">
@@ -504,7 +506,7 @@ function TitleBar({ state, width }: { state: CockpitState; width: number }) {
         <box flexGrow={1} />
         <text fg={statusColor} wrapMode="none"><strong>{statusText}</strong></text>
       </box>
-      <text fg={colors.muted} wrapMode="none">{clip(identity, contentWidth)}</text>
+      <text fg={colors.muted} wrapMode="none">{clip(secondary, contentWidth)}</text>
     </box>
   )
 }
@@ -1173,6 +1175,22 @@ function runtimeIdentityParts(state: CockpitState): string[] {
     runtimeOptionValue("speed", state),
   ]
 }
+
+function loopHeaderText(session: NonNullable<CockpitState["loopSession"]>, width: number): string {
+  const nMax = `LOOP ${session.iteration}/${session.maxIterations}`
+  const cap = `cap ${session.maxIterations}`
+  const window = `window ${session.noProgressWindow}`
+  const phase = session.phase
+  const ranked = phase === null
+    ? [[nMax, cap, window], [nMax, cap], [nMax]]
+    : [[nMax, cap, window, phase], [nMax, cap, phase], [nMax, phase], [nMax]]
+  for (const parts of ranked) {
+    const text = parts.join(" · ")
+    if (text.length <= width) return text
+  }
+  return clip(nMax, width)
+}
+
 
 function runtimeOptionValue(name: RuntimeOptionName, state: CockpitState): string {
   const outcome = state.runtimeOptions[name]

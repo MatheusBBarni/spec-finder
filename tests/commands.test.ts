@@ -1305,6 +1305,50 @@ describe("loop command", () => {
     }
   })
 
+  test("no-ui still prints loop activity and does not print loop_started", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-loop-nui-"))
+    try {
+      const output = commandOutput()
+      const code = await loopCommand(["demo", "--no-ui"], {
+        root,
+        output: output.output,
+        loadConfig: async () => DEFAULT_CONFIG,
+        runLoop: async ({ emit }) => {
+          emit({ type: "loop_started", slug: "demo", iteration: 0, maxIterations: 50, noProgressWindow: 3 })
+          emit({ type: "activity", message: "loop: iteration 1/50 execute" })
+          emit({
+            type: "loop_progress",
+            slug: "demo",
+            iteration: 1,
+            maxIterations: 50,
+            noProgressWindow: 3,
+            phase: "execute",
+          })
+          emit({ type: "activity", message: "loop: terminal done: ok" })
+          emit({
+            type: "loop_finished",
+            slug: "demo",
+            terminal: "done",
+            reason: "ok",
+            iteration: 1,
+            maxIterations: 50,
+            noProgressWindow: 3,
+          })
+          return { terminal: "done", reason: "ok", iteration: 1, slug: "demo" }
+        },
+      })
+      expect(code).toBe(0)
+      expect(output.text()).toContain("loop: iteration")
+      expect(output.text()).toContain("loop: terminal")
+      expect(output.text()).not.toContain("loop_started")
+      expect(output.text()).not.toContain("loop_progress")
+      expect(output.text()).not.toContain("loop_finished")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+
   test("dry-run exits 0 even when the plan names a non-success terminal", async () => {
     const root = await mkdtemp(join(tmpdir(), "spec-finder-loop-dry-"))
     try {

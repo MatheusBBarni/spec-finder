@@ -1310,6 +1310,105 @@ describe("read-only progress cockpit", () => {
       await destroy(exitScreen)
     }
   })
+
+  test("shows live recover and execute loop facts in existing header chrome", async () => {
+    const store = new CockpitStore()
+    store.consume({
+      type: "loop_started",
+      slug: "demo",
+      iteration: 0,
+      maxIterations: 50,
+      noProgressWindow: 3,
+    })
+    store.consume({
+      type: "loop_progress",
+      slug: "demo",
+      iteration: 1,
+      maxIterations: 50,
+      noProgressWindow: 3,
+      phase: "recover",
+    })
+    store.consume({ type: "run_started", slug: "demo", config: DEFAULT_CONFIG, tasks: [task(1, "Recover work")] })
+    store.consume({ type: "task_status", taskId: "task_01", status: "in_progress" })
+
+    const recoverScreen = await render(store, 80, 24)
+    try {
+      const frame = recoverScreen.captureCharFrame()
+      expect(frame).toContain("LOOP 1/50")
+      expect(frame).toContain("cap 50")
+      expect(frame).toContain("window 3")
+      expect(frame).toContain("recover")
+      expect(frame).not.toContain("execute")
+    } finally {
+      await destroy(recoverScreen)
+    }
+
+    await Promise.resolve()
+    store.consume({
+      type: "loop_progress",
+      slug: "demo",
+      iteration: 2,
+      maxIterations: 50,
+      noProgressWindow: 3,
+      phase: "execute",
+    })
+    const executeScreen = await render(store, 80, 24)
+    try {
+      const frame = executeScreen.captureCharFrame()
+      expect(frame).toContain("LOOP 2/50")
+      expect(frame).toContain("cap 50")
+      expect(frame).toContain("window 3")
+      expect(frame).toContain("execute")
+    } finally {
+      await destroy(executeScreen)
+    }
+  })
+
+  test("clips the no-progress window before phase and N/max on a compact header", async () => {
+    const store = new CockpitStore()
+    store.consume({
+      type: "loop_started",
+      slug: "demo",
+      iteration: 0,
+      maxIterations: 50,
+      noProgressWindow: 3,
+    })
+    store.consume({
+      type: "loop_progress",
+      slug: "demo",
+      iteration: 1,
+      maxIterations: 50,
+      noProgressWindow: 3,
+      phase: "recover",
+    })
+    store.consume({ type: "run_started", slug: "demo", config: DEFAULT_CONFIG, tasks: [task(1, "Compact")] })
+
+    const screen = await render(store, 36, 20)
+    try {
+      const frame = screen.captureCharFrame()
+      expect(frame).toContain("LOOP 1/50")
+      expect(frame).toContain("recover")
+      expect(frame).not.toContain("window 3")
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+  test("omits loop iteration facts from run and batch cockpits", async () => {
+    const runScreen = await render(startedStore([task(1, "Single run")]), 80, 24)
+    try {
+      expect(runScreen.captureCharFrame()).not.toContain("LOOP ")
+    } finally {
+      await destroy(runScreen)
+    }
+
+    const batchScreen = await render(startedBatchStore(["alpha", "beta"], 0, [task(1, "Alpha")]), 80, 24)
+    try {
+      expect(batchScreen.captureCharFrame()).not.toContain("LOOP ")
+    } finally {
+      await destroy(batchScreen)
+    }
+  })
 })
 
 describe("cockpit session lifecycle", () => {
