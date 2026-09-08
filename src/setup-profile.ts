@@ -4,6 +4,43 @@ import type { ProviderName } from "./config.ts"
 export const SETUP_DESTINATIONS = [".agents/skills", ".claude/skills"] as const
 export type SetupDestination = (typeof SETUP_DESTINATIONS)[number]
 
+/** Managed Spec Finder skills copied by setup. */
+export const SPEC_FINDER_SKILLS = [
+  "sf-idea-factory",
+  "sf-create-prd",
+  "sf-create-techspec",
+  "sf-create-tasks",
+  "sf-write-spec",
+  "sf-memory",
+  "sf-execute-task",
+  "sf-task-report",
+  "sf-batch-tasks",
+  "sf-tdd-plan",
+  "sf-tdd-execute",
+  "sf-tdd-report",
+  "sf-tdd-batch",
+  "sf-archive-tasks",
+] as const
+export type SpecFinderSkill = (typeof SPEC_FINDER_SKILLS)[number]
+
+export function isSpecFinderSkill(value: string): value is SpecFinderSkill {
+  return (SPEC_FINDER_SKILLS as readonly string[]).includes(value)
+}
+
+/** Canonicalize a skill selection. Omitted means every managed skill. */
+export function resolveSetupSkills(skills?: readonly string[]): SpecFinderSkill[] {
+  if (skills === undefined) return [...SPEC_FINDER_SKILLS]
+  if (skills.length === 0) throw new Error("setup requires at least one skill")
+  const seen = new Set<string>()
+  for (const skill of skills) {
+    if (!isSpecFinderSkill(skill)) throw new Error(`unsupported setup skill: ${skill}`)
+    if (seen.has(skill)) throw new Error(`duplicate setup skill: ${skill}`)
+    seen.add(skill)
+  }
+  return SPEC_FINDER_SKILLS.filter((skill) => seen.has(skill))
+}
+
+
 /** Static, source-controlled setup choices; `auto` is universal and implicit. */
 export interface SetupProviderProfile {
   provider: ProviderName

@@ -40,12 +40,15 @@ import { CONFIG_FILE, SPEC_DIR, findWorkspaceRoot } from "./paths.ts"
 import { acquireRunLock } from "./run-lock.ts"
 import {
   refreshManagedSkills,
+  resolveSetupSkills,
   setupWorkspace,
+  SPEC_FINDER_SKILLS,
   type SetupScope,
   type SetupInputOrigin,
   type SetupRequest,
   type SetupResult,
   type SetupSpeed,
+  type SpecFinderSkill,
 } from "./setup.ts"
 import {
   defaultsRuntimeToAutoOnProviderSwitch,
@@ -57,6 +60,7 @@ import { isValidTaskSlug, loadTaskPacket, validateTasks, type TaskFile } from ".
 import { CockpitStore } from "./ui/store.ts"
 import { startCockpit, type CockpitSession } from "./ui/cockpit.tsx"
 import {
+  setupMultiSelect,
   setupSelect,
   type SetupPickerInput,
 } from "./ui/setup-picker.ts"
@@ -303,17 +307,24 @@ export async function resolveSetupOptions(
     speedOrigin = "default"
   }
 
+  const skills = interactive
+    ? await promptForSkills(input, output, savedSetupSkills(saved.config))
+    : savedSetupSkills(saved.config)
+
+
   return {
     provider,
     model,
     speed,
     scope,
+    skills,
     origin: {
       provider: providerOrigin,
       model: modelOrigin,
       speed: speedOrigin,
     },
   }
+
 }
 
 /**
@@ -716,6 +727,50 @@ async function promptForSpeed(
     output,
   })
 }
+
+const SKILL_HINTS: Record<SpecFinderSkill, string> = {
+  "sf-idea-factory": "idea discovery",
+  "sf-create-prd": "product requirements",
+  "sf-create-techspec": "technical design",
+  "sf-create-tasks": "task plan",
+  "sf-write-spec": "one-shot spec",
+  "sf-memory": "packet memory",
+  "sf-execute-task": "implement a task",
+  "sf-task-report": "evidence report",
+  "sf-batch-tasks": "run a task range",
+  "sf-tdd-plan": "TDD plan",
+  "sf-tdd-execute": "red-green execute",
+  "sf-tdd-report": "TDD report",
+  "sf-tdd-batch": "TDD range",
+  "sf-archive-tasks": "archive completed packets",
+}
+
+async function promptForSkills(
+  input: SetupPickerInput,
+  output: Writable,
+  initialSelected: readonly SpecFinderSkill[],
+): Promise<SpecFinderSkill[]> {
+  const selected = await setupMultiSelect({
+    message: "Choose skills to install",
+    items: SPEC_FINDER_SKILLS.map((value) => ({
+      label: value,
+      value,
+      hint: SKILL_HINTS[value],
+    })),
+    initialSelected: [...initialSelected],
+    required: true,
+    requiredMessage: "Select at least one skill before continuing",
+    input,
+    output,
+  })
+  return resolveSetupSkills(selected)
+}
+
+function savedSetupSkills(config: SpecFinderConfig | undefined): SpecFinderSkill[] {
+  if (config?.setup.status === "configured") return resolveSetupSkills(config.setup.skills)
+  return resolveSetupSkills()
+}
+
 
 function validateSetupModel(provider: ProviderName, model: string): string {
   const normalized = model.trim()
@@ -1259,7 +1314,10 @@ export async function refreshCommand(
     const result = await refreshManagedSkills(root, {
       provider: config.provider,
       scope: config.setup.scope,
+      ...(config.setup.skills === undefined ? {} : { skills: config.setup.skills }),
     }, options.homeDirectory === undefined ? undefined : { homeDirectory: options.homeDirectory })
+
+
     output.write(`destination: ${result.destination}\n`)
     output.write(`skill root: ${result.skillRoot}\n`)
     output.write(`scope: ${result.scope}\n`)

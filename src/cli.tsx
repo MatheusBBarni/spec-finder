@@ -36,14 +36,17 @@ Setup mode:
   retained compatibility syntax and is the only installation mode. Repeated or duplicate setup
   options, conflicting scopes, and --symlink are rejected before any writes.
   Destinations are .claude/skills for Claude and .agents/skills for Codex, Cursor, Grok Build, or Pi. A valid v3
-  rerun preserves omitted provider, model, speed, and scope values, including a saved custom model.
+  rerun preserves omitted provider, model, speed, scope, and skill-selection values, including a saved custom model.
+  Interactive setup asks which managed skills to copy. A first run starts with every skill selected; a configured rerun starts from the saved selection. Space toggles a skill, and Enter confirms.
+  Non-interactive setup copies every managed skill, or the saved selection on a configured rerun.
   Migrated v1/v2 configurations require an explicit first --local or --global choice because their
   historic scope is unknown. Setup summaries say requested model and requested speed; runtime ACP feedback remains
   authoritative for applied, defaulted, or unsupported capabilities. Legacy Cursor .cursor/skills
   content is preserved and not migrated.
 
+
 Refresh mode:
-  spec-finder refresh recopies current managed skills into this workspace's saved destination and scope.
+  spec-finder refresh recopies the saved skill selection into this workspace's saved destination and scope.
   It has no flags. Extra arguments exit 2 before writes.
   Unconfigured cwd or a package that is not npm latest exits 1 with no writes;
   run spec-finder setup or spec-finder upgrade as directed. spec-finder upgrade remains npm-only.

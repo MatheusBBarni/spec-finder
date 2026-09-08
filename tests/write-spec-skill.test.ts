@@ -33,7 +33,8 @@ describe("sf-write-spec packet contract", () => {
     const spec = await readFile(join(skillDir, "references", "spec-template.md"), "utf8")
     const prd = await readFile(join(skillDir, "references", "prd-template.md"), "utf8")
     const techspec = await readFile(join(skillDir, "references", "techspec-template.md"), "utf8")
-    const body = `${skill}\n${doctrine}\n${spec}\n${prd}\n${techspec}`
+    const quality = await readFile(join(skillDir, "references", "quality-bar.md"), "utf8")
+    const body = `${skill}\n${doctrine}\n${spec}\n${prd}\n${techspec}\n${quality}`
 
     expect(skill).toContain("<HARD-GATE>")
     expect(skill).toContain("sf-write-spec")
@@ -51,6 +52,10 @@ describe("sf-write-spec packet contract", () => {
       "task_NN.md",
       ".spec-finder/specs/<slug>-spec.md",
       "whole-draft",
+      "complete implementation prompt",
+      "Current System",
+      "quality-bar.md",
+
     ]) {
       expect(body).toContain(needle)
     }
@@ -85,6 +90,20 @@ describe("sf-write-spec packet contract", () => {
     expect(spec).toContain("## Slices")
     expect(spec).toContain("**Focused:**")
     expect(spec).toContain("**Repository gate:**")
+    expect(spec).toContain("## Current System")
+    expect(spec).toContain("## Output")
+    expect(spec).toContain("Read first because")
+    expect(spec).toContain("current evidence, not the fix")
+    expect(spec).toContain("Valid:")
+    expect(spec).toContain("Invalid:")
+    expect(doctrine).toContain("The spec is the prompt")
+    expect(quality).toContain("NO PROMPT WITHOUT CURRENT-SYSTEM EVIDENCE")
+    expect(skill).toContain("against `.spec-finder/specs/<slug>-spec.md` only")
+    expect(quality).toContain("This bar applies only to `.spec-finder/specs/<slug>-spec.md`")
+    expect(quality).toContain("every template token must be replaced")
+
+    expect(skill).toContain("references/quality-bar.md")
+
   })
 
   test("writes the agent-executable spec at .spec-finder/specs/<slug>-spec.md from the shipped template", async () => {
@@ -110,7 +129,12 @@ describe("sf-write-spec packet contract", () => {
     expect(body).toContain("### Ask first")
     expect(body).toContain("### Never")
     expect(body).toContain("## Failure and Edge Cases")
-    expect(body).toContain("`[exact command]`")
+
+
+    expect(body).toContain("## Current System")
+    expect(body).toContain("## Output")
+    expect(body).toContain("Read first because")
+
   })
 
   test("a packet from this path loads through the shipped task parser and memory writer", async () => {

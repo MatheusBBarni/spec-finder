@@ -4,7 +4,7 @@
 
 `src/` contains the Bun/TypeScript CLI and runtime. Keep CLI parsing in `cli.tsx`/`commands.ts`, task and ACP lifecycle behavior in `engine.ts`, `tasks.ts`, and `acp-client.ts`, and terminal UI code in `src/ui/`. Tests in `tests/` mirror their source surface.
 
-Portable workflow skills belong in `skills/sf-*/`; `.spec-finder/` contains repository configuration and task packets. Packet artifacts follow fixed names such as `_idea.md`, `_prd.md`, `_techspec.md`, `task_01.md`, `memory/MEMORY.md`, and `reports/task_01.md`. Simplified-path specs live at `.spec-finder/specs/<slug>-spec.md`.
+Portable workflow skills belong in `skills/sf-*/`; `.spec-finder/` contains repository configuration and task packets. Packet artifacts follow fixed names such as `_idea.md`, `_prd.md`, `_techspec.md`, `task_01.md`, `memory/MEMORY.md`, and `reports/task_01.md`. Simplified-path specs live at `.spec-finder/specs/<slug>-spec.md` and are the implementation prompt an agent runs when pointed at that file.
 
 ## Build, Test, and Development Commands
 

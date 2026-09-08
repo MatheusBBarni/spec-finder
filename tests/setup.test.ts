@@ -77,11 +77,40 @@ describe("setup", () => {
         expect(writeSpec.trim().length).toBeGreaterThan(0)
         await access(join(base, destination, "sf-write-spec", "references", "doctrine.md"))
         await access(join(base, destination, "sf-write-spec", "references", "spec-template.md"))
+        await access(join(base, destination, "sf-write-spec", "references", "quality-bar.md"))
+
         const config = await loadConfig(root)
-        expect(config.setup).toEqual({ status: "configured", scope, destination })
+        expect(config.setup).toEqual({
+          status: "configured",
+          scope,
+          destination,
+          skills: [...SPEC_FINDER_SKILLS],
+        })
+
       }
     }
   })
+
+  test("copies only the selected managed skills and leaves unselected entries untouched", async () => {
+    const root = await tempRoot()
+    const destination = join(root, ".agents", "skills")
+    await mkdir(join(destination, "sf-idea-factory"), { recursive: true })
+    await writeFile(join(destination, "sf-idea-factory", "SKILL.md"), "prior idea")
+    await mkdir(join(destination, "unrelated-skill"), { recursive: true })
+    await writeFile(join(destination, "unrelated-skill", "SKILL.md"), "keep me")
+
+    const selected = ["sf-write-spec", "sf-memory"] as const
+    const result = await setupWorkspace(root, { ...request("codex"), skills: [...selected] })
+
+    expect(result.installed).toEqual(selected.map((skill) => join(".agents/skills", skill)))
+    await access(join(destination, "sf-write-spec", "SKILL.md"))
+    await access(join(destination, "sf-memory", "SKILL.md"))
+    expect(await readFile(join(destination, "sf-idea-factory", "SKILL.md"), "utf8")).toBe("prior idea")
+    expect(await readFile(join(destination, "unrelated-skill", "SKILL.md"), "utf8")).toBe("keep me")
+    await expect(access(join(destination, "sf-create-prd"))).rejects.toThrow()
+    expect((await loadConfig(root)).setup).toMatchObject({ skills: [...selected] })
+  })
+
 
   test("creates task scaffolding and persists requested values without live provider discovery", async () => {
     const root = await tempRoot()
@@ -99,7 +128,13 @@ describe("setup", () => {
       `${PACKET_GITIGNORE_COMMENT}\n${PACKET_GITIGNORE_PATHS.join("\n")}\n`,
     )
     await expect(access(join(root, ".gitignore"))).rejects.toThrow()
-    expect(raw.setup).toEqual({ status: "configured", scope: "local", destination: ".agents/skills" })
+    expect(raw.setup).toEqual({
+      status: "configured",
+      scope: "local",
+      destination: ".agents/skills",
+      skills: [...SPEC_FINDER_SKILLS],
+    })
+
     expect(DEFAULT_CONFIG.reasoning).toBe("high")
   })
 
@@ -406,6 +441,20 @@ describe("refreshManagedSkills", () => {
     await expect(access(join(root, ".spec-finder", "tasks"))).rejects.toThrow()
     await expect(access(join(root, ".spec-finder", "specs"))).rejects.toThrow()
   })
+
+  test("recopies only the requested skill subset", async () => {
+    const root = await tempRoot()
+    const result = await refreshManagedSkills(root, {
+      provider: "codex",
+      scope: "local",
+      skills: ["sf-write-spec"],
+    })
+
+    expect(result.installed).toEqual([join(".agents/skills", "sf-write-spec")])
+    await access(join(root, ".agents", "skills", "sf-write-spec", "SKILL.md"))
+    await expect(access(join(root, ".agents", "skills", "sf-create-prd"))).rejects.toThrow()
+  })
+
 
   test("preserves unrelated destination skills and leftover Cursor or Pi paths", async () => {
     const root = await tempRoot()
