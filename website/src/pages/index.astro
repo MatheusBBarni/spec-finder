@@ -1,0 +1,273 @@
+---
+import Layout from "../layouts/Layout.astro"
+import Install from "../components/Install.astro"
+
+const base = import.meta.env.BASE_URL.endsWith("/")
+  ? import.meta.env.BASE_URL
+  : `${import.meta.env.BASE_URL}/`
+const gettingStartedHref = `${base}getting-started/`
+---
+
+<Layout
+  title="Spec Finder"
+  description="A skill-driven specification framework with a local ACP cockpit."
+>
+  <section class="hero">
+    <h1>Spec Finder</h1>
+    <p class="lede">
+      A skill-driven specification framework with a local ACP cockpit.
+    </p>
+    <p>
+      Idea → PRD → TechSpec → executable tasks, without a daemon or a second
+      source of truth. Skills are portable Agent Skills. Claude, Codex, Cursor,
+      Grok Build, and Pi run through their ACP harnesses while Spec Finder owns
+      ordering, lifecycle, permissions, and evidence reports.
+    </p>
+    <Install group="home-install" />
+    <ul class="actions">
+      <li>
+        <a class="btn" href={gettingStartedHref}>Getting started</a>
+      </li>
+      <li>
+        <a class="btn btn-ghost" href="https://github.com/MatheusBBarni/spec-finder"
+          >GitHub</a
+        >
+      </li>
+      <li>
+        <a class="btn btn-ghost" href="https://www.npmjs.com/package/spec-finder"
+          >npm</a
+        >
+      </li>
+    </ul>
+  </section>
+
+  <h2>What it does</h2>
+  <div class="grid features">
+    <article class="card">
+      <h3>Closed specification pipeline</h3>
+      <p>
+        Idea, PRD, TechSpec, and numbered tasks live in
+        <code>.spec-finder/tasks/&lt;slug&gt;/</code>.
+      </p>
+    </article>
+    <article class="card">
+      <h3>Simplified spec path</h3>
+      <p>
+        <code>sf-write-spec</code> writes
+        <code>.spec-finder/specs/&lt;slug&gt;-spec.md</code> for an agent to
+        execute, plus the same runner packet, in one research-and-approve pass.
+      </p>
+    </article>
+    <article class="card">
+      <h3>Five ACP providers</h3>
+      <p>
+        Claude, Codex, Cursor, plus packet-only Grok Build and Pi. Spec Finder
+        does not install or authenticate providers.
+      </p>
+    </article>
+    <article class="card">
+      <h3>Read-only cockpit</h3>
+      <p>
+        Watch provider, task graph, ACP activity, and tool calls. One ACP session
+        per task covers implementation and the final report.
+      </p>
+    </article>
+    <article class="card">
+      <h3>Run, loop, batch</h3>
+      <p>
+        <code>spec-finder run</code> is one pass.
+        <code>spec-finder loop</code> keeps recovering one packet.
+        <code>spec-finder run --multiple</code> is serial and fail-fast.
+      </p>
+    </article>
+    <article class="card">
+      <h3>Local packets</h3>
+      <p>
+        Task packets stay in <code>.spec-finder/tasks/</code>. Setup writes
+        <code>.spec-finder/.gitignore</code> so committed specs cannot poison
+        later agent context.
+      </p>
+    </article>
+  </div>
+
+  <h2>How to use the skills</h2>
+  <p>
+    Every stage keeps approval gates. Research and interactive decisions happen
+    before artifacts are saved. Tasks form an acyclic dependency graph and carry
+    their own tests.
+  </p>
+  <ol class="steps">
+    <li>
+      <span class="n">01</span>
+      <strong>Idea</strong>
+      <p><code>sf-idea-factory</code> → <code>_idea.md</code></p>
+    </li>
+    <li>
+      <span class="n">02</span>
+      <strong>PRD</strong>
+      <p><code>sf-create-prd</code> → <code>_prd.md</code></p>
+    </li>
+    <li>
+      <span class="n">03</span>
+      <strong>TechSpec</strong>
+      <p><code>sf-create-techspec</code> → <code>_techspec.md</code></p>
+    </li>
+    <li>
+      <span class="n">04</span>
+      <strong>Tasks</strong>
+      <p><code>sf-create-tasks</code> → <code>task_NN.md</code></p>
+    </li>
+  </ol>
+  <div class="grid split">
+    <article class="card">
+      <h3>Clear request: one-shot spec</h3>
+      <p>
+        Use <code>sf-write-spec</code> when the feature is clear enough for one
+        research-and-approve pass. It writes the agent-executable spec and still
+        writes the runner packet.
+      </p>
+    </article>
+    <article class="card">
+      <h3>Discovery or regeneration</h3>
+      <p>
+        Keep using idea, PRD, TechSpec, and tasks when you need discovery, a
+        product-only PRD, a design-only TechSpec, or task regeneration.
+      </p>
+    </article>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Skill</th>
+          <th>Artifact</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>sf-write-spec</code></td>
+          <td>
+            <code>.spec-finder/specs/&lt;slug&gt;-spec.md</code> plus runner
+            packet (<code>_prd.md</code>, <code>_techspec.md</code>,
+            <code>_tasks.md</code>, <code>task_NN.md</code>)
+          </td>
+        </tr>
+        <tr>
+          <td><code>sf-idea-factory</code></td>
+          <td><code>.spec-finder/tasks/&lt;slug&gt;/_idea.md</code></td>
+        </tr>
+        <tr>
+          <td><code>sf-create-prd</code></td>
+          <td><code>_prd.md</code></td>
+        </tr>
+        <tr>
+          <td><code>sf-create-techspec</code></td>
+          <td><code>_techspec.md</code></td>
+        </tr>
+        <tr>
+          <td><code>sf-create-tasks</code></td>
+          <td><code>_tasks.md</code> and <code>task_NN.md</code></td>
+        </tr>
+        <tr>
+          <td><code>sf-memory</code></td>
+          <td><code>memory/MEMORY.md</code> and <code>memory/task_NN.md</code></td>
+        </tr>
+        <tr>
+          <td><code>sf-execute-task</code></td>
+          <td>bounded implementation and verification</td>
+        </tr>
+        <tr>
+          <td><code>sf-task-report</code></td>
+          <td><code>reports/task_NN.md</code></td>
+        </tr>
+        <tr>
+          <td><code>sf-batch-tasks</code></td>
+          <td>dependency-safe manual range execution</td>
+        </tr>
+        <tr>
+          <td><code>sf-tdd-plan</code></td>
+          <td>additive <code>## TDD Plan</code> on an existing task</td>
+        </tr>
+        <tr>
+          <td><code>sf-tdd-execute</code></td>
+          <td>red → green vertical slices for opted-in behavioral work</td>
+        </tr>
+        <tr>
+          <td><code>sf-tdd-report</code></td>
+          <td>red+green evidence report, or a one-line not-applicable reason</td>
+        </tr>
+        <tr>
+          <td><code>sf-tdd-batch</code></td>
+          <td>TDD-only range runner; stop on failure</td>
+        </tr>
+        <tr>
+          <td><code>sf-archive-tasks</code></td>
+          <td>completed-packet archival and reports</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    The four <code>sf-tdd-*</code> skills are optional. Use them when a task
+    changes product behavior and you need a failing public-seam test first.
+    <code>spec-finder run</code> stays on core skills until a separate opt-in
+    design; invoking TDD skills is a manual choice.
+  </p>
+
+  <h2>Providers</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Provider</th>
+          <th>Packet run</th>
+          <th>One-turn exec</th>
+          <th>Local skills</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Claude</td>
+          <td>yes</td>
+          <td>uncertified</td>
+          <td><code>.claude/skills</code></td>
+        </tr>
+        <tr>
+          <td>Codex</td>
+          <td>yes</td>
+          <td>uncertified</td>
+          <td><code>.agents/skills</code></td>
+        </tr>
+        <tr>
+          <td>Cursor</td>
+          <td>yes</td>
+          <td>uncertified</td>
+          <td><code>.agents/skills</code></td>
+        </tr>
+        <tr>
+          <td>Grok Build</td>
+          <td>packet-only</td>
+          <td>uncertified</td>
+          <td><code>.agents/skills</code></td>
+        </tr>
+        <tr>
+          <td>Pi</td>
+          <td>packet-only</td>
+          <td>uncertified</td>
+          <td><code>.agents/skills</code></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Run a packet</h2>
+  <pre><code>spec-finder run my-feature
+spec-finder run my-feature --no-ui
+spec-finder loop my-feature</code></pre>
+  <p>
+    Install, setup, and skill destinations are on
+    <a href={gettingStartedHref}>Getting started</a>. Full flags and provider
+    notes stay in the repository README.
+  </p>
+</Layout>

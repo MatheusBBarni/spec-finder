@@ -2,6 +2,7 @@
   "name": "spec-finder",
   "version": "0.5.0",
   "description": "A skill-driven specification framework and ACP cockpit",
+  "homepage": "https://matheusbbarni.github.io/spec-finder/",
   "type": "module",
   "bin": {
     "spec-finder": "dist/cli.js"
