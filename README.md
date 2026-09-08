@@ -31,6 +31,8 @@ spec-finder setup
 spec-finder run my-feature
 ```
 
+Once the package is current, `spec-finder refresh` recopies managed skills into this workspace's saved destination and scope without changing provider, model, or scope.
+
 `setup` creates:
 
 ```text
@@ -372,6 +374,7 @@ spec-finder config
 ```text
 spec-finder setup [--agent claude|codex|cursor|grok|pi] [--model auto|CURATED] [--speed auto|normal|fast] [--local|--global] [--copy]
 spec-finder upgrade
+spec-finder refresh
 spec-finder run <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
 spec-finder run --multiple <slug1,slug2,...> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
 spec-finder loop <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE] [--max-iterations N] [--no-progress-window N] [--dry-run] [--reset-state]
@@ -384,7 +387,7 @@ spec-finder version
 
 The `--provider` option accepts `claude`, `codex`, `cursor`, `grok`, or `pi`. Grok Build and Pi remain packet-only; `spec-finder exec --provider grok` and `spec-finder exec --provider pi` are rejected before provider spawn while their separate packet launches remain available.
 
-`upgrade` runs `npm install --global spec-finder@latest`, keeping npm as the package authority. It refreshes the installed package only and does not recopy agent skill destinations. Existing workspaces must re-run `spec-finder setup` to install newly shipped skills such as the TDD pack.
+`upgrade` runs `npm install --global spec-finder@latest`, keeping npm as the package authority. It refreshes the installed package only and does not recopy agent skill destinations. After the package is current, `spec-finder refresh` recopies managed skills into this workspace's saved destination and scope. Extra arguments exit 2 before writes. An unconfigured cwd or a package that is not npm latest exits 1 with no writes. Leftover Cursor `.cursor/skills` and Pi `.pi/skills` content is preserved and not migrated.
 
 ## Task contract
 

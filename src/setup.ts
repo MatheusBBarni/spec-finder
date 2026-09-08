@@ -89,6 +89,14 @@ export interface SetupResult {
   gitignoreStatus: GitignoreStatus
 }
 
+export interface RefreshSkillsResult {
+  destination: SetupDestination
+  skillRoot: string
+  scope: SetupScope
+  installed: string[]
+  legacyCursor: "preserved" | "absent"
+}
+
 export type SetupFailurePhase =
   | "stage"
   | "backup"
@@ -176,6 +184,54 @@ export function skillTargetPath(
 /** Stable workspace lock shared by every setup provider and scope. */
 export function setupLockPath(root: string): string {
   return join(resolve(root), SPEC_DIR, ".setup.lock")
+}
+
+export async function refreshManagedSkills(
+  workspace: string,
+  input: { provider: ProviderName; scope: SetupScope },
+  options: Pick<SetupWorkspaceOptions, "homeDirectory" | "failure" | "failAt" | "failurePoint"> = {},
+): Promise<RefreshSkillsResult> {
+  if (!isSkillTarget(input.provider)) throw new Error(`unsupported setup agent: ${String(input.provider)}`)
+  if (!SETUP_SCOPES.includes(input.scope)) throw new Error(`unsupported setup scope: ${String(input.scope)}`)
+  const root = resolve(workspace)
+  const homeDirectory = resolve(options.homeDirectory ?? homedir())
+  const profile = getSetupProfile(input.provider)
+  const base = input.scope === "global" ? homeDirectory : root
+  const configPath = join(root, SPEC_DIR, CONFIG_FILE)
+  let targetRoot: string
+  try {
+    targetRoot = await resolveSkillTargetRoot(
+      base,
+      join(base, profile.destination),
+      `${input.scope} skill path`,
+    )
+  } catch (error) {
+    throw new SetupTransactionError(errorMessage(error), "preflight")
+  }
+  try {
+    await assertManagedEntries(targetRoot, base, `${input.scope} skill path`)
+  } catch (error) {
+    if (error instanceof SetupTransactionError) throw error
+    throw new SetupTransactionError(errorMessage(error), "preflight")
+  }
+  const legacyCursor = await readLegacyStatus(base)
+  return createTransaction({
+    workspace: root,
+    targetRoot,
+    configPath,
+    candidate: DEFAULT_CONFIG,
+    configExisted: false,
+    request: {
+      provider: input.provider,
+      model: profile.defaultModel,
+      speed: "normal",
+      scope: input.scope,
+      origin: { provider: "default", model: "default", speed: "default" },
+    },
+    legacyCursor,
+    options,
+    persistConfig: false,
+  }).runSkills()
 }
 
 export async function setupWorkspace(
@@ -464,12 +520,14 @@ function createTransaction(input: {
   request: SetupRequest
   legacyCursor: "preserved" | "absent"
   options: SetupWorkspaceOptions
+  persistConfig?: boolean
 }): SetupTransaction {
   return new SetupTransaction(input)
 }
 
 class SetupTransaction {
   private readonly id = randomUUID()
+  private readonly persistConfig: boolean
   private readonly paths: TransactionPaths
   private readonly state: TransactionState = {
     backedUp: [],
@@ -494,9 +552,11 @@ class SetupTransaction {
     request: SetupRequest
     legacyCursor: "preserved" | "absent"
     options: SetupWorkspaceOptions
+    persistConfig?: boolean
   }) {
     const { targetRoot, configPath } = input
     const gitignorePath = join(input.workspace, SPEC_DIR, GITIGNORE_FILE)
+    this.persistConfig = input.persistConfig ?? true
     this.paths = {
       targetRoot,
       targetParent: dirname(targetRoot),
@@ -516,6 +576,25 @@ class SetupTransaction {
   }
 
   async run(): Promise<SetupResult> {
+    const copied = await this.execute()
+    return {
+      ...copied,
+      configPath: this.paths.configPath,
+      provider: this.input.request.provider,
+      model: this.input.request.model,
+      speed: this.input.request.speed,
+      gitignorePath: this.paths.gitignorePath,
+      gitignoreStatus: this.gitignoreChanged
+        ? (this.gitignoreExisted ? "updated" : "created")
+        : "unchanged",
+    }
+  }
+
+  async runSkills(): Promise<RefreshSkillsResult> {
+    return this.execute()
+  }
+
+  private async execute(): Promise<RefreshSkillsResult> {
     await this.acquireLock()
     try {
       try {
@@ -541,26 +620,19 @@ class SetupTransaction {
         throw await this.recoveryError("cleanup", error)
       }
       await this.releaseLock()
+      const destination = getSetupProfile(this.input.request.provider).destination
       return {
-        configPath: this.paths.configPath,
-        provider: this.input.request.provider,
-        model: this.input.request.model,
-        speed: this.input.request.speed,
-        destination: getSetupProfile(this.input.request.provider).destination,
+        destination,
         skillRoot: this.paths.targetRoot,
         scope: this.input.request.scope,
-        installed: SPEC_FINDER_SKILLS.map((skill) => join(
-          getSetupProfile(this.input.request.provider).destination,
-          skill,
-        )),
+        installed: SPEC_FINDER_SKILLS.map((skill) => join(destination, skill)),
         legacyCursor: this.input.legacyCursor,
-        gitignorePath: this.paths.gitignorePath,
-        gitignoreStatus: this.gitignoreChanged
-          ? (this.gitignoreExisted ? "updated" : "created")
-          : "unchanged",
       }
     } catch (error) {
-      if (error instanceof SetupTransactionError && error.recoveryPaths.length > 0) throw error
+      if (error instanceof SetupTransactionError && error.recoveryPaths.length > 0) {
+        await this.closeLockHandle()
+        throw error
+      }
       try {
         await this.releaseLock()
       } catch (releaseError) {
@@ -591,9 +663,11 @@ class SetupTransaction {
 
   private async stage(): Promise<void> {
     await this.maybeFail("stage", this.paths.stageRoot)
-    await mkdir(dirname(this.paths.configPath), { recursive: true })
-    await mkdir(join(this.input.workspace, SPEC_DIR, TASKS_DIR), { recursive: true })
-    await mkdir(join(this.input.workspace, SPEC_DIR, SPECS_DIR), { recursive: true })
+    if (this.persistConfig) {
+      await mkdir(dirname(this.paths.configPath), { recursive: true })
+      await mkdir(join(this.input.workspace, SPEC_DIR, TASKS_DIR), { recursive: true })
+      await mkdir(join(this.input.workspace, SPEC_DIR, SPECS_DIR), { recursive: true })
+    }
     await mkdir(this.paths.targetParent, { recursive: true })
     await mkdir(this.paths.stageRoot, { recursive: true })
     const sourceRoot = bundledSkillsPath()
@@ -605,6 +679,7 @@ class SetupTransaction {
         throw new Error(`bundled skill ${skill} is missing from ${sourceRoot}: ${errorMessage(error)}`)
       }
     }
+    if (!this.persistConfig) return
     await writeFile(this.paths.configStagePath, serializeConfig(this.input.candidate), { flag: "wx" })
     const existingGitignore = await readTextIfPresent(this.paths.gitignorePath)
     this.gitignoreExisted = existingGitignore !== undefined
@@ -631,6 +706,8 @@ class SetupTransaction {
       await rename(join(this.paths.stageRoot, skill), destination)
       this.state.promoted.push(skill)
     }
+
+    if (!this.persistConfig) return
 
     await this.maybeFail("config", this.paths.configPath)
     if (this.input.configExisted && await pathExists(this.paths.configPath)) {
@@ -694,13 +771,19 @@ class SetupTransaction {
     await rm(this.paths.gitignoreBackupPath, { force: true })
   }
 
+  private async closeLockHandle(): Promise<void> {
+    if (!this.lock) return
+    await this.lock.close().catch(() => undefined)
+    this.lock = undefined
+  }
+
   private async releaseLock(): Promise<void> {
     if (!this.lock) return
     const lock = this.lock
+    this.lock = undefined
     await lock.close()
     try {
       await rm(this.paths.lockPath, { force: true })
-      this.lock = undefined
     } catch (error) {
       throw await this.recoveryError("cleanup", error)
     }

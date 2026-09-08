@@ -5,6 +5,7 @@ import {
   configCommand,
   execCommand,
   loopCommand,
+  refreshCommand,
   runCommand,
   setupCommand,
   upgradeCommand,
@@ -16,6 +17,7 @@ const HELP = `spec-finder — skill-driven specifications with an ACP cockpit
 Usage:
   spec-finder setup [--agent claude|codex|cursor|grok|pi] [--model auto|CURATED] [--speed auto|normal|fast] [--local|--global] [--copy]
   spec-finder upgrade
+  spec-finder refresh
   spec-finder run <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
   spec-finder run --multiple <slug1,slug2,...> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
   spec-finder loop <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE] [--max-iterations N] [--no-progress-window N] [--dry-run] [--reset-state]
@@ -39,6 +41,13 @@ Setup mode:
   historic scope is unknown. Setup summaries say requested model and requested speed; runtime ACP feedback remains
   authoritative for applied, defaulted, or unsupported capabilities. Legacy Cursor .cursor/skills
   content is preserved and not migrated.
+
+Refresh mode:
+  spec-finder refresh recopies current managed skills into this workspace's saved destination and scope.
+  It has no flags. Extra arguments exit 2 before writes.
+  Unconfigured cwd or a package that is not npm latest exits 1 with no writes;
+  run spec-finder setup or spec-finder upgrade as directed. spec-finder upgrade remains npm-only.
+  Leftover Cursor .cursor/skills and Pi .pi/skills content is preserved and not migrated.
 
 Batch mode:
   --multiple is opt-in, serial, and fail-fast. Supply exactly one ordered comma-separated slug list.
@@ -92,6 +101,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   switch (command) {
     case "setup": return setupCommand(args)
     case "upgrade": return upgradeCommand()
+    case "refresh": return refreshCommand(args)
     case "run": return runCommand(args)
     case "loop": return loopCommand(args)
     case "checkpoint": return checkpointCommand(args)
