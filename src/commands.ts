@@ -39,6 +39,7 @@ import {
 import { CONFIG_FILE, SPEC_DIR, findWorkspaceRoot } from "./paths.ts"
 import { acquireRunLock } from "./run-lock.ts"
 import {
+  refreshManagedSkills,
   setupWorkspace,
   type SetupScope,
   type SetupInputOrigin,
@@ -1178,14 +1179,120 @@ function batchExitCode(result: BatchResult): number {
   return result.ok && result.status === "completed" && allSucceeded ? 0 : 1
 }
 
+export function npmCliCommand(platform = process.platform): string {
+  return platform === "win32" ? "npm.cmd" : "npm"
+}
+
 export async function upgradeCommand(): Promise<number> {
-  const command = process.platform === "win32" ? "npm.cmd" : "npm"
-  const child = spawn(command, ["install", "--global", `${PACKAGE_NAME}@latest`], { stdio: "inherit" })
+  const child = spawn(npmCliCommand(), ["install", "--global", `${PACKAGE_NAME}@latest`], { stdio: "inherit" })
   const code = await new Promise<number>((resolve, reject) => {
     child.once("error", reject)
     child.once("exit", (value) => resolve(value ?? 1))
   })
   return code
+}
+
+export const REFRESH_USAGE = "usage: spec-finder refresh"
+
+export interface RefreshCommandOptions {
+  root?: string
+  output?: Writable
+  error?: Writable
+  homeDirectory?: string
+  viewLatest?: () => Promise<string>
+}
+
+export async function refreshCommand(
+  args: readonly string[],
+  options: RefreshCommandOptions = {},
+): Promise<number> {
+  const output = options.output ?? process.stdout
+  const stderr = options.error ?? process.stderr
+  if (args.length > 0) {
+    const argument = args[0]!
+    const message = argument.startsWith("-")
+      ? `unsupported refresh option: ${argument}`
+      : `refresh accepts no arguments; unexpected positional argument: ${argument}`
+    stderr.write(`${message}\n${REFRESH_USAGE}\n`)
+    return 2
+  }
+
+  const root = options.root ?? process.cwd()
+  let config: SpecFinderConfig
+  try {
+    config = await loadConfig(root)
+  } catch (caught) {
+    if (isMissingConfigError(caught)) {
+      stderr.write("workspace is not configured; run spec-finder setup\n")
+      return 1
+    }
+    if (caught instanceof ConfigError) {
+      stderr.write(`${caught.message}\n`)
+      if (caught.issues.length > 0) {
+        stderr.write(`${caught.issues.map((issue) => `- ${issue}`).join("\n")}\n`)
+      }
+      return 2
+    }
+    throw caught
+  }
+
+  if (config.setup.status !== "configured") {
+    stderr.write("workspace is not configured; run spec-finder setup\n")
+    return 1
+  }
+
+  const viewLatest = options.viewLatest ?? defaultViewLatest
+  let latest: string
+  try {
+    latest = await viewLatest()
+  } catch {
+    stderr.write("installed package is not latest; run spec-finder upgrade\n")
+    return 1
+  }
+  const version = parseSingleLineVersion(latest)
+  if (version === undefined || version !== VERSION) {
+    stderr.write("installed package is not latest; run spec-finder upgrade\n")
+    return 1
+  }
+
+  try {
+    const result = await refreshManagedSkills(root, {
+      provider: config.provider,
+      scope: config.setup.scope,
+    }, options.homeDirectory === undefined ? undefined : { homeDirectory: options.homeDirectory })
+    output.write(`destination: ${result.destination}\n`)
+    output.write(`skill root: ${result.skillRoot}\n`)
+    output.write(`scope: ${result.scope}\n`)
+    output.write(`refreshed managed skills: ${result.installed.length}\n`)
+    output.write(`legacy Cursor skills: ${result.legacyCursor === "preserved" ? "preserved (not migrated)" : "absent (not migrated)"}\n`)
+    return 0
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : String(caught)
+    stderr.write(`${message}\n`)
+    return 1
+  }
+}
+
+async function defaultViewLatest(): Promise<string> {
+  const child = spawn(npmCliCommand(), ["view", PACKAGE_NAME, "version"], {
+    stdio: ["ignore", "pipe", "pipe"],
+  })
+  const chunks: Buffer[] = []
+  child.stdout?.on("data", (chunk: Buffer) => {
+    chunks.push(chunk)
+  })
+  const code = await new Promise<number>((resolve, reject) => {
+    child.once("error", reject)
+    child.once("exit", (value) => resolve(value ?? 1))
+  })
+  if (code !== 0) throw new Error(`npm view ${PACKAGE_NAME} version failed`)
+  return Buffer.concat(chunks).toString("utf8")
+}
+
+function parseSingleLineVersion(raw: string): string | undefined {
+  const trimmed = raw.trim()
+  if (trimmed.length === 0 || trimmed.includes("\n") || trimmed.includes("\r")) return undefined
+  return trimmed
 }
 
 export function versionCommand(): number {

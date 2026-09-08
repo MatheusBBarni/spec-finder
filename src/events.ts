@@ -2,6 +2,7 @@ import type { RequestPermissionRequest, RequestPermissionResponse, SessionUpdate
 import type { BatchResult, PacketOutcome, PacketSummary } from "./batch.ts"
 import type { SpecFinderConfig } from "./config.ts"
 import type { TaskFile, TaskStatus } from "./tasks.ts"
+import type { LoopTerminal } from "./loop-state.ts"
 
 export type BatchEventStatus = "running" | BatchResult["status"]
 
@@ -68,6 +69,35 @@ export type CheckpointEvent =
   | { type: "checkpoint"; taskId: string; state: "created"; commit?: string }
   | { type: "checkpoint"; taskId: string; state: "blocked"; reason: string }
 
+export type LoopPhase = "recover" | "execute"
+
+export type LoopStartedEvent = {
+  type: "loop_started"
+  slug: string
+  iteration: 0
+  maxIterations: number
+  noProgressWindow: number
+}
+
+export type LoopProgressEvent = {
+  type: "loop_progress"
+  slug: string
+  iteration: number
+  maxIterations: number
+  noProgressWindow: number
+  phase: LoopPhase
+}
+
+export type LoopFinishedEvent = {
+  type: "loop_finished"
+  slug: string
+  terminal: LoopTerminal
+  reason: string
+  iteration: number
+  maxIterations: number
+  noProgressWindow: number
+}
+
 export type RunEvent =
   | { type: "run_started"; slug: string; config: SpecFinderConfig; tasks: TaskFile[] }
   | { type: "task_status"; taskId: string; status: TaskStatus; reportReference?: string }
@@ -83,6 +113,9 @@ export type RunEvent =
       outcome?: "no_work"
       reason?: NoWorkReason
     }
+  | LoopStartedEvent
+  | LoopProgressEvent
+  | LoopFinishedEvent
   | BatchStartedEvent
   | BatchPacketStartedEvent
   | BatchPacketFinishedEvent

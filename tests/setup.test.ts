@@ -10,6 +10,7 @@ import {
 import {
   SPEC_FINDER_SKILLS,
   SetupTransactionError,
+  refreshManagedSkills,
   setupLockPath,
   setupWorkspace,
   type SetupRequest,
@@ -374,5 +375,77 @@ describe("setup", () => {
     expect(stdout).toContain(`skill root: ${await realpath(join(home, ".agents/skills"))}`)
     await access(join(home, ".agents", "skills", "sf-execute-task", "SKILL.md"))
     await expect(access(join(cwd, ".agents", "skills", "sf-execute-task", "SKILL.md"))).rejects.toThrow()
+  })
+})
+
+describe("refreshManagedSkills", () => {
+  test("recopies managed skills without rewriting config or packet gitignore", async () => {
+    const root = await tempRoot()
+    await mkdir(join(root, ".spec-finder"), { recursive: true })
+    const configBytes = JSON.stringify({
+      ...DEFAULT_CONFIG,
+      model: "saved-refresh-model",
+      setup: { status: "configured", scope: "local", destination: ".agents/skills" },
+    })
+    const gitignoreBytes = "*.tmp\n# operator ignore\n"
+    await writeFile(join(root, ".spec-finder", "config.json"), configBytes)
+    await writeFile(join(root, ".spec-finder", ".gitignore"), gitignoreBytes)
+
+    const result = await refreshManagedSkills(root, { provider: "codex", scope: "local" })
+
+    expect(result.destination).toBe(".agents/skills")
+    expect(result.scope).toBe("local")
+    expect(result.installed).toHaveLength(SPEC_FINDER_SKILLS.length)
+    expect(await realpath(result.skillRoot)).toBe(await realpath(join(root, ".agents", "skills")))
+    for (const skill of SPEC_FINDER_SKILLS) {
+      const skillMd = await readFile(join(root, ".agents", "skills", skill, "SKILL.md"), "utf8")
+      expect(skillMd.trim().length).toBeGreaterThan(0)
+    }
+    expect(await readFile(join(root, ".spec-finder", "config.json"), "utf8")).toBe(configBytes)
+    expect(await readFile(join(root, ".spec-finder", ".gitignore"), "utf8")).toBe(gitignoreBytes)
+    await expect(access(join(root, ".spec-finder", "tasks"))).rejects.toThrow()
+    await expect(access(join(root, ".spec-finder", "specs"))).rejects.toThrow()
+  })
+
+  test("preserves unrelated destination skills and leftover Cursor or Pi paths", async () => {
+    const root = await tempRoot()
+    const leftoverCursor = join(root, ".cursor", "skills")
+    const leftoverPi = join(root, ".pi", "skills")
+    const unrelated = join(root, ".agents", "skills", "unrelated-skill")
+    await mkdir(leftoverCursor, { recursive: true })
+    await mkdir(leftoverPi, { recursive: true })
+    await mkdir(unrelated, { recursive: true })
+    await writeFile(join(leftoverCursor, "legacy.md"), "cursor leftover")
+    await writeFile(join(leftoverPi, "legacy.md"), "pi leftover")
+    await writeFile(join(unrelated, "SKILL.md"), "unrelated bytes")
+
+    const result = await refreshManagedSkills(root, { provider: "codex", scope: "local" })
+
+    expect(result.legacyCursor).toBe("preserved")
+    expect(await readFile(join(leftoverCursor, "legacy.md"), "utf8")).toBe("cursor leftover")
+    expect(await readFile(join(leftoverPi, "legacy.md"), "utf8")).toBe("pi leftover")
+    expect(await readFile(join(unrelated, "SKILL.md"), "utf8")).toBe("unrelated bytes")
+    await expect(access(join(root, ".cursor", "skills", "sf-task-report"))).rejects.toThrow()
+    await access(join(root, ".agents", "skills", "sf-task-report", "SKILL.md"))
+  })
+
+  test("rolls back managed entries on stage or promote failure without touching config", async () => {
+    for (const phase of ["stage", "promote"] as const) {
+      const root = await tempRoot(`spec-finder-refresh-${phase}-`)
+      const prior = join(root, ".agents", "skills", "sf-create-prd")
+      await mkdir(prior, { recursive: true })
+      await writeFile(join(prior, "sentinel.txt"), `prior refresh ${phase}`)
+      const beforeConfig = JSON.stringify({
+        ...DEFAULT_CONFIG,
+        model: `refresh-before-${phase}`,
+      })
+      await mkdir(join(root, ".spec-finder"), { recursive: true })
+      await writeFile(join(root, ".spec-finder", "config.json"), beforeConfig)
+
+      await expect(refreshManagedSkills(root, { provider: "codex", scope: "local" }, { failAt: phase })).rejects.toThrow()
+      expect(await readFile(join(prior, "sentinel.txt"), "utf8")).toBe(`prior refresh ${phase}`)
+      expect(await readFile(join(root, ".spec-finder", "config.json"), "utf8")).toBe(beforeConfig)
+      await expect(access(join(root, ".agents", "skills", "sf-task-report"))).rejects.toThrow()
+    }
   })
 })

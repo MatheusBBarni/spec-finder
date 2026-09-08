@@ -1,17 +1,19 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile, access } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { PassThrough } from "node:stream"
 import type { SessionUpdate } from "@agentclientprotocol/sdk"
 import { DEFAULT_CONFIG, parseConfig, type SpecFinderConfig } from "../src/config.ts"
 import type { CheckpointServiceContract } from "../src/checkpoints.ts"
-import { checkpointCommand, loopCommand, runCommand, resolveSetupOptions, setupCommand } from "../src/commands.ts"
+import { checkpointCommand, loopCommand, npmCliCommand, refreshCommand, REFRESH_USAGE, runCommand, resolveSetupOptions, setupCommand } from "../src/commands.ts"
 import { describeLoopPaths } from "../src/loop-state.ts"
+import { SPEC_FINDER_SKILLS, setupLockPath } from "../src/setup.ts"
 import { CockpitStore } from "../src/ui/store.ts"
 import type { BatchResult } from "../src/batch.ts"
 import { parseTask, type TaskFile } from "../src/tasks.ts"
 import type { SetupPickerInput } from "../src/ui/setup-picker.ts"
+import { VERSION } from "../src/version.ts"
 
 class FakeTtyInput extends PassThrough implements SetupPickerInput {
   isTTY = true
@@ -1303,6 +1305,50 @@ describe("loop command", () => {
     }
   })
 
+  test("no-ui still prints loop activity and does not print loop_started", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-loop-nui-"))
+    try {
+      const output = commandOutput()
+      const code = await loopCommand(["demo", "--no-ui"], {
+        root,
+        output: output.output,
+        loadConfig: async () => DEFAULT_CONFIG,
+        runLoop: async ({ emit }) => {
+          emit({ type: "loop_started", slug: "demo", iteration: 0, maxIterations: 50, noProgressWindow: 3 })
+          emit({ type: "activity", message: "loop: iteration 1/50 execute" })
+          emit({
+            type: "loop_progress",
+            slug: "demo",
+            iteration: 1,
+            maxIterations: 50,
+            noProgressWindow: 3,
+            phase: "execute",
+          })
+          emit({ type: "activity", message: "loop: terminal done: ok" })
+          emit({
+            type: "loop_finished",
+            slug: "demo",
+            terminal: "done",
+            reason: "ok",
+            iteration: 1,
+            maxIterations: 50,
+            noProgressWindow: 3,
+          })
+          return { terminal: "done", reason: "ok", iteration: 1, slug: "demo" }
+        },
+      })
+      expect(code).toBe(0)
+      expect(output.text()).toContain("loop: iteration")
+      expect(output.text()).toContain("loop: terminal")
+      expect(output.text()).not.toContain("loop_started")
+      expect(output.text()).not.toContain("loop_progress")
+      expect(output.text()).not.toContain("loop_finished")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+
   test("dry-run exits 0 even when the plan names a non-success terminal", async () => {
     const root = await mkdtemp(join(tmpdir(), "spec-finder-loop-dry-"))
     try {
@@ -1508,4 +1554,199 @@ dependencies: []
       await rm(root, { recursive: true, force: true })
     }
   })
+
+  test("keeps no_op wait-for-exit and dismisses non-success except cancelled", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-loop-waits-"))
+    try {
+      async function waitsFor(terminal: "done" | "no_op" | "blocked" | "failed" | "exhausted" | "stalled" | "cancelled") {
+        let exits = 0
+        let dismissals = 0
+        await loopCommand(["demo"], {
+          root,
+          input: { isTTY: true },
+          output: commandOutput(true).output,
+          loadConfig: async () => DEFAULT_CONFIG,
+          startCockpit: async () => ({
+            close() {},
+            waitForDismissal: async () => { dismissals += 1 },
+            waitForExit: async () => { exits += 1 },
+          }),
+          runLoop: async () => ({ terminal, reason: terminal, iteration: 0, slug: "demo" }),
+        })
+        return { exits, dismissals }
+      }
+
+      expect(await waitsFor("no_op")).toEqual({ exits: 1, dismissals: 0 })
+      expect(await waitsFor("blocked")).toEqual({ exits: 0, dismissals: 1 })
+      expect(await waitsFor("failed")).toEqual({ exits: 0, dismissals: 1 })
+      expect(await waitsFor("exhausted")).toEqual({ exits: 0, dismissals: 1 })
+      expect(await waitsFor("stalled")).toEqual({ exits: 0, dismissals: 1 })
+      expect(await waitsFor("done")).toEqual({ exits: 0, dismissals: 0 })
+      expect(await waitsFor("cancelled")).toEqual({ exits: 0, dismissals: 0 })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
 })
+
+describe("refresh command", () => {
+  test("rejects extra args at exit 2 without touching the workspace", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-refresh-extra-"))
+    try {
+      const stdout = commandOutput()
+      const stderr = commandOutput()
+      const code = await refreshCommand(["--copy"], {
+        root,
+        output: stdout.output,
+        error: stderr.output,
+        viewLatest: async () => {
+          throw new Error("viewLatest must not run")
+        },
+      })
+      expect(code).toBe(2)
+      expect(stdout.text()).toBe("")
+      expect(stderr.text()).toContain("unsupported refresh option: --copy")
+      expect(stderr.text()).toContain(REFRESH_USAGE)
+      await expect(access(join(root, ".agents"))).rejects.toThrow()
+      await expect(access(setupLockPath(root))).rejects.toThrow()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("refuses missing or unconfigured cwd without writing skills", async () => {
+    const missing = await mkdtemp(join(tmpdir(), "spec-finder-refresh-missing-"))
+    const unconfigured = await mkdtemp(join(tmpdir(), "spec-finder-refresh-unconfigured-"))
+    try {
+      await mkdir(join(unconfigured, ".spec-finder"), { recursive: true })
+      await writeFile(join(unconfigured, ".spec-finder", "config.json"), `${JSON.stringify(DEFAULT_CONFIG, null, 2)}\n`)
+
+      for (const root of [missing, unconfigured]) {
+        const stdout = commandOutput()
+        const stderr = commandOutput()
+        const code = await refreshCommand([], {
+          root,
+          output: stdout.output,
+          error: stderr.output,
+          viewLatest: async () => {
+            throw new Error("viewLatest must not run")
+          },
+        })
+        expect(code).toBe(1)
+        expect(stdout.text()).toBe("")
+        expect(stderr.text()).toContain("spec-finder setup")
+        await expect(access(join(root, ".agents", "skills", "sf-task-report"))).rejects.toThrow()
+        await expect(access(setupLockPath(root))).rejects.toThrow()
+      }
+    } finally {
+      await rm(missing, { recursive: true, force: true })
+      await rm(unconfigured, { recursive: true, force: true })
+    }
+  })
+
+  test("refuses a package that is not latest or whose latest view fails without writes or a lock", async () => {
+    for (const viewLatest of [
+      async () => "0.0.0-not-latest",
+      async () => {
+        throw new Error("registry unavailable")
+      },
+    ]) {
+      const root = await mkdtemp(join(tmpdir(), "spec-finder-refresh-stale-"))
+      try {
+        await writeConfiguredRefresh(root)
+        const beforeConfig = await readFile(join(root, ".spec-finder", "config.json"), "utf8")
+        const stdout = commandOutput()
+        const stderr = commandOutput()
+        const code = await refreshCommand([], { root, output: stdout.output, error: stderr.output, viewLatest })
+        expect(code).toBe(1)
+        expect(stdout.text()).toBe("")
+        expect(stderr.text()).toContain("spec-finder upgrade")
+        expect(await readFile(join(root, ".spec-finder", "config.json"), "utf8")).toBe(beforeConfig)
+        await expect(access(join(root, ".agents", "skills", "sf-task-report"))).rejects.toThrow()
+        await expect(access(setupLockPath(root))).rejects.toThrow()
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    }
+  })
+
+  test("recopies managed skills when configured and latest without rewriting config", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-refresh-ok-"))
+    try {
+      await writeConfiguredRefresh(root)
+      const beforeConfig = await readFile(join(root, ".spec-finder", "config.json"), "utf8")
+      const stdout = commandOutput()
+      const stderr = commandOutput()
+      const code = await refreshCommand([], {
+        root,
+        output: stdout.output,
+        error: stderr.output,
+        viewLatest: async () => VERSION,
+      })
+      expect(code).toBe(0)
+      const text = stdout.text()
+      expect(text).toContain("destination: .agents/skills")
+      expect(text).toContain(`skill root: ${await realpath(join(root, ".agents", "skills"))}`)
+      expect(text).toContain("scope: local")
+      expect(text).toContain(`refreshed managed skills: ${SPEC_FINDER_SKILLS.length}`)
+      expect(text).toContain("legacy Cursor skills: absent (not migrated)")
+      expect(text).not.toContain("requested model")
+      expect(text).not.toContain("requested speed")
+      expect(stderr.text()).toBe("")
+      expect(await readFile(join(root, ".spec-finder", "config.json"), "utf8")).toBe(beforeConfig)
+      for (const skill of SPEC_FINDER_SKILLS) {
+        await access(join(root, ".agents", "skills", skill, "SKILL.md"))
+      }
+      await expect(access(setupLockPath(root))).rejects.toThrow()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("maps invalid config JSON or schema to exit 2", async () => {
+    const invalidJson = await mkdtemp(join(tmpdir(), "spec-finder-refresh-json-"))
+    const invalidSchema = await mkdtemp(join(tmpdir(), "spec-finder-refresh-schema-"))
+    try {
+      await mkdir(join(invalidJson, ".spec-finder"), { recursive: true })
+      await writeFile(join(invalidJson, ".spec-finder", "config.json"), "{")
+      await mkdir(join(invalidSchema, ".spec-finder"), { recursive: true })
+      await writeFile(join(invalidSchema, ".spec-finder", "config.json"), JSON.stringify({
+        ...DEFAULT_CONFIG,
+        unknown: true,
+      }))
+
+      for (const root of [invalidJson, invalidSchema]) {
+        const stdout = commandOutput()
+        const stderr = commandOutput()
+        const code = await refreshCommand([], {
+          root,
+          output: stdout.output,
+          error: stderr.output,
+          viewLatest: async () => VERSION,
+        })
+        expect(code).toBe(2)
+        expect(stdout.text()).toBe("")
+        expect(stderr.text().length).toBeGreaterThan(0)
+        await expect(access(join(root, ".agents", "skills", "sf-task-report"))).rejects.toThrow()
+      }
+    } finally {
+      await rm(invalidJson, { recursive: true, force: true })
+      await rm(invalidSchema, { recursive: true, force: true })
+    }
+  })
+
+  test("uses npm.cmd on Windows for the default latest view", () => {
+    expect(npmCliCommand("win32")).toBe("npm.cmd")
+    expect(npmCliCommand("darwin")).toBe("npm")
+  })
+})
+
+async function writeConfiguredRefresh(root: string): Promise<void> {
+  await mkdir(join(root, ".spec-finder"), { recursive: true })
+  await writeFile(join(root, ".spec-finder", "config.json"), `${JSON.stringify({
+    ...DEFAULT_CONFIG,
+    model: "saved-refresh-model",
+    setup: { status: "configured", scope: "local", destination: ".agents/skills" },
+  }, null, 2)}\n`)
+}

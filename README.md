@@ -31,6 +31,8 @@ spec-finder setup
 spec-finder run my-feature
 ```
 
+Once the package is current, `spec-finder refresh` recopies managed skills into this workspace's saved destination and scope without changing provider, model, or scope.
+
 `setup` creates:
 
 ```text
@@ -150,7 +152,23 @@ Keep using idea, PRD, TechSpec, and tasks when you need discovery, a product-onl
 
 ### When to use TDD versus core
 
-The four `sf-tdd-*` skills are an optional pack for honest red-before-green work. Use them when a task adds or changes product behavior and you need a failing public-seam test before production code. Keep using core `sf-execute-task`, `sf-task-report`, and `sf-batch-tasks` for research, docs, chore, config-only, or any packet that does not need a red phase. `spec-finder run` stays on the core skills until a separate opt-in design; invoking TDD skills is a manual choice.
+The four `sf-tdd-*` skills are an optional pack for honest red-before-green work. Use them when a task adds or changes product behavior and you need a failing public-seam test before production code. Keep using core `sf-execute-task`, `sf-task-report`, and `sf-batch-tasks` for research, docs, chore, config-only, or any packet that does not need a red phase.
+
+`spec-finder run`, `spec-finder loop`, and `--multiple` default to those core skills. Opt in with a packet-local `tdd.json` (operator-edited; there is no `spec-finder tdd` command). A task uses TDD execute/report if the packet is marked or that task id is listed; unmarked work stays on core. Leftover task frontmatter `execution` / `tdd` keys are ignored. `sf-tdd-batch` remains the manual TDD path and is not the cockpit driver.
+
+Packet-wide:
+
+```json
+{ "version": 1, "packet": "tdd" }
+```
+
+One or more tasks (packet unmarked):
+
+```json
+{ "version": 1, "tasks": ["task_02"] }
+```
+
+`{ "version": 1 }` is valid and means all core. Clear the choice by deleting `tdd.json` or removing the `packet` / `tasks` marks.
 
 ## Run tasks
 
@@ -372,6 +390,7 @@ spec-finder config
 ```text
 spec-finder setup [--agent claude|codex|cursor|grok|pi] [--model auto|CURATED] [--speed auto|normal|fast] [--local|--global] [--copy]
 spec-finder upgrade
+spec-finder refresh
 spec-finder run <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
 spec-finder run --multiple <slug1,slug2,...> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
 spec-finder loop <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE] [--max-iterations N] [--no-progress-window N] [--dry-run] [--reset-state]
@@ -384,7 +403,7 @@ spec-finder version
 
 The `--provider` option accepts `claude`, `codex`, `cursor`, `grok`, or `pi`. Grok Build and Pi remain packet-only; `spec-finder exec --provider grok` and `spec-finder exec --provider pi` are rejected before provider spawn while their separate packet launches remain available.
 
-`upgrade` runs `npm install --global spec-finder@latest`, keeping npm as the package authority. It refreshes the installed package only and does not recopy agent skill destinations. Existing workspaces must re-run `spec-finder setup` to install newly shipped skills such as the TDD pack.
+`upgrade` runs `npm install --global spec-finder@latest`, keeping npm as the package authority. It refreshes the installed package only and does not recopy agent skill destinations. After the package is current, `spec-finder refresh` recopies managed skills into this workspace's saved destination and scope. Extra arguments exit 2 before writes. An unconfigured cwd or a package that is not npm latest exits 1 with no writes. Leftover Cursor `.cursor/skills` and Pi `.pi/skills` content is preserved and not migrated.
 
 ## Task contract
 

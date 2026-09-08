@@ -21,6 +21,29 @@ async function captureHelp(): Promise<string> {
   }
 }
 
+async function captureMain(argv: string[]): Promise<{ exit: number; stdout: string; stderr: string }> {
+  const originalStdout = process.stdout.write
+  const originalStderr = process.stderr.write
+  let stdout = ""
+  let stderr = ""
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    stdout += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk)
+    return true
+  }) as typeof originalStdout
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    stderr += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk)
+    return true
+  }) as typeof originalStderr
+
+  try {
+    const exit = await main(argv)
+    return { exit, stdout, stderr }
+  } finally {
+    process.stdout.write = originalStdout
+    process.stderr.write = originalStderr
+  }
+}
+
 describe("CLI help", () => {
   test("publishes the singular setup contract in help and README", async () => {
     const help = await captureHelp()
@@ -157,6 +180,28 @@ describe("CLI help", () => {
     expect(README).toContain("The reviewed task 09 certification record")
   })
 
+  test("dispatches refresh instead of treating it as an unknown command", async () => {
+    const result = await captureMain(["refresh", "extra"])
+    expect(result.exit).toBe(2)
+    expect(result.stderr).not.toContain("unknown command: refresh")
+    expect(result.stderr).toContain("refresh accepts no arguments")
+  })
+
+  test("publishes spec-finder refresh in help and README without a setup rerun for new skills", async () => {
+    const help = await captureHelp()
+    for (const text of [help, README]) {
+      expect(text).toContain("spec-finder refresh")
+      expect(text).toContain("spec-finder upgrade")
+      expect(text).toContain("Extra arguments exit 2")
+      expect(text).toContain("saved destination and scope")
+      expect(text).not.toContain("re-run spec-finder setup to install newly shipped")
+      expect(text).not.toContain("re-run `spec-finder setup` to install newly shipped")
+      expect(text).not.toContain("newly shipped skills such as the TDD pack")
+    }
+    expect(README).toContain("npm install --global spec-finder@latest")
+    expect(README).toContain("does not recopy agent skill destinations")
+  })
+
   test("documents config-only local checkpoint phases and legacy-token rejection", async () => {
     const help = await captureHelp()
 
@@ -194,5 +239,24 @@ describe("CLI help", () => {
     expect(README).not.toContain("loop --multiple")
     expect(help).toContain("no required loop config key")
     expect(README).toContain("no required `loop` key")
+  })
+
+  test("keeps help and README aligned on runtime TDD opt-in", async () => {
+    const help = await captureHelp()
+    for (const text of [help, README]) {
+      expect(text).toContain("tdd.json")
+      expect(text).toContain("default to")
+      expect(text).toContain("core")
+      expect(text).toContain(`{ "version": 1, "packet": "tdd" }`)
+      expect(text).toContain(`{ "version": 1, "tasks": ["task_02"] }`)
+      expect(text).toContain(`{ "version": 1 }`)
+      expect(text).toContain("Clear the choice by deleting")
+      expect(text).toContain("sf-tdd-batch")
+      expect(text).toContain("manual TDD path")
+    }
+    const usage = help.split("Usage:")[1]?.split("Setup mode:")[0] ?? ""
+    expect(usage).not.toContain("spec-finder tdd")
+    expect(help).toContain("There is no spec-finder tdd command")
+    expect(README).toContain("there is no `spec-finder tdd` command")
   })
 })

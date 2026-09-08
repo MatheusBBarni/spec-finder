@@ -1232,6 +1232,109 @@ dependencies: []
     expect(prompts).toContain(`Use the sf-execute-task skill to execute ${taskPath}.`)
     expect(prompts).not.toContain("Loop feedback:")
   })
+
+  test("mixed tdd.json marks only opted tasks with TDD execute and report prompts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-engine-tdd-mixed-"))
+    const packet = join(root, ".spec-finder", "tasks", "demo")
+    await mkdir(packet, { recursive: true })
+    const task01 = join(packet, "task_01.md")
+    const task02 = join(packet, "task_02.md")
+    await writeFile(task01, `---
+status: pending
+title: Core task
+type: test
+complexity: low
+dependencies: []
+---
+
+# Task 01: Core task
+`)
+    await writeFile(task02, `---
+status: pending
+title: TDD task
+type: test
+complexity: low
+dependencies:
+  - task_01
+---
+
+# Task 02: TDD task
+`)
+    await writeFile(join(packet, "tdd.json"), `${JSON.stringify({ version: 1, tasks: ["task_02"] })}\n`)
+    const promptLog = join(root, "prompts.log")
+    const agent = join(import.meta.dir, "fixtures", "mock-agent.ts")
+    const config = parseConfig({
+      ...DEFAULT_CONFIG,
+      provider: "cursor",
+      model: "auto",
+      reasoning: "auto",
+      speed: "auto",
+      permissions: "approve-all",
+    })
+
+    const result = await runTaskPacket({
+      root,
+      slug: "demo",
+      config,
+      signal: new AbortController().signal,
+      emit: () => undefined,
+      interactivePermissions: false,
+      providerLaunch: {
+        command: process.execPath,
+        args: [agent],
+        env: { SPEC_FINDER_TEST_PROMPT_LOG: promptLog },
+        authMethod: null,
+      },
+    })
+
+    expect(result).toEqual({ ok: true, completed: 2, failed: 0, blocked: 0 })
+    const prompts = await readFile(promptLog, "utf8")
+    expect(prompts).toContain(`Use the sf-execute-task skill to execute ${task01}.`)
+    expect(prompts).toContain("Use the sf-task-report skill if it is installed.")
+    expect(prompts).not.toContain(`Use the sf-tdd-execute skill to execute ${task01}.`)
+    expect(prompts).toContain(`Use the sf-tdd-execute skill to execute ${task02}.`)
+    expect(prompts).toContain("instead of silently substituting sf-execute-task or a generic workflow.")
+    expect(prompts).toContain("Use the sf-tdd-report skill. If it is unavailable, stop and report that blocker instead of substituting sf-task-report.")
+    expect(prompts).not.toContain(`Use the sf-execute-task skill to execute ${task02}.`)
+  })
+
+  test("invalid tdd.json fails before run_started and without launching the provider", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-engine-tdd-invalid-"))
+    const packet = join(root, ".spec-finder", "tasks", "demo")
+    await mkdir(packet, { recursive: true })
+    await writeFile(join(packet, "task_01.md"), `---
+status: pending
+title: Blocked by sidecar
+type: test
+complexity: low
+dependencies: []
+---
+
+# Task 01: Blocked by sidecar
+`)
+    await writeFile(join(packet, "tdd.json"), `${JSON.stringify({ version: 1, packet: "core" })}\n`)
+    const promptLog = join(root, "prompts.log")
+    const events: RunEvent[] = []
+
+    await expect(runTaskPacket({
+      root,
+      slug: "demo",
+      config: DEFAULT_CONFIG,
+      signal: new AbortController().signal,
+      emit: (event) => events.push(event),
+      interactivePermissions: false,
+      providerLaunch: {
+        command: "/invalid-tdd-sidecar-provider-must-not-run",
+        args: [],
+        env: { SPEC_FINDER_TEST_PROMPT_LOG: promptLog },
+        authMethod: null,
+      },
+    })).rejects.toThrow("invalid tdd.json")
+    expect(events).toEqual([])
+    await expect(access(join(packet, "memory"))).rejects.toThrow()
+    await expect(access(promptLog)).rejects.toThrow()
+  })
+
 })
 
 function recordingCheckpointService(timeline: string[]): CheckpointServiceContract {

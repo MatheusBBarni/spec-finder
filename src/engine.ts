@@ -20,6 +20,7 @@ import {
   type PorcelainStatusEntry,
 } from "./checkpoints.ts"
 import { ensurePacketMemory, taskMemoryPaths } from "./memory.ts"
+import { loadTddOptIn, resolveTddPath, type ExecutionPath } from "./tdd-opt-in.ts"
 import {
   clearTaskCheckpoint,
   clearTaskHandoff,
@@ -69,6 +70,7 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
   if (issues.length > 0) {
     throw new Error(`task packet is invalid:\n${issues.map((issue) => `- ${relative(options.root, issue.path)}: ${issue.message}`).join("\n")}`)
   }
+  const tddOptIn = await loadTddOptIn(packet.directory, packet.tasks.map((task) => task.id))
 
   const checkpointEnabled = options.config.auto_commit
   let checkpointService: CheckpointServiceContract | undefined = options.checkpointService
@@ -242,7 +244,7 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
                 emit: options.emit,
                 run: async (attempt) => {
                   const implementation = await session.runTurn(
-                    implementationPrompt(options.root, packet.directory, current, attempt, options.loopFeedback),
+                    implementationPrompt(options.root, packet.directory, current, attempt, resolveTddPath(tddOptIn, current.id), options.loopFeedback),
                     "implementation",
                   )
                   assertSuccessfulStop("implementation", implementation.stopReason)
@@ -277,6 +279,7 @@ export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
                     reportPath,
                     attempt,
                     resumingReportHandoff || attempts["final report"] > 1,
+                    resolveTddPath(tddOptIn, current.id),
                     options.loopFeedback,
                   ),
                   "report",
@@ -544,7 +547,7 @@ function withLoopFeedback(feedback: string | undefined, body: string): string {
   return `${LOOP_FEEDBACK_HEADING}\n${sanitized}\n\n${body}`
 }
 
-function implementationPrompt(root: string, packetDirectory: string, task: TaskFile, attempt: number, loopFeedback?: string): string {
+function implementationPrompt(root: string, packetDirectory: string, task: TaskFile, attempt: number, executionPath: ExecutionPath, loopFeedback?: string): string {
   const prd = join(packetDirectory, "_prd.md")
   const techspec = join(packetDirectory, "_techspec.md")
   const memory = taskMemoryPaths(packetDirectory, task.id)
@@ -553,9 +556,12 @@ function implementationPrompt(root: string, packetDirectory: string, task: TaskF
 This is continuation attempt ${attempt}/${TASK_PHASE_ATTEMPTS}. Preserve and inspect the task-owned edits, test output, and memory from the preceding attempt. Resume only incomplete requirements; do not restart the task or treat those edits as unrelated work.
 `
     : ""
+  const executeSkill = executionPath === "tdd"
+    ? `Use the sf-tdd-execute skill to execute ${task.path}. Follow the skill's hard gates and lifecycle contract. If the skill is unavailable, stop and report that blocker instead of silently substituting sf-execute-task or a generic workflow.`
+    : `Use the sf-execute-task skill to execute ${task.path}. Follow the skill's hard gates and lifecycle contract. If the skill is unavailable, stop and report that blocker instead of silently substituting a generic workflow.`
   return withLoopFeedback(loopFeedback, `You are executing a Spec Finder implementation task in ${root}.
 
-Use the sf-execute-task skill to execute ${task.path}. Follow the skill's hard gates and lifecycle contract. If the skill is unavailable, stop and report that blocker instead of silently substituting a generic workflow.
+${executeSkill}
 
 Read the complete task at ${task.path}. Read ${prd} and ${techspec} when they exist, plus every ADR referenced by the task. Treat the task requirements and repository instructions as authoritative.
 
@@ -575,6 +581,7 @@ function reportPrompt(
   reportPath: string,
   attempt: number,
   resumed: boolean,
+  executionPath: ExecutionPath,
   loopFeedback?: string,
 ): string {
   const memory = taskMemoryPaths(packetDirectory, task.id)
@@ -583,6 +590,9 @@ function reportPrompt(
     : resumed
       ? "A prior ACP run completed the implementation phase and persisted this report handoff. Use the task memory, current diff, and exact terminal results as evidence. Do not rerun implementation or verification that is already fresh and complete."
       : "The implementation phase completed immediately before this prompt in the same ACP session. Treat its task memory and exact terminal results as the handoff evidence. Do not repeat implementation or rerun verification that is already fresh and complete."
+  const reportSkill = executionPath === "tdd"
+    ? "Use the sf-tdd-report skill. If it is unavailable, stop and report that blocker instead of substituting sf-task-report."
+    : "Use the sf-task-report skill if it is installed."
   return withLoopFeedback(loopFeedback, `You are the final-report phase for ${task.id} in ${root}.
 
 ${retry}
@@ -591,7 +601,7 @@ Read ${task.path}, ${join(packetDirectory, "_prd.md")}, ${join(packetDirectory, 
 
 Write the final report to ${reportPath}. The report MUST include: task and outcome; files changed; requirements satisfied; tests and exact results; unresolved risks or follow-ups; and a final verdict of completed, failed, or blocked. Be factual and never claim a test passed without terminal evidence. Do not change the task frontmatter status; Spec Finder owns it.
 
-Use the sf-task-report skill if it is installed.`)
+${reportSkill}`)
 }
 
 function successfulStop(reason: string): boolean {

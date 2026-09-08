@@ -11,6 +11,7 @@ import {
   type TaskFile,
   type TaskIssue,
 } from "./tasks.ts"
+import { loadTddOptIn } from "./tdd-opt-in.ts"
 
 export type PacketOutcome = "succeeded" | "failed" | "cancelled" | "not_started"
 
@@ -303,6 +304,7 @@ export async function preflightBatch(
         issues.push(...formatTaskIssues(root, slug, taskIssues))
         continue
       }
+      await loadTddOptIn(packet.directory, packet.tasks.map((task) => task.id))
       packets.set(slug, {
         slug,
         directory: packet.directory,

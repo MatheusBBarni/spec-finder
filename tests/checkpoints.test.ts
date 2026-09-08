@@ -107,6 +107,78 @@ describe("safe Git checkpoint service", () => {
     expect(calls.find((args) => args[0] === "commit")).toEqual(["commit", "-m", "feat: demo Checkpoint task"])
   })
 
+  test("captures a baseline when packet files are gitignored", async () => {
+    const fixture = await createIgnoredPacketFixture()
+    const service = new CheckpointService({ enabled: true })
+
+    const begin = await service.begin(fixture.input)
+    expect(begin.state).toBe("created")
+    expect((await readTask(fixture.taskPath)).frontmatter.checkpoint?.state).toBe("active")
+    expect(await gitText(fixture.root, ["status", "--porcelain"])).toBe("")
+
+    await writeFile(join(fixture.root, "src", "implementation.ts"), "export const delivered = true\n")
+    await writeEvidenceAndComplete(fixture)
+
+    const complete = await service.complete(fixture.input)
+    expect(complete.state).toBe("created")
+    expect(complete.commit).toMatch(/^[a-f0-9]{40,64}$/)
+    const tree = await gitText(fixture.root, ["-c", "core.quotePath=false", "ls-tree", "-r", "-z", "--name-only", "HEAD"])
+    expect(tree).toContain("src/implementation.ts")
+    expect(tree).not.toContain(".spec-finder/tasks/demo/task_01.md")
+    expect(tree).not.toContain(".spec-finder/tasks/demo/reports/task_01.md")
+    expect((await readTask(fixture.taskPath)).frontmatter.checkpoint).toBeUndefined()
+  })
+
+  test("preserves recovery state when the task file is gitignored", async () => {
+    const fixture = await createIgnoredPacketFixture()
+    const service = new CheckpointService({ enabled: true })
+
+    expect((await service.begin(fixture.input)).state).toBe("created")
+    await writeFile(join(fixture.root, "src", "implementation.ts"), "export const delivered = true\n")
+
+    const preserve = await service.preserve({
+      ...fixture.input,
+      task: await readTask(fixture.taskPath),
+    })
+    expect(preserve.state).toBe("created")
+    const record = (await readTask(fixture.taskPath)).frontmatter.checkpoint
+    expect(record?.state).toBe("active")
+    expect(record?.paths).toContain("src/implementation.ts")
+    expect(record?.paths).not.toContain(".spec-finder/tasks/demo/task_01.md")
+
+    await writeEvidenceAndComplete(fixture)
+    const complete = await service.complete({
+      ...fixture.input,
+      task: await readTask(fixture.taskPath),
+    })
+    expect(complete.state).toBe("created")
+    expect((await readTask(fixture.taskPath)).frontmatter.checkpoint).toBeUndefined()
+  })
+
+
+  test("still fail-closes begin when git-visible paths appear during capture", async () => {
+    const fixture = await createIgnoredPacketFixture()
+    let statusCalls = 0
+    const service = new CheckpointService({
+      enabled: true,
+      git: async (args, cwd) => {
+        const result = await runCheckpointGit(args, cwd)
+        if (args[0] === "status") {
+          statusCalls += 1
+          if (statusCalls >= 2 && result.exitCode === 0) {
+            return { ...result, stdout: `${result.stdout}?? extra.ts\0` }
+          }
+        }
+        return result
+      },
+    })
+
+    const begin = await service.begin(fixture.input)
+    expect(begin.state).toBe("blocked")
+    expect(begin.message).toContain("repository changed while capturing the checkpoint baseline")
+    expect((await readTask(fixture.taskPath)).frontmatter.checkpoint).toBeUndefined()
+  })
+
   test("keeps a pre-dirty allowed task path in the candidate set", async () => {
     const fixture = await createFixture()
     await updateTaskStatus(await readTask(fixture.taskPath), "in_progress")
@@ -450,6 +522,36 @@ Fixture task.
   await runGit(root, ["config", "user.name", "Spec Finder Test"])
   await runGit(root, ["config", "user.email", "spec-finder@example.test"])
   await runGit(root, ["add", "--", "README.md", ".spec-finder/tasks/demo/task_01.md"])
+  await runGit(root, ["commit", "-m", "initial"])
+  const task = await readTask(taskPath)
+  return { root, taskPath, task, input: { root, slug: "demo", task } }
+}
+
+async function createIgnoredPacketFixture(): Promise<Fixture> {
+  const root = await mkdtemp(join(tmpdir(), "spec-finder-checkpoint-ignored-"))
+  roots.push(root)
+  const taskPath = join(root, ".spec-finder", "tasks", "demo", "task_01.md")
+  await mkdir(join(root, ".spec-finder", "tasks", "demo"), { recursive: true })
+  await mkdir(join(root, "src"), { recursive: true })
+  await writeFile(join(root, "README.md"), "fixture\n")
+  await writeFile(join(root, ".spec-finder", ".gitignore"), "/tasks/\n/tasks_done/\n/specs/\n")
+  await writeFile(taskPath, `---
+status: pending
+title: Checkpoint task
+type: backend
+complexity: low
+dependencies: []
+---
+
+# Task 01: Checkpoint task
+
+## Overview
+Fixture task.
+`)
+  await runGit(root, ["init", "-q"])
+  await runGit(root, ["config", "user.name", "Spec Finder Test"])
+  await runGit(root, ["config", "user.email", "spec-finder@example.test"])
+  await runGit(root, ["add", "--", "README.md", ".spec-finder/.gitignore"])
   await runGit(root, ["commit", "-m", "initial"])
   const task = await readTask(taskPath)
   return { root, taskPath, task, input: { root, slug: "demo", task } }

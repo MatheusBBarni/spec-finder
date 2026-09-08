@@ -1,6 +1,6 @@
 ---
 name: sf-tdd-report
-description: Writes the mandatory TDD evidence report for a Spec Finder task, requiring per-slice red and green command identities or a one-line not-applicable reason. Use after TDD execute on the manual path, not to replace sf-task-report or to change task frontmatter status.
+description: Writes the mandatory TDD evidence report for a Spec Finder task, requiring per-slice red and green command identities or a one-line not-applicable reason. Use after TDD execute on the manual path or during the ACP report phase for opted work. Do not change task frontmatter status.
 ---
 
 # Write a Spec Finder TDD Task Report
@@ -14,7 +14,7 @@ description: Writes the mandatory TDD evidence report for a Spec Finder task, re
 - NEVER require a user-global `/tdd` path. Read `references/tdd-doctrine.md` in this tree.
 </HARD-GATE>
 
-Manual TDD completion path only. Core `sf-task-report` remains the non-TDD and ACP report skill.
+ACP report phase may write this report; the runtime still owns status. Manual TDD completion still uses this skill. Core `sf-task-report` remains the unmarked path.
 
 ## Invocation
 
@@ -54,4 +54,4 @@ Allowed not-applicable claim: one reason line copied from the plan and no red ro
 
 - Excerpts stay short. No full transcripts, secrets, or env files.
 - Partial or stale command output is not evidence.
-- ACP runs do not invoke this skill for status or report ownership.
+- ACP report phase may write the TDD report. Do not change task frontmatter status; Spec Finder owns it.

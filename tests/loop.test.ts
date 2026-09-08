@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DEFAULT_CONFIG } from "../src/config.ts"
 import type { RunOptions, RunResult } from "../src/engine.ts"
+import type { RunEvent } from "../src/events.ts"
 import { detectLoopAction, runLoop } from "../src/loop.ts"
 import {
   createBootstrapLoopState,
@@ -402,8 +403,82 @@ describe("runLoop", () => {
     expect(calls).toBe(0)
     expect(result.reason).toContain("dry-run")
     expect(await snapshotTree(packet)).toEqual(before)
+    expect(await Bun.file(join(packet, "tdd.json")).exists()).toBe(false)
     expect(await Bun.file(describeLoopPaths(packet).directory).exists()).toBe(false)
   })
+
+  test("emits started then progress then finished and maps recover actions to recover", async () => {
+    const { root, packet } = await createLoopPacket({
+      "task_01.md": diskTask("task_01", "completed", "Deliver", checkpointYaml),
+      "task_02.md": diskTask("task_02", "pending", "Next"),
+    })
+    const events: RunEvent[] = []
+    const result = await runLoop({
+      root,
+      slug: "demo-packet",
+      config: DEFAULT_CONFIG,
+      signal: new AbortController().signal,
+      emit: (event) => { events.push(event) },
+      interactivePermissions: false,
+      runTaskPacket: async () => {
+        const latest = events.filter((event) => event.type === "loop_progress").at(-1)
+        if (latest?.phase === "recover") {
+          await writeFile(join(packet, "task_01.md"), diskTask("task_01", "completed", "Deliver"))
+        }
+        if (latest?.phase === "execute") {
+          await writeFile(join(packet, "task_02.md"), diskTask("task_02", "completed", "Next"))
+        }
+        return okResult
+      },
+    })
+    expect(result.terminal).toBe("done")
+    const types = events.map((event) => event.type)
+    expect(types[0]).toBe("loop_started")
+    expect(types).toContain("loop_progress")
+    expect(types.at(-1)).toBe("loop_finished")
+    expect(types.indexOf("loop_started")).toBeLessThan(types.indexOf("loop_progress"))
+    expect(types.lastIndexOf("loop_progress")).toBeLessThan(types.lastIndexOf("loop_finished"))
+    expect(events.filter((event) => event.type === "loop_progress").map((event) => event.phase)).toEqual(["recover", "execute"])
+    expect(events.some((event) => event.type === "activity" && event.message.startsWith("loop: iteration"))).toBe(true)
+    expect(events.some((event) => event.type === "activity" && event.message.startsWith("loop: terminal"))).toBe(true)
+  })
+
+  test("dry-run does not emit loop session events", async () => {
+    const { root } = await createLoopPacket({
+      "task_01.md": diskTask("task_01", "pending", "Plan"),
+    })
+    const events: RunEvent[] = []
+    await runLoop({
+      root,
+      slug: "demo-packet",
+      config: DEFAULT_CONFIG,
+      signal: new AbortController().signal,
+      emit: (event) => { events.push(event) },
+      interactivePermissions: false,
+      dryRun: true,
+      runTaskPacket: async () => okResult,
+    })
+    expect(events.every((event) => event.type === "activity")).toBe(true)
+    expect(events.some((event) => event.type === "loop_started" || event.type === "loop_progress" || event.type === "loop_finished")).toBe(false)
+  })
+
+  test("immediate no_op emits started then finished without progress", async () => {
+    const { root } = await createLoopPacket({
+      "task_01.md": diskTask("task_01", "completed", "Already done"),
+    })
+    const events: RunEvent[] = []
+    await runLoop({
+      root,
+      slug: "demo-packet",
+      config: DEFAULT_CONFIG,
+      signal: new AbortController().signal,
+      emit: (event) => { events.push(event) },
+      interactivePermissions: false,
+      runTaskPacket: async () => okResult,
+    })
+    expect(events.map((event) => event.type).filter((type) => type.startsWith("loop_"))).toEqual(["loop_started", "loop_finished"])
+  })
+
 
   test("resume from mid-loop ledger skips completed work", async () => {
     const { root, packet } = await createLoopPacket({
@@ -438,5 +513,85 @@ describe("runLoop", () => {
     })
     expect(calls).toBe(1)
     expect(result.terminal).toBe("done")
+  })
+
+  test("invalid tdd.json dry-run does not call the runner or write loop state", async () => {
+    const { root, packet } = await createLoopPacket({
+      "task_01.md": diskTask("task_01", "pending", "Plan"),
+      "tdd.json": `${JSON.stringify({ version: 1, packet: "core" })}\n`,
+    })
+    const before = await snapshotTree(packet)
+    let calls = 0
+    await expect(runLoop({
+      root,
+      slug: "demo-packet",
+      config: DEFAULT_CONFIG,
+      signal: new AbortController().signal,
+      emit: () => undefined,
+      interactivePermissions: false,
+      dryRun: true,
+      runTaskPacket: async () => {
+        calls += 1
+        return okResult
+      },
+    })).rejects.toThrow("invalid tdd.json")
+    expect(calls).toBe(0)
+    expect(await snapshotTree(packet)).toEqual(before)
+    expect(await Bun.file(describeLoopPaths(packet).directory).exists()).toBe(false)
+  })
+
+  test("invalid tdd.json start does not call the runner or write loop/state.json", async () => {
+    const { root, packet } = await createLoopPacket({
+      "task_01.md": diskTask("task_01", "pending", "Plan"),
+      "tdd.json": `${JSON.stringify({ version: 1, packet: "core" })}\n`,
+    })
+    let calls = 0
+    await expect(runLoop({
+      root,
+      slug: "demo-packet",
+      config: DEFAULT_CONFIG,
+      signal: new AbortController().signal,
+      emit: () => undefined,
+      interactivePermissions: false,
+      runTaskPacket: async () => {
+        calls += 1
+        return okResult
+      },
+    })).rejects.toThrow("invalid tdd.json")
+    expect(calls).toBe(0)
+    expect(await Bun.file(describeLoopPaths(packet).statePath).exists()).toBe(false)
+  })
+
+  test("reset-state rewrites the ledger and leaves tdd.json bytes unchanged", async () => {
+    const sidecar = `${JSON.stringify({ version: 1, packet: "tdd" }, null, 2)}\n`
+    const { root, packet } = await createLoopPacket({
+      "task_01.md": diskTask("task_01", "completed", "Already done"),
+      "tdd.json": sidecar,
+    })
+    const initial = await initLoopState(packet, { slug: "demo-packet" })
+    await writeLoopState(packet, parseLoopState({
+      ...initial,
+      iteration: 4,
+    }))
+    const beforeSidecar = await readFile(join(packet, "tdd.json"))
+    let calls = 0
+    const result = await runLoop({
+      root,
+      slug: "demo-packet",
+      config: DEFAULT_CONFIG,
+      signal: new AbortController().signal,
+      emit: () => undefined,
+      interactivePermissions: false,
+      resetState: true,
+      runTaskPacket: async () => {
+        calls += 1
+        return okResult
+      },
+    })
+    expect(calls).toBe(0)
+    expect(result.terminal).toBe("no_op")
+    expect(Buffer.from(await readFile(join(packet, "tdd.json"))).equals(Buffer.from(beforeSidecar))).toBeTrue()
+    const ledgerAfter = JSON.parse(await readFile(describeLoopPaths(packet).statePath, "utf8")) as { iteration: number }
+    expect(ledgerAfter.iteration).toBe(0)
   })
 })

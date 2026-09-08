@@ -70,7 +70,8 @@ export function App({ store, onCancel, onDismiss, onExit = () => {} }: AppProps)
   const compact = width < 80 || height < 24
   const batchMode = isBatchCockpit(state)
   const retainedFailureReview = isRetainedFailureReview(state)
-  const noWorkSummary = isNoWorkSummary(state)
+  const noWorkSummary = isNoWorkSummary(state) || isLoopNoOp(state)
+  const retainedLoopDismiss = isRetainedLoopDismiss(state)
   const taskState = selectPacketTaskView(state, batchCursorIndex, batchTaskCursorIndex)
   const selectedTask = selectSelectedTask(taskState)
   const selectedTranscript = selectSelectedTranscript(taskState)
@@ -93,7 +94,7 @@ export function App({ store, onCancel, onDismiss, onExit = () => {} }: AppProps)
     if (escape) {
       if (summaryOpenRef.current) {
         if (noWorkSummary) return
-        if (retainedFailureReview) {
+        if (retainedFailureReview || retainedLoopDismiss) {
           onDismiss()
           return
         }
@@ -109,7 +110,7 @@ export function App({ store, onCancel, onDismiss, onExit = () => {} }: AppProps)
     if (summaryOpenRef.current) {
       if (key.name === "q" || (key.ctrl && key.name === "c")) {
         requestExit(() => {
-          if (retainedFailureReview) onDismiss()
+          if (retainedFailureReview || retainedLoopDismiss) onDismiss()
           else onCancel()
         })
       }
@@ -276,13 +277,13 @@ function FailureReview({ state, width, height }: { state: CockpitState; width: n
         paddingLeft={1}
         paddingRight={1}
       >
-        <text fg={colors.accentBright} wrapMode="none"><strong>{state.batchStatus === null ? "RUN.STATUS" : "RUN.STATUS · BATCH SEQUENCE"}</strong></text>
-        <text fg={colors.danger} wrapMode="none"><strong>{fit(state.batchStatus === null ? heading : batchHeading(state), innerWidth)}</strong></text>
+        <text fg={colors.accentBright} wrapMode="none"><strong>{loopStopTerminal(state) === "failed" ? "LOOP.STATUS" : state.batchStatus === null ? "RUN.STATUS" : "RUN.STATUS · BATCH SEQUENCE"}</strong></text>
+        <text fg={colors.danger} wrapMode="none"><strong>{fit(loopStopTerminal(state) === "failed" ? "Loop failed" : state.batchStatus === null ? heading : batchHeading(state), innerWidth)}</strong></text>
         {packetOutcomes ? <text fg={colors.muted} wrapMode="none">{fit(`PACKETS: ${packetOutcomes}`, innerWidth)}</text> : null}
         {state.stoppingPacket ? <text fg={colors.warning} wrapMode="none">{fit(`STOPPING PACKET: ${state.stoppingPacket.slug} (${state.stoppingPacket.outcome})`, innerWidth)}</text> : null}
         <text fg={colors.accentBright} wrapMode="none"><strong>RUN.FAILURES</strong></text>
         <text fg={colors.danger} wrapMode="none"><strong>{fit(`${failedTask ? failureLabel(failedTask) : "FAIL"} ${failedTask?.id ?? "unavailable"} · TASK: ${taskIdentity}`, innerWidth)}</strong></text>
-        <text fg={colors.textStrong} wrapMode="none">{fit(`OUTCOME: FAILED · SUCCEEDED ${delivered} · FAILED ${failed} · BLOCKED ${blocked} · TOTAL ${taskState.tasks.length}`, innerWidth)}</text>
+        <text fg={colors.textStrong} wrapMode="none">{fit(loopStopTerminal(state) === "failed" ? `OUTCOME: FAILED · ${state.loopSession?.reason ?? state.finished?.message ?? "loop failed"}` : `OUTCOME: FAILED · SUCCEEDED ${delivered} · FAILED ${failed} · BLOCKED ${blocked} · TOTAL ${taskState.tasks.length}`, innerWidth)}</text>
         {checkpointBlocked > 0 ? <text fg={colors.warning} wrapMode="none">CHECKPOINT DELIVERY: 0 created · {checkpointBlocked} blocked</text> : null}
         <text fg={colors.muted} wrapMode="none">{fit(state.batchStatus === null ? heading : state.finished?.message ?? "Batch failed", innerWidth)}</text>
         <text fg={colors.accentBright}><strong>ERROR</strong></text>
@@ -497,6 +498,8 @@ function TitleBar({ state, width }: { state: CockpitState; width: number }) {
   const title = `SPEC FINDER · ${state.slug || "cockpit"} · ACP COCKPIT`
   const titleLimit = Math.max(12, contentWidth - statusText.length - 1)
   const identity = runtimeIdentityParts(state).join(" - ")
+  const liveLoop = state.loopSession !== null && state.loopSession.terminal === null
+  const secondary = liveLoop ? loopHeaderText(state.loopSession, contentWidth) : identity
   return (
     <box height={2} paddingLeft={1} paddingRight={1} flexDirection="column" backgroundColor={colors.background}>
       <box height={1} flexDirection="row" alignItems="center">
@@ -504,7 +507,7 @@ function TitleBar({ state, width }: { state: CockpitState; width: number }) {
         <box flexGrow={1} />
         <text fg={statusColor} wrapMode="none"><strong>{statusText}</strong></text>
       </box>
-      <text fg={colors.muted} wrapMode="none">{clip(identity, contentWidth)}</text>
+      <text fg={colors.muted} wrapMode="none">{clip(secondary, contentWidth)}</text>
     </box>
   )
 }
@@ -777,6 +780,9 @@ function RunSummary({
   if (isNoWorkSummary(state)) {
     return <NoWorkRunSummary state={state} width={width} />
   }
+  if (loopStopTerminal(state)) {
+    return <LoopStopSummary state={state} width={width} />
+  }
 
   const completed = state.tasks.filter((task) => isCompleted(task.status)).length
   const failed = state.tasks.filter((task) => task.status === "failed").length
@@ -879,6 +885,52 @@ function NoWorkRunSummary({ state, width }: { state: CockpitState; width: number
   )
 }
 
+function LoopStopSummary({ state, width }: { state: CockpitState; width: number }) {
+  const terminal = loopStopTerminal(state)
+  if (!terminal) return null
+  const panelWidth = Math.max(24, Math.min(width - 4, 86))
+  const innerWidth = Math.max(panelWidth - 4, 16)
+  const reason = state.loopSession?.reason ?? state.finished?.message ?? ""
+  const noOp = terminal === "no_op"
+  const capStop = terminal === "exhausted" || terminal === "stalled"
+  const cancelled = terminal === "cancelled"
+  const blocked = terminal === "blocked"
+  const heading = `LOOP ${terminal.toUpperCase()}`
+  const detail = noOp
+    ? "Already complete · nothing to do"
+    : capStop
+      ? terminal === "exhausted"
+        ? "Stopped by iteration cap · not all-tasks-complete"
+        : "Stopped by no-progress window · not task failure"
+      : blocked
+        ? "Loop blocked · not ordinary task failure"
+        : cancelled
+          ? "Loop cancelled"
+          : reason || `Loop ${terminal}`
+  const border = noOp || terminal === "done" ? colors.accent : capStop || cancelled ? colors.warning : colors.danger
+  const titleColor = noOp || terminal === "done" ? colors.accent : capStop || cancelled ? colors.warning : colors.danger
+  const footer = noOp
+    ? <text fg={colors.muted} wrapMode="none">[<span fg={colors.accent}>Q</span>/<span fg={colors.accent}>CTRL+C</span>] EXIT</text>
+    : capStop || blocked || terminal === "failed"
+      ? <text fg={colors.muted} wrapMode="none">[<span fg={colors.accent}>ESC</span>/<span fg={colors.accent}>Q</span>/<span fg={colors.accent}>CTRL+C</span>] DISMISS</text>
+      : <text fg={colors.muted} wrapMode="none">[<span fg={colors.accent}>Q</span>] QUIT</text>
+  return (
+    <box flexGrow={1} flexDirection="column" paddingLeft={1} paddingTop={1}>
+      <box width={panelWidth} borderStyle="single" borderColor={border} backgroundColor={colors.panel} paddingLeft={1} paddingRight={1}>
+        <text fg={colors.accentBright} wrapMode="none"><strong>LOOP.STATUS</strong></text>
+        <text fg={titleColor} wrapMode="none"><strong>{fit(heading, innerWidth)}</strong></text>
+        <text fg={colors.textStrong} wrapMode="word">{detail}</text>
+        {reason ? <text fg={colors.muted} wrapMode="word">{reason}</text> : null}
+      </box>
+      <box height={1} marginTop={1} paddingLeft={1}>
+        {footer}
+      </box>
+      <box flexGrow={1} />
+    </box>
+  )
+}
+
+
 function SummaryStat({ label, value, color }: { label: string; value: string; color: string }) {
   return (
     <text fg={colors.muted} wrapMode="none">{label.padEnd(9, " ")} <span fg={color}><strong>{value}</strong></span></text>
@@ -949,6 +1001,8 @@ function workflowStatusText(state: CockpitState): string {
     if (state.batchStatus === "running") return "● batch RUNNING"
     return "● batch PREPARING"
   }
+  const loopTerminal = loopStopTerminal(state)
+  if (loopTerminal) return `● loop ${loopTerminal.toUpperCase()}`
   if (state.finished) {
     if (state.finished.ok) return "● workflow COMPLETE"
     return hasCheckpointBlocked(state) ? "● workflow FAILED · CHECKPOINT BLOCKED" : "● workflow FAILED"
@@ -958,6 +1012,9 @@ function workflowStatusText(state: CockpitState): string {
 }
 
 function workflowStatusColor(state: CockpitState): string {
+  const loopTerminal = loopStopTerminal(state)
+  if (loopTerminal === "cancelled" || loopTerminal === "exhausted" || loopTerminal === "stalled") return colors.warning
+  if (loopTerminal === "blocked" || loopTerminal === "failed") return colors.danger
   if (state.batchStatus === "cancelled") return colors.warning
   if (state.batchStatus === "failed" || state.batchStatus === "preflight_failed" || state.finished?.ok === false || hasCheckpointBlocked(state)) return colors.danger
   if (state.batchStatus === "completed" || state.finished) return colors.success
@@ -1174,6 +1231,22 @@ function runtimeIdentityParts(state: CockpitState): string[] {
   ]
 }
 
+function loopHeaderText(session: NonNullable<CockpitState["loopSession"]>, width: number): string {
+  const nMax = `LOOP ${session.iteration}/${session.maxIterations}`
+  const cap = `cap ${session.maxIterations}`
+  const window = `window ${session.noProgressWindow}`
+  const phase = session.phase
+  const ranked = phase === null
+    ? [[nMax, cap, window], [nMax, cap], [nMax]]
+    : [[nMax, cap, window, phase], [nMax, cap, phase], [nMax, phase], [nMax]]
+  for (const parts of ranked) {
+    const text = parts.join(" · ")
+    if (text.length <= width) return text
+  }
+  return clip(nMax, width)
+}
+
+
 function runtimeOptionValue(name: RuntimeOptionName, state: CockpitState): string {
   const outcome = state.runtimeOptions[name]
   const requested = outcome?.requested ?? state.config?.[name] ?? "auto"
@@ -1225,6 +1298,8 @@ function isBatchCockpit(state: CockpitState): boolean {
 }
 
 function isRetainedFailureReview(state: CockpitState): boolean {
+  if (state.loopSession?.terminal === "failed") return hasSurfacedCockpitFailure(state)
+  if (state.loopSession?.terminal) return false
   if (state.finished?.ok !== false) return false
   return state.batchStatus !== "cancelled" && state.batchStatus !== "preflight_failed"
 }
@@ -1235,6 +1310,29 @@ function isNoWorkSummary(state: CockpitState): boolean {
     && state.finished.outcome === "no_work"
     && state.finished.reason === "all_tasks_complete"
 }
+
+function loopStopTerminal(state: CockpitState): NonNullable<CockpitState["loopSession"]>["terminal"] {
+  return state.loopSession?.terminal ?? null
+}
+
+function isLoopNoOp(state: CockpitState): boolean {
+  return loopStopTerminal(state) === "no_op" && state.finished?.ok === true
+}
+
+function hasSurfacedCockpitFailure(state: CockpitState): boolean {
+  const packetIndex = state.stoppingPacket?.index ?? state.activePacket?.index ?? 0
+  const taskState = state.batchStatus === null ? state : selectPacketTaskView(state, packetIndex, 0)
+  return taskState.tasks.some((task) => (
+    task.status === "failed" || task.status === "blocked" || task.checkpoint?.state === "blocked"
+  ))
+}
+
+function isRetainedLoopDismiss(state: CockpitState): boolean {
+  const terminal = loopStopTerminal(state)
+  return terminal === "blocked" || terminal === "exhausted" || terminal === "stalled"
+    || (terminal === "failed" && !hasSurfacedCockpitFailure(state))
+}
+
 
 function taskRowId(taskId: string): string {
   return `task-row-${taskId}`

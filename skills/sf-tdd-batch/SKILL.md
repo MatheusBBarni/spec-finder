@@ -15,7 +15,7 @@ description: Sequentially executes a range or all tasks in one Spec Finder packe
 - NEVER require a user-global `/tdd` path. Read `references/tdd-doctrine.md` in this tree.
 </HARD-GATE>
 
-Use `spec-finder run <slug>` when the user wants the cockpit/ACP runtime. That path stays on core execute/report. This skill is the manual TDD orchestration path for explicit ranges and config-driven local checkpoints.
+Use `spec-finder run <slug>` when the user wants the cockpit/ACP runtime. That path defaults to core unless the packet has `tdd.json`. This skill remains the manual TDD orchestration path for explicit ranges and config-driven local checkpoints.
 
 ## Invocation
 
