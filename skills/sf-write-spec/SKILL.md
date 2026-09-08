@@ -24,7 +24,7 @@ Read `references/quality-bar.md` before drafting.
 - NEVER create a slice that is not independently testable once its declared dependencies are done.
 - NEVER omit `.spec-finder/specs/<slug>-spec.md`.
   That file is the implementation prompt and must contain everything needed to implement and verify without chat history.
-- NEVER present a draft that fails `references/quality-bar.md` or still contains template placeholders.
+- NEVER present a `.spec-finder/specs/<slug>-spec.md` draft that fails `references/quality-bar.md` or still contains template placeholders.
 - NEVER omit Current System evidence (verified paths, callers/tests, and a current excerpt when the seam exists).
 - NEVER omit `_prd.md` or `_techspec.md`.
   The runner and `sf-execute-task` re-read those files.
@@ -117,10 +117,10 @@ If those sibling files are missing, stop.
 This path does not invent a second task format.
 
 Fill every required section below with repository facts, not writer notes.
-Strip every template placeholder.
-Run `references/quality-bar.md` and rewrite until it passes, then present the draft.
-The spec file is the complete implementation prompt.
+Strip every template placeholder from the spec file.
+Run `references/quality-bar.md` against `.spec-finder/specs/<slug>-spec.md` only and rewrite until it passes, then present the draft.
 Packet files are the runner projection of that same draft and must not contradict it.
+They are not scored against the quality bar.
 The spec stays dense; do not shrink it to match packet brevity.
 Do not ask for section-by-section or stage-by-stage approval.
 

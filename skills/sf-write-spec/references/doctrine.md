@@ -84,4 +84,4 @@ Numeric IDs are the execution order and always depend backward.
 
 Research the repository and current docs before any question.
 Ask only remaining material decisions.
-Write nothing until the user explicitly approves one complete draft that passes `quality-bar.md`.
+Write nothing until the user explicitly approves one complete draft whose spec file passes `quality-bar.md`.

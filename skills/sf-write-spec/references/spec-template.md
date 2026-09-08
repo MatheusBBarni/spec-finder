@@ -38,8 +38,6 @@ Desired after this spec: [observable change against that baseline].
 
 ## Current System
 
-The system as it is. Not the design.
-
 ### Behavior now
 
 [What happens today, including the failure this spec fixes.]
@@ -52,13 +50,10 @@ The system as it is. Not the design.
 
 ### Current excerpts
 
-Label each fence with path and `current evidence, not the fix`.
-Quote the smallest snippet that shows the seam.
-If the seam does not exist yet, quote the adjacent module to follow and say `create`.
-
 ```ts
 // path/to/file — current evidence, not the fix
 ```
+
 
 ### Preserve
 

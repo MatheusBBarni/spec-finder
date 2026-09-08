@@ -98,6 +98,10 @@ describe("sf-write-spec packet contract", () => {
     expect(spec).toContain("Invalid:")
     expect(doctrine).toContain("The spec is the prompt")
     expect(quality).toContain("NO PROMPT WITHOUT CURRENT-SYSTEM EVIDENCE")
+    expect(skill).toContain("against `.spec-finder/specs/<slug>-spec.md` only")
+    expect(quality).toContain("This bar applies only to `.spec-finder/specs/<slug>-spec.md`")
+    expect(quality).toContain("every template token must be replaced")
+
     expect(skill).toContain("references/quality-bar.md")
 
   })
@@ -125,7 +129,8 @@ describe("sf-write-spec packet contract", () => {
     expect(body).toContain("### Ask first")
     expect(body).toContain("### Never")
     expect(body).toContain("## Failure and Edge Cases")
-    expect(body).toContain("`[exact command]`")
+
+
     expect(body).toContain("## Current System")
     expect(body).toContain("## Output")
     expect(body).toContain("Read first because")

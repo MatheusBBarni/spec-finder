@@ -45,7 +45,7 @@ Once the package is current, `spec-finder refresh` recopies the saved skill sele
 
 `.spec-finder/.gitignore` ignores `tasks/`, `tasks_done/`, and `specs/` when those entries are missing. Packet and spec files stay out of git. The workspace root `.gitignore` is left alone. `.spec-finder/config.json` remains eligible to commit.
 
-In an interactive terminal, `setup` resolves exactly one provider and asks for its installation scope, model, speed, and skills. Use `↑`/`↓` to move, `Enter` to confirm, and `Esc` to cancel. Provider, scope, model, and speed are single-select. Skills start all selected; `Space` toggles a skill. Supplying a flag skips only that choice's picker. `--copy` remains accepted for compatibility and is the only installation mode.
+In an interactive terminal, `setup` resolves exactly one provider and asks for its installation scope, model, speed, and skills. Use `↑`/`↓` to move, `Enter` to confirm, and `Esc` to cancel. Provider, scope, model, and speed are single-select. A first run starts with every skill selected; a configured rerun starts from the saved selection. `Space` toggles a skill. Supplying a flag skips only that choice's picker. `--copy` remains accepted for compatibility and is the only installation mode.
 
 ```text
 spec-finder setup [--agent claude|codex|cursor|grok|pi] [--model auto|CURATED] \

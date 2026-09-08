@@ -1,9 +1,11 @@
 # Spec quality bar
 
-Read this before drafting and again before presenting the draft.
+Read this before drafting and again before presenting the spec.
+This bar applies only to `.spec-finder/specs/<slug>-spec.md`.
+Packet files are a thinner projection and are not scored here.
 The saved spec is the prompt the operator will point an agent at.
-Reject and rewrite if any item fails.
-Do not present a failing draft.
+Reject and rewrite the spec if any item fails.
+Do not present a failing spec.
 
 ## Iron law
 
@@ -28,8 +30,8 @@ NO PLACEHOLDERS IN THE SAVED SPEC.
 - **Acceptance** has only the happy path when a failure path exists.
 - A **Relevant Files** row has no "read first because".
 - A section is one vague sentence that does not change executor behavior.
-- Writer-facing template prose remains ("Write exclusions before…", "Who is affected…").
-- Any fill-in placeholder remains: `[Feature]`, `[precondition]`, `[exact command]`, `[Excluded capability]`, `<slug>`.
+- Writer-facing template prose remains ("Write exclusions before…", "Who is affected…", "The system as it is. Not the design.").
+- Any `[…]` fill-in token or `<slug>` remains. The listed examples are not exhaustive; every template token must be replaced.
 - The executor would still need chat history, a question, or a repo-wide hunt to start.
 
 ## Density by section
