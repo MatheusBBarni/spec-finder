@@ -6,7 +6,9 @@ import {
   getSetupProfile,
   isCuratedSetupModel,
   isSetupDestination,
+  resolveSetupSkills,
   SETUP_PROVIDER_PROFILES,
+  SPEC_FINDER_SKILLS,
 } from "../src/setup-profile.ts"
 
 describe("setup provider policy", () => {
@@ -84,4 +86,13 @@ describe("setup provider policy", () => {
     expect(defaultsRuntimeToAutoOnProviderSwitch("codex")).toBeFalse()
     expect(defaultsRuntimeToAutoOnProviderSwitch("cursor")).toBeFalse()
   })
+
+  test("canonicalizes selected skills and rejects empty, unknown, or duplicate names", () => {
+    expect(resolveSetupSkills()).toEqual([...SPEC_FINDER_SKILLS])
+    expect(resolveSetupSkills(["sf-memory", "sf-write-spec"])).toEqual(["sf-write-spec", "sf-memory"])
+    expect(() => resolveSetupSkills([])).toThrow("at least one skill")
+    expect(() => resolveSetupSkills(["sf-memory", "nope"])).toThrow("unsupported setup skill: nope")
+    expect(() => resolveSetupSkills(["sf-memory", "sf-memory"])).toThrow("duplicate setup skill: sf-memory")
+  })
+
 })

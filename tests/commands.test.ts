@@ -88,8 +88,10 @@ describe("setup command options", () => {
         model: "gpt-5.6-luna",
         speed: "normal",
         scope: "local",
+        skills: [...SPEC_FINDER_SKILLS],
         origin: { provider: "default", model: "default", speed: "default" },
       })
+
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -103,8 +105,10 @@ describe("setup command options", () => {
         model: "auto",
         speed: "normal",
         scope: "local",
+        skills: [...SPEC_FINDER_SKILLS],
         origin: { provider: "flag", model: "default", speed: "default" },
       })
+
       await expect(resolveSetupOptions(["--agent", "grok", "--model", "volatile-model"], { interactive: false, root }))
         .rejects.toThrow("unsupported setup model for grok")
     } finally {
@@ -120,8 +124,10 @@ describe("setup command options", () => {
         model: "auto",
         speed: "normal",
         scope: "local",
+        skills: [...SPEC_FINDER_SKILLS],
         origin: { provider: "flag", model: "default", speed: "default" },
       })
+
       await expect(resolveSetupOptions(["--agent", "pi", "--model", "volatile-model"], { interactive: false, root }))
         .rejects.toThrow("unsupported setup model for pi")
     } finally {
@@ -146,8 +152,10 @@ describe("setup command options", () => {
       model: "team-custom-model",
       speed: "fast",
       scope: "global",
+      skills: [...SPEC_FINDER_SKILLS],
       origin: { provider: "saved", model: "saved", speed: "saved" },
     })
+
   })
 
   test("reuses a saved Grok provider and its provider-directed model", async () => {
@@ -168,8 +176,10 @@ describe("setup command options", () => {
       model: "auto",
       speed: "fast",
       scope: "local",
+      skills: [...SPEC_FINDER_SKILLS],
       origin: { provider: "saved", model: "saved", speed: "saved" },
     })
+
   })
 
   test("reuses a saved Pi provider and its provider-directed model", async () => {
@@ -190,8 +200,10 @@ describe("setup command options", () => {
       model: "auto",
       speed: "fast",
       scope: "local",
+      skills: [...SPEC_FINDER_SKILLS],
       origin: { provider: "saved", model: "saved", speed: "saved" },
     })
+
   })
 
   test("defaults a changed provider to its newest model while retaining saved speed", async () => {
@@ -210,9 +222,30 @@ describe("setup command options", () => {
       model: "fable",
       speed: "fast",
       scope: "local",
+      skills: [...SPEC_FINDER_SKILLS],
       origin: { provider: "flag", model: "default", speed: "saved" },
     })
+
   })
+
+  test("reuses a saved skill subset on a non-interactive rerun", async () => {
+    const configured = parseConfig({
+      ...DEFAULT_CONFIG,
+      setup: {
+        status: "configured",
+        scope: "local",
+        destination: ".agents/skills",
+        skills: ["sf-write-spec", "sf-memory"],
+      },
+    })
+    await expect(resolveSetupOptions([], {
+      interactive: false,
+      loadConfig: async () => configured,
+    })).resolves.toMatchObject({
+      skills: ["sf-write-spec", "sf-memory"],
+    })
+  })
+
 
   test("requires an explicit scope after v2 migration and then preserves its runtime intent", async () => {
     const root = await mkdtemp(join(tmpdir(), "spec-finder-v2-"))
@@ -259,20 +292,55 @@ describe("setup command options", () => {
       terminal.input.write("\r")
       await waitForText(terminal.text, "Choose speed")
       terminal.input.write("\r")
+      await waitForText(terminal.text, "Choose skills to install")
+      expect(terminal.text()).toContain("Space toggle")
+      terminal.input.write("\r")
 
       await expect(resolution).resolves.toMatchObject({
         provider: "codex",
         scope: "global",
         model: "gpt-5.6-luna",
         speed: "normal",
+        skills: [...SPEC_FINDER_SKILLS],
       })
-      expect(terminal.text()).not.toContain("Space toggle")
-      expect(terminal.input.rawModes).toEqual([true, false, true, false, true, false, true, false])
+      expect(terminal.input.rawModes).toEqual([true, false, true, false, true, false, true, false, true, false])
       expect(terminal.input.isPaused()).toBe(true)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
   })
+
+  test("starts with every skill selected and Space toggles a skill off", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-skill-picker-"))
+    const terminal = terminalHarness()
+    try {
+      const resolution = resolveSetupOptions([], {
+        interactive: true,
+        root,
+        input: terminal.input,
+        output: terminal.output,
+      })
+
+      await waitForText(terminal.text, "Choose provider")
+      terminal.input.write("\r")
+      await waitForText(terminal.text, "Choose installation scope")
+      terminal.input.write("\r")
+      await waitForText(terminal.text, "Choose model")
+      terminal.input.write("\r")
+      await waitForText(terminal.text, "Choose speed")
+      terminal.input.write("\r")
+      await waitForText(terminal.text, "Choose skills to install")
+      terminal.input.write(" ")
+      terminal.input.write("\r")
+
+      await expect(resolution).resolves.toMatchObject({
+        skills: SPEC_FINDER_SKILLS.filter((skill) => skill !== "sf-idea-factory"),
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
 
   test("requires an explicit migrated scope selection and reports cancellation without success", async () => {
     const root = await mkdtemp(join(tmpdir(), "spec-finder-v2-picker-"))

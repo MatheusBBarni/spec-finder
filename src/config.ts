@@ -5,6 +5,7 @@ import { CONFIG_FILE, SPEC_DIR } from "./paths.ts"
 import {
   getSetupProfile,
   SETUP_DESTINATIONS,
+  SPEC_FINDER_SKILLS,
 } from "./setup-profile.ts"
 export type { SetupDestination } from "./setup-profile.ts"
 
@@ -24,7 +25,17 @@ const setupStateSchema = z.discriminatedUnion("status", [
     status: z.literal("configured"),
     scope: z.enum(SETUP_SCOPES),
     destination: z.enum(SETUP_DESTINATIONS),
-  }).strict(),
+    skills: z.array(z.enum(SPEC_FINDER_SKILLS)).min(1).optional(),
+  }).strict().superRefine((value, context) => {
+    if (value.skills === undefined) return
+    if (new Set(value.skills).size !== value.skills.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["skills"],
+        message: "must not contain duplicate skills",
+      })
+    }
+  }),
 ])
 
 const runtimeFieldsSchema = z.object({

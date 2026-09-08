@@ -10,7 +10,7 @@ Task packets stay local in `.spec-finder/tasks/` and `.spec-finder/tasks_done/`.
 ## Features
 
 - **Closed specification pipeline** — idea, PRD, TechSpec, and numbered tasks live in `.spec-finder/tasks/<slug>/`.
-- **Simplified spec path** - `sf-write-spec` writes `.spec-finder/specs/<slug>-spec.md` for an agent to execute, plus the same runner packet, in one research-and-approve pass.
+- **Simplified spec path** - `sf-write-spec` writes `.spec-finder/specs/<slug>-spec.md` as the implementation prompt an agent runs when pointed at that file, plus the same runner packet, in one research-and-approve pass.
 - **Five ACP providers** — Claude, Codex, Cursor, plus packet-only Grok Build and Pi.
 - **Read-only cockpit** — watch provider, task graph, ACP activity, and tool calls without extra UI chrome.
 - **One session per task** — implementation and the final report share one ACP session.
@@ -31,7 +31,7 @@ spec-finder setup
 spec-finder run my-feature
 ```
 
-Once the package is current, `spec-finder refresh` recopies managed skills into this workspace's saved destination and scope without changing provider, model, or scope.
+Once the package is current, `spec-finder refresh` recopies the saved skill selection into this workspace's saved destination and scope without changing provider, model, or scope.
 
 `setup` creates:
 
@@ -45,7 +45,7 @@ Once the package is current, `spec-finder refresh` recopies managed skills into 
 
 `.spec-finder/.gitignore` ignores `tasks/`, `tasks_done/`, and `specs/` when those entries are missing. Packet and spec files stay out of git. The workspace root `.gitignore` is left alone. `.spec-finder/config.json` remains eligible to commit.
 
-In an interactive terminal, `setup` resolves exactly one provider and asks for its installation scope, model, and speed. Use `↑`/`↓` to move, `Enter` to confirm, and `Esc` to cancel; the provider and every other choice are single-select. Supplying a flag skips only that choice's picker. `--copy` remains accepted for compatibility and is the only installation mode.
+In an interactive terminal, `setup` resolves exactly one provider and asks for its installation scope, model, speed, and skills. Use `↑`/`↓` to move, `Enter` to confirm, and `Esc` to cancel. Provider, scope, model, and speed are single-select. Skills start all selected; `Space` toggles a skill. Supplying a flag skips only that choice's picker. `--copy` remains accepted for compatibility and is the only installation mode.
 
 ```text
 spec-finder setup [--agent claude|codex|cursor|grok|pi] [--model auto|CURATED] \
@@ -54,7 +54,7 @@ spec-finder setup [--agent claude|codex|cursor|grok|pi] [--model auto|CURATED] \
 
 Each `--agent`, `--model`, and `--speed` option is optional and accepts at most one value. `--model` accepts the universal `auto` value or a curated model for the selected provider. `--speed` accepts auto, normal, or fast. `--local` and `--global` are independent scope flags; supply at most one. Repeated or duplicate setup options, conflicting scopes, and `--symlink` are rejected before any writes; the error directs users to `--copy`.
 
-Fresh setup defaults to Codex, `gpt-5.6-luna`, `normal` speed, and local scope. A valid configured v3 rerun reuses omitted provider, model, speed, and scope values, including a saved custom model. Selecting a different provider uses that provider's newest catalogue model while an omitted speed still reuses the saved speed. `auto` remains available for every provider.
+Fresh setup defaults to Codex, `gpt-5.6-luna`, `normal` speed, local scope, and every managed skill. A valid configured v3 rerun reuses omitted provider, model, speed, scope, and skill-selection values, including a saved custom model. Selecting a different provider uses that provider's newest catalogue model while an omitted speed still reuses the saved speed. `auto` remains available for every provider.
 
 ```bash
 spec-finder run my-feature --no-ui
@@ -129,7 +129,7 @@ Setup does not launch a provider or perform live capability discovery. Completio
 
 | Skill | Artifact |
 |---|---|
-| `sf-write-spec` | Simplified path: `.spec-finder/specs/<slug>-spec.md` (agent-executable spec) plus the runner packet (`_prd.md`, `_techspec.md`, `_tasks.md`, `task_NN.md`) |
+| `sf-write-spec` | Simplified path: `.spec-finder/specs/<slug>-spec.md` (implementation prompt an agent runs from that file) plus the runner packet (`_prd.md`, `_techspec.md`, `_tasks.md`, `task_NN.md`) |
 | `sf-idea-factory` | `.spec-finder/tasks/<slug>/_idea.md` |
 | `sf-create-prd` | `.spec-finder/tasks/<slug>/_prd.md` |
 | `sf-create-techspec` | `.spec-finder/tasks/<slug>/_techspec.md` |
@@ -147,7 +147,7 @@ Setup does not launch a provider or perform live capability discovery. Completio
 Every stage keeps the approval gates from the original Compozy skills. Research and interactive decisions happen before artifacts are saved. Tasks form an acyclic dependency graph and carry their own tests.
 
 Use `sf-write-spec` when a feature request is clear enough for one research-and-approve pass.
-It writes `.spec-finder/specs/<slug>-spec.md` so an agent can execute from one file, and still writes the runner packet.
+It writes `.spec-finder/specs/<slug>-spec.md` as the implementation prompt: point an agent at that file and it should implement without chat history. The runner packet is still written for `spec-finder run`.
 Keep using idea, PRD, TechSpec, and tasks when you need discovery, a product-only PRD, a design-only TechSpec, or task regeneration.
 
 ### When to use TDD versus core
@@ -403,7 +403,7 @@ spec-finder version
 
 The `--provider` option accepts `claude`, `codex`, `cursor`, `grok`, or `pi`. Grok Build and Pi remain packet-only; `spec-finder exec --provider grok` and `spec-finder exec --provider pi` are rejected before provider spawn while their separate packet launches remain available.
 
-`upgrade` runs `npm install --global spec-finder@latest`, keeping npm as the package authority. It refreshes the installed package only and does not recopy agent skill destinations. After the package is current, `spec-finder refresh` recopies managed skills into this workspace's saved destination and scope. Extra arguments exit 2 before writes. An unconfigured cwd or a package that is not npm latest exits 1 with no writes. Leftover Cursor `.cursor/skills` and Pi `.pi/skills` content is preserved and not migrated.
+`upgrade` runs `npm install --global spec-finder@latest`, keeping npm as the package authority. It refreshes the installed package only and does not recopy agent skill destinations. After the package is current, `spec-finder refresh` recopies the saved skill selection into this workspace's saved destination and scope. Extra arguments exit 2 before writes. An unconfigured cwd or a package that is not npm latest exits 1 with no writes. Leftover Cursor `.cursor/skills` and Pi `.pi/skills` content is preserved and not migrated.
 
 ## Task contract
 

@@ -18,7 +18,10 @@ import {
   defaultsRuntimeToAutoOnProviderSwitch,
   getSetupProfile,
   isCuratedSetupModel,
+  resolveSetupSkills,
+  SPEC_FINDER_SKILLS,
   type SetupDestination,
+  type SpecFinderSkill,
 } from "./setup-profile.ts"
 import {
   GITIGNORE_FILE,
@@ -43,22 +46,8 @@ export const SETUP_SCOPES = CONFIG_SETUP_SCOPES
 export const SKILL_INSTALL_MODES = ["copy"] as const
 export type SkillInstallMode = (typeof SKILL_INSTALL_MODES)[number]
 
-export const SPEC_FINDER_SKILLS = [
-  "sf-idea-factory",
-  "sf-create-prd",
-  "sf-create-techspec",
-  "sf-create-tasks",
-  "sf-write-spec",
-  "sf-memory",
-  "sf-execute-task",
-  "sf-task-report",
-  "sf-batch-tasks",
-  "sf-tdd-plan",
-  "sf-tdd-execute",
-  "sf-tdd-report",
-  "sf-tdd-batch",
-  "sf-archive-tasks",
-] as const
+export { SPEC_FINDER_SKILLS, resolveSetupSkills }
+export type { SpecFinderSkill }
 
 export type SetupSpeed = (typeof SPEED_VALUES)[number]
 export type SetupInputOrigin = "flag" | "saved" | "default"
@@ -73,6 +62,8 @@ export interface SetupRequest {
     model: SetupInputOrigin
     speed: SetupInputOrigin
   }
+  skills?: readonly SpecFinderSkill[]
+
 }
 
 export interface SetupResult {
@@ -188,7 +179,7 @@ export function setupLockPath(root: string): string {
 
 export async function refreshManagedSkills(
   workspace: string,
-  input: { provider: ProviderName; scope: SetupScope },
+  input: { provider: ProviderName; scope: SetupScope; skills?: readonly string[] },
   options: Pick<SetupWorkspaceOptions, "homeDirectory" | "failure" | "failAt" | "failurePoint"> = {},
 ): Promise<RefreshSkillsResult> {
   if (!isSkillTarget(input.provider)) throw new Error(`unsupported setup agent: ${String(input.provider)}`)
@@ -227,6 +218,7 @@ export async function refreshManagedSkills(
       speed: "normal",
       scope: input.scope,
       origin: { provider: "default", model: "default", speed: "default" },
+      skills: resolveSetupSkills(input.skills),
     },
     legacyCursor,
     options,
@@ -289,6 +281,8 @@ function validateSetupRequest(request: SetupRequest): void {
   if (request.speed !== "auto" && request.speed !== "normal" && request.speed !== "fast") {
     throw new Error(`unsupported setup speed: ${String(request.speed)}`)
   }
+  resolveSetupSkills(request.skills)
+
 }
 
 function isOrigin(value: unknown): value is SetupInputOrigin {
@@ -326,6 +320,7 @@ function createConfigCandidate(
       status: "configured",
       scope: request.scope,
       destination,
+      skills: resolveSetupSkills(request.skills),
     },
   }
 }
@@ -539,9 +534,11 @@ class SetupTransaction {
   }
   private readonly failure: SetupFailureInjection | SetupFailureHook | undefined
   private readonly phaseCounts = new Map<SetupFailurePhase, number>()
+  private readonly skills: readonly SpecFinderSkill[]
   private lock: FileHandle | undefined
   private gitignoreChanged = false
   private gitignoreExisted = false
+
 
   constructor(private readonly input: {
     workspace: string
@@ -573,6 +570,8 @@ class SetupTransaction {
     this.failure = input.options.failure
       ?? (input.options.failAt ? { phase: input.options.failAt } : undefined)
       ?? (input.options.failurePoint ? { phase: input.options.failurePoint } : undefined)
+    this.skills = resolveSetupSkills(input.request.skills)
+
   }
 
   async run(): Promise<SetupResult> {
@@ -625,7 +624,7 @@ class SetupTransaction {
         destination,
         skillRoot: this.paths.targetRoot,
         scope: this.input.request.scope,
-        installed: SPEC_FINDER_SKILLS.map((skill) => join(destination, skill)),
+        installed: this.skills.map((skill) => join(destination, skill)),
         legacyCursor: this.input.legacyCursor,
       }
     } catch (error) {
@@ -671,7 +670,7 @@ class SetupTransaction {
     await mkdir(this.paths.targetParent, { recursive: true })
     await mkdir(this.paths.stageRoot, { recursive: true })
     const sourceRoot = bundledSkillsPath()
-    for (const skill of SPEC_FINDER_SKILLS) {
+    for (const skill of this.skills) {
       const from = join(sourceRoot, skill)
       try {
         await cp(from, join(this.paths.stageRoot, skill), { recursive: true })
@@ -692,7 +691,7 @@ class SetupTransaction {
 
   private async commit(): Promise<void> {
     await mkdir(this.paths.targetRoot, { recursive: true })
-    for (const skill of SPEC_FINDER_SKILLS) {
+    for (const skill of this.skills) {
       const destination = join(this.paths.targetRoot, skill)
       if (await pathExists(destination)) {
         await this.maybeFail("backup", destination)

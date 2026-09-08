@@ -175,6 +175,41 @@ describe("config", () => {
     })).toThrow(ConfigError)
   })
 
+  test("accepts a unique configured skill list and rejects empty or duplicate skills", () => {
+    expect(parseConfig({
+      ...DEFAULT_CONFIG,
+      setup: {
+        status: "configured",
+        scope: "local",
+        destination: ".agents/skills",
+        skills: ["sf-write-spec", "sf-memory"],
+      },
+    }).setup).toMatchObject({ skills: ["sf-write-spec", "sf-memory"] })
+    expect(() => parseConfig({
+      ...DEFAULT_CONFIG,
+      setup: { status: "configured", scope: "local", destination: ".agents/skills", skills: [] },
+    })).toThrow(ConfigError)
+    expect(() => parseConfig({
+      ...DEFAULT_CONFIG,
+      setup: {
+        status: "configured",
+        scope: "local",
+        destination: ".agents/skills",
+        skills: ["sf-memory", "sf-memory"],
+      },
+    })).toThrow(ConfigError)
+    expect(() => parseConfig({
+      ...DEFAULT_CONFIG,
+      setup: {
+        status: "configured",
+        scope: "local",
+        destination: ".agents/skills",
+        skills: ["not-a-skill"],
+      },
+    })).toThrow(ConfigError)
+  })
+
+
   test("keeps non-empty custom models legal for runtime config", () => {
     expect(parseConfig({ ...DEFAULT_CONFIG, model: "provider-specific-custom-model" }).model)
       .toBe("provider-specific-custom-model")
