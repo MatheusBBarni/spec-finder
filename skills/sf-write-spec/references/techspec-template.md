@@ -40,6 +40,11 @@ Omit unused fields.
 
 Repository language for types, functions, CLI, or protocol contracts.
 
+### Examples
+
+- Valid: [input] → [output]
+- Invalid: [input] → [error / observable failure]
+
 ### Errors
 
 Named errors, mapping to user/system behavior, and fail-closed cases.
@@ -65,6 +70,7 @@ Record a follow-up; do not invent them mid-run.
 Hard bans.
 
 - [Prohibited action]
+- [Second hard ban]
 
 ## Failure and Edge Cases
 

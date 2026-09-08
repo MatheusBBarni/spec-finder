@@ -1,14 +1,15 @@
 ---
 name: sf-write-spec
-description: Creates an approved, agent-executable Spec Finder spec in one simplified path from a feature request, idea, or packet slug. Researches the repository and current docs before asking, asks only remaining material decisions, and writes nothing until the user approves a complete draft. Writes `.spec-finder/specs/<slug>-spec.md` with everything an agent needs to execute, plus the runner packet (`_prd.md`, `_techspec.md`, `_tasks.md`, `task_NN.md`). Use for a simplified spec path, sf-write-spec, write a spec, skip the idea/PRD/TechSpec/tasks stages, or one-shot specification. Do not use for idea-factory discovery, PRD-only, TechSpec-only, or task regeneration.
+description: Creates an approved, agent-executable Spec Finder spec in one simplified path from a feature request, idea, or packet slug. Researches the repository and current docs before asking, asks only remaining material decisions, and writes nothing until the user approves a complete draft. Writes `.spec-finder/specs/<slug>-spec.md` as the complete implementation prompt an agent runs when pointed at that file, plus the runner packet (`_prd.md`, `_techspec.md`, `_tasks.md`, `task_NN.md`). Use for a simplified spec path, sf-write-spec, write a spec, skip the idea/PRD/TechSpec/tasks stages, or one-shot specification. Do not use for idea-factory discovery, PRD-only, TechSpec-only, or task regeneration.
 ---
 
 # Write a Spec Finder Packet
 
-One invocation produces `.spec-finder/specs/<slug>-spec.md`, the self-contained spec an agent executes, plus a runner packet `sf-execute-task` can consume.
+One invocation produces `.spec-finder/specs/<slug>-spec.md`, the complete implementation prompt an agent runs when pointed at that file, plus a runner packet `sf-execute-task` can consume.
 This is not `sf-idea-factory`, `sf-create-prd`, `sf-create-techspec`, and `sf-create-tasks` run in sequence.
 
 Read `references/doctrine.md` before research.
+Read `references/quality-bar.md` before drafting.
 
 <HARD-GATE>
 - NEVER require `sf-idea-factory`, `sf-create-prd`, `sf-create-techspec`, or `sf-create-tasks` before starting.
@@ -18,11 +19,13 @@ Read `references/doctrine.md` before research.
 - NEVER expand capabilities before explicit non-goals.
 - NEVER accept acceptance criteria that are not binary Given/When/Then.
   Reject "works correctly" and other untestable phrases.
-- NEVER micromanage private implementation except public contracts (signatures, schemas, CLI grammar, errors).
+- NEVER micromanage private implementation except public contracts (signatures, schemas, CLI grammar, errors, valid and invalid examples).
 - NEVER omit Always / Ask first / Never boundaries, named failure and edge cases, codebase-informed files, or named verification commands.
 - NEVER create a slice that is not independently testable once its declared dependencies are done.
 - NEVER omit `.spec-finder/specs/<slug>-spec.md`.
-  That file is the agent-executable spec and must contain everything needed to implement and verify without chat history.
+  That file is the implementation prompt and must contain everything needed to implement and verify without chat history.
+- NEVER present a draft that fails `references/quality-bar.md` or still contains template placeholders.
+- NEVER omit Current System evidence (verified paths, callers/tests, and a current excerpt when the seam exists).
 - NEVER omit `_prd.md` or `_techspec.md`.
   The runner and `sf-execute-task` re-read those files.
 - NEVER run idea-factory council, KPI scoring, or 3-7 market-search depth on this path.
@@ -52,13 +55,13 @@ If they asked only for a PRD, TechSpec, or task regeneration, use that skill ins
 ## Mandatory phase checklist
 
 1. Resolve the packet and read existing artifacts.
-2. Research the repository and current docs.
+2. Research the repository and current docs into a current-system ledger.
 3. Present evidence and remaining decisions.
 4. Ask only the remaining material questions.
-5. Draft the complete packet (product, technical, slices) as one review.
+5. Draft the complete packet (prompt spec, product, technical, slices) as one review.
 6. Obtain explicit whole-draft approval.
 7. Write `.spec-finder/specs/<slug>-spec.md`, the runner packet, and missing memory.
-8. Re-read and validate.
+8. Re-read and validate against the quality bar.
 
 ## Workflow
 
@@ -77,12 +80,13 @@ If they asked only for a PRD, TechSpec, or task regeneration, use that skill ins
 Complete research before asking.
 Run independent tracks concurrently when the runtime can do real parallel work.
 
-**Repository track - required**
+**Repository track - required.** Capture a current-system ledger the spec will quote:
 
-- Inspect related flows, modules, interfaces, tests, fixtures, verification commands, and conventions.
-- Trace callers and consumers, not only the apparent target file.
-- Cite concrete paths.
-  Distinguish shipped behavior from comments or plans.
+- Current behavior versus desired behavior.
+- Related flows, modules, interfaces, callers, consumers, tests, fixtures, and conventions.
+- Exact verification commands from this repository.
+- 1-3 short current-code excerpts that show the seam (evidence of now, not the fix).
+- Distinguish shipped behavior from comments or plans.
 
 **Current-docs track - required when the change depends on an evolving library, SDK, protocol, CLI, or platform**
 
@@ -107,22 +111,24 @@ Present:
 
 ### 4. Draft the complete packet
 
-Read `references/spec-template.md`, `references/prd-template.md`, `references/techspec-template.md`, and `references/tasks-index-template.md`.
+Read `references/spec-template.md`, `references/quality-bar.md`, `references/prd-template.md`, `references/techspec-template.md`, and `references/tasks-index-template.md`.
 Read the sibling task contract: `../sf-create-tasks/references/task-template.md` and `../sf-create-tasks/references/task-context-schema.md`.
 If those sibling files are missing, stop.
 This path does not invent a second task format.
 
-Fill every required section below.
-Present the spec, product, technical, and slices together as one draft.
-The spec file is the complete agent-executable contract.
-Packet files are the runner projection of that same draft and must not diverge.
+Fill every required section below with repository facts, not writer notes.
+Strip every template placeholder.
+Run `references/quality-bar.md` and rewrite until it passes, then present the draft.
+The spec file is the complete implementation prompt.
+Packet files are the runner projection of that same draft and must not contradict it.
+The spec stays dense; do not shrink it to match packet brevity.
 Do not ask for section-by-section or stage-by-stage approval.
 
 **Agent-executable spec (`.spec-finder/specs/<slug>-spec.md`)**
 
 - Read `references/spec-template.md` and fill every section.
-- Include what/why, Out of Scope before In Scope, Given/When/Then, public contracts, Always / Ask first / Never, named failure cases, verified files, named verification commands, and independently testable slices.
-- An executor that reads only this file must be able to implement and verify.
+- Include outcome, current vs desired, Current System evidence, Out of Scope before In Scope, Given/When/Then plus a failure path, public contracts with examples, Always / Ask first / Never, named failure cases, read-first files, named verification commands, independently testable slices, and Output.
+- An executor pointed at only this file must be able to implement and verify.
 
 **Product (`_prd.md`)**
 
@@ -182,7 +188,7 @@ Create an ADR from `../sf-create-prd/references/adr-template.md` only for a cons
 
 Re-read every generated file and verify:
 
-- `.spec-finder/specs/<slug>-spec.md` exists, has no `<slug>` placeholder, and contains Execution, Problem, Out of Scope, In Scope, Acceptance, Contracts, Agent Boundaries, Failure and Edge Cases, Relevant Files, Verification, and Slices
+- `.spec-finder/specs/<slug>-spec.md` exists, has no `<slug>` or template placeholder, passes `references/quality-bar.md`, and contains Execution, Problem, Current System, Out of Scope, In Scope, Acceptance, Contracts, Agent Boundaries, Failure and Edge Cases, Relevant Files, Verification, Slices, and Output
 - `_prd.md` has what/why, Out of Scope before In Scope, and Given/When/Then stories
 - `_techspec.md` has technical non-goals, public contracts, Always / Ask first / Never, named failure cases, verified files, and named verification commands
 - every `task_NN.md` parses as Spec Finder frontmatter and its H1 title matches
@@ -192,11 +198,13 @@ Re-read every generated file and verify:
 - no acceptance line is "works correctly" or another untestable phrase
 
 Fix validation failures and repeat.
-Point to `spec-finder run <slug>` or `sf-execute-task` as the next step, not the four-skill pipeline.
+Point to the spec file as the prompt an agent executes, or `spec-finder run <slug>` / `sf-execute-task` for the runner packet, not the four-skill pipeline.
 
 ## Anti-patterns
 
 - Running the four existing skills in sequence and calling that simplified.
+- A stakeholder outline that restates the feature request with no files, contracts, or current excerpts.
+- Writer instructions or template placeholders left in the spec.
 - Market council, KPI scoring, or invented baselines.
 - Writing files before whole-draft approval.
 - Guessed file paths.
@@ -204,6 +212,7 @@ Point to `spec-finder run <slug>` or `sf-execute-task` as the next step, not the
 - Layer splits (schema, API, UI, tests) when an outcome slice is possible.
 - Forward dependencies such as `task_01` depending on `task_02`.
 - Generic "read the PRD" instructions that omit this packet's paths.
+- Shrinking the spec to match packet brevity.
 
 ## Failure rules
 
