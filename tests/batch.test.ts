@@ -202,6 +202,38 @@ describe("batch preflight and serial coordination", () => {
     ])
   })
 
+  test("invalid tdd.json in one slug fails preflight with zero runners", async () => {
+    const root = await createRoot()
+    await createPacket(root, "alpha")
+    const beta = await createPacket(root, "beta")
+    await createPacket(root, "gamma")
+    await writeFile(join(beta, "tdd.json"), `${JSON.stringify({ version: 1, packet: "core" })}\n`)
+    const calls: string[] = []
+    const runner: PacketRunner = async (options) => {
+      calls.push(options.slug)
+      return { ok: true, completed: 1, failed: 0, blocked: 0 }
+    }
+
+    const result = await runBatch({
+      root,
+      slugs: ["alpha", "beta", "gamma"],
+      config: DEFAULT_CONFIG,
+      signal: new AbortController().signal,
+      packetRunner: runner,
+    })
+
+    expect(calls).toEqual([])
+    expect(result).toEqual({
+      ok: false,
+      status: "preflight_failed",
+      packets: [
+        { slug: "alpha", outcome: "not_started" },
+        { slug: "beta", outcome: "not_started" },
+        { slug: "gamma", outcome: "not_started" },
+      ],
+    })
+  })
+
   test("stops after a failed middle packet and marks later packets not started", async () => {
     const root = await createRoot()
     await createPacket(root, "alpha")

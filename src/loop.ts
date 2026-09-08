@@ -21,6 +21,7 @@ import {
   type LoopState,
   type LoopTerminal,
 } from "./loop-state.ts"
+import { loadTddOptIn } from "./tdd-opt-in.ts"
 import {
   hasPendingCheckpointDelivery,
   isCompletedStatus,
@@ -171,6 +172,7 @@ export async function runLoop(options: LoopRunOptions): Promise<LoopResult> {
   if (issues.length > 0) {
     throw new Error(`task packet is invalid:\n${issues.map((issue) => `- ${relative(options.root, issue.path)}: ${issue.message}`).join("\n")}`)
   }
+  await loadTddOptIn(packet.directory, packet.tasks.map((task) => task.id))
 
   const bootstrapInput = {
     slug: options.slug,

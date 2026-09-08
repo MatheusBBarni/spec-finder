@@ -403,6 +403,7 @@ describe("runLoop", () => {
     expect(calls).toBe(0)
     expect(result.reason).toContain("dry-run")
     expect(await snapshotTree(packet)).toEqual(before)
+    expect(await Bun.file(join(packet, "tdd.json")).exists()).toBe(false)
     expect(await Bun.file(describeLoopPaths(packet).directory).exists()).toBe(false)
   })
 
@@ -512,5 +513,85 @@ describe("runLoop", () => {
     })
     expect(calls).toBe(1)
     expect(result.terminal).toBe("done")
+  })
+
+  test("invalid tdd.json dry-run does not call the runner or write loop state", async () => {
+    const { root, packet } = await createLoopPacket({
+      "task_01.md": diskTask("task_01", "pending", "Plan"),
+      "tdd.json": `${JSON.stringify({ version: 1, packet: "core" })}\n`,
+    })
+    const before = await snapshotTree(packet)
+    let calls = 0
+    await expect(runLoop({
+      root,
+      slug: "demo-packet",
+      config: DEFAULT_CONFIG,
+      signal: new AbortController().signal,
+      emit: () => undefined,
+      interactivePermissions: false,
+      dryRun: true,
+      runTaskPacket: async () => {
+        calls += 1
+        return okResult
+      },
+    })).rejects.toThrow("invalid tdd.json")
+    expect(calls).toBe(0)
+    expect(await snapshotTree(packet)).toEqual(before)
+    expect(await Bun.file(describeLoopPaths(packet).directory).exists()).toBe(false)
+  })
+
+  test("invalid tdd.json start does not call the runner or write loop/state.json", async () => {
+    const { root, packet } = await createLoopPacket({
+      "task_01.md": diskTask("task_01", "pending", "Plan"),
+      "tdd.json": `${JSON.stringify({ version: 1, packet: "core" })}\n`,
+    })
+    let calls = 0
+    await expect(runLoop({
+      root,
+      slug: "demo-packet",
+      config: DEFAULT_CONFIG,
+      signal: new AbortController().signal,
+      emit: () => undefined,
+      interactivePermissions: false,
+      runTaskPacket: async () => {
+        calls += 1
+        return okResult
+      },
+    })).rejects.toThrow("invalid tdd.json")
+    expect(calls).toBe(0)
+    expect(await Bun.file(describeLoopPaths(packet).statePath).exists()).toBe(false)
+  })
+
+  test("reset-state rewrites the ledger and leaves tdd.json bytes unchanged", async () => {
+    const sidecar = `${JSON.stringify({ version: 1, packet: "tdd" }, null, 2)}\n`
+    const { root, packet } = await createLoopPacket({
+      "task_01.md": diskTask("task_01", "completed", "Already done"),
+      "tdd.json": sidecar,
+    })
+    const initial = await initLoopState(packet, { slug: "demo-packet" })
+    await writeLoopState(packet, parseLoopState({
+      ...initial,
+      iteration: 4,
+    }))
+    const beforeSidecar = await readFile(join(packet, "tdd.json"))
+    let calls = 0
+    const result = await runLoop({
+      root,
+      slug: "demo-packet",
+      config: DEFAULT_CONFIG,
+      signal: new AbortController().signal,
+      emit: () => undefined,
+      interactivePermissions: false,
+      resetState: true,
+      runTaskPacket: async () => {
+        calls += 1
+        return okResult
+      },
+    })
+    expect(calls).toBe(0)
+    expect(result.terminal).toBe("no_op")
+    expect(Buffer.from(await readFile(join(packet, "tdd.json"))).equals(Buffer.from(beforeSidecar))).toBeTrue()
+    const ledgerAfter = JSON.parse(await readFile(describeLoopPaths(packet).statePath, "utf8")) as { iteration: number }
+    expect(ledgerAfter.iteration).toBe(0)
   })
 })
