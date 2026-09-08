@@ -1,0 +1,372 @@
+---
+interface Props {
+  title: string
+  description: string
+}
+
+const { title, description } = Astro.props
+const base = import.meta.env.BASE_URL.endsWith("/")
+  ? import.meta.env.BASE_URL
+  : `${import.meta.env.BASE_URL}/`
+const homeHref = base
+const gettingStartedHref = `${base}getting-started/`
+const onGettingStarted = Astro.url.pathname.includes("getting-started")
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <link rel="icon" type="image/svg+xml" href={`${base}favicon.svg`} />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <title>{title}</title>
+  </head>
+  <body>
+    <a class="skip" href="#content">Skip to content</a>
+    <header class="site-header">
+      <div class="wrap header-inner">
+        <a class="brand" href={homeHref}>Spec Finder</a>
+        <nav>
+          <a href={homeHref} aria-current={onGettingStarted ? undefined : "page"}>Home</a>
+          <a
+            href={gettingStartedHref}
+            aria-current={onGettingStarted ? "page" : undefined}>Getting started</a
+          >
+        </nav>
+      </div>
+    </header>
+    <main id="content" class="wrap">
+      <slot />
+    </main>
+    <footer class="site-footer">
+      <div class="wrap">
+        <p>
+          Spec Finder is a local CLI. The README remains the operator manual.
+        </p>
+        <p>
+          <a href="https://github.com/MatheusBBarni/spec-finder">GitHub</a>
+          ·
+          <a href="https://www.npmjs.com/package/spec-finder">npm</a>
+        </p>
+      </div>
+    </footer>
+  </body>
+</html>
+
+<style is:global>
+  :root {
+    color-scheme: dark;
+    --bg: #0f172a;
+    --bg-raised: #1e293b;
+    --bg-code: #0b1220;
+    --fg: #f8fafc;
+    --muted: #cbd5e1;
+    --line: #334155;
+    --accent: #4ade80;
+    --accent-text: #052e16;
+    --link: #86efac;
+    --max: 72rem;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.55;
+  }
+
+  .skip {
+    position: absolute;
+    left: -999px;
+    top: 0;
+  }
+
+  .skip:focus {
+    left: 1rem;
+    top: 1rem;
+    z-index: 3;
+    background: var(--bg-raised);
+    color: var(--fg);
+    padding: 0.5rem 0.75rem;
+  }
+
+  .wrap {
+    width: min(100%, var(--max));
+    margin: 0 auto;
+    padding: 0 1.25rem;
+  }
+
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    border-bottom: 1px solid var(--line);
+    backdrop-filter: blur(10px);
+  }
+
+  .header-inner,
+  nav {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .header-inner {
+    justify-content: space-between;
+    min-height: 3.5rem;
+  }
+
+  nav a {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 0.2rem;
+  }
+
+  nav a[aria-current="page"] {
+    color: var(--fg);
+    text-decoration: none;
+    box-shadow: inset 0 -2px 0 var(--accent);
+  }
+
+  .brand {
+    font-weight: 700;
+    color: var(--fg);
+    text-decoration: none;
+    letter-spacing: -0.02em;
+  }
+
+  main.wrap {
+    padding-top: 2.5rem;
+    padding-bottom: 4rem;
+  }
+
+  a {
+    color: var(--link);
+    cursor: pointer;
+  }
+
+  a:focus-visible,
+  .btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+    color: var(--fg);
+  }
+
+  h1 {
+    font-size: clamp(2rem, 4vw, 3rem);
+    margin: 0 0 0.75rem;
+  }
+
+  h2 {
+    font-size: 1.35rem;
+    margin: 2.5rem 0 0.85rem;
+  }
+
+  h3 {
+    font-size: 1.05rem;
+    margin: 0 0 0.4rem;
+  }
+
+  p {
+    margin: 0 0 1rem;
+    color: var(--muted);
+    max-width: 46rem;
+  }
+
+  p strong,
+  li {
+    color: var(--fg);
+  }
+  .hero {
+    display: grid;
+    gap: 0.25rem;
+    padding-bottom: 1.75rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .hero pre {
+    max-width: 46rem;
+  }
+  code,
+  kbd,
+  .mono {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.9em;
+  }
+
+  p code,
+  li code,
+  td code {
+    background: var(--bg-raised);
+    padding: 0.1em 0.35em;
+  }
+
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1rem;
+    align-items: center;
+    margin: 1.25rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding: 0.55rem 1rem;
+    background: var(--accent);
+    color: var(--accent-text);
+    font-weight: 600;
+    text-decoration: none;
+    border: 1px solid var(--accent);
+    cursor: pointer;
+    transition: background-color 180ms ease, color 180ms ease;
+  }
+
+  .btn:hover {
+    background: #86efac;
+  }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--fg);
+    border-color: var(--line);
+  }
+
+  .btn-ghost:hover {
+    border-color: var(--fg);
+    background: var(--bg-raised);
+  }
+
+  .grid {
+    display: grid;
+    gap: 0.85rem;
+  }
+
+  @media (min-width: 720px) {
+    .grid.features {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .grid.split {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  .card {
+    background: var(--bg-raised);
+    border: 1px solid var(--line);
+    padding: 1rem 1.1rem;
+  }
+
+  .card p:last-child {
+    margin-bottom: 0;
+  }
+
+  .steps {
+    display: grid;
+    gap: 0.65rem;
+    margin: 0 0 1.5rem;
+    padding: 0;
+    list-style: none;
+  }
+
+  @media (min-width: 800px) {
+    .steps {
+      grid-template-columns: repeat(4, 1fr);
+    }
+  }
+
+  .steps li {
+    background: var(--bg-raised);
+    border: 1px solid var(--line);
+    padding: 0.9rem 1rem;
+  }
+
+  .steps .n {
+    display: block;
+    color: var(--accent);
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.8rem;
+    margin-bottom: 0.35rem;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+    margin: 0 0 1.5rem;
+    border: 1px solid var(--line);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95rem;
+  }
+
+  th,
+  td {
+    text-align: left;
+    padding: 0.7rem 0.85rem;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+
+  th {
+    background: var(--bg-raised);
+    font-weight: 600;
+  }
+
+  tr:last-child td {
+    border-bottom: 0;
+  }
+
+  .site-footer {
+    border-top: 1px solid var(--line);
+    padding: 1.5rem 0 2rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+
+  .site-footer p {
+    margin-bottom: 0.4rem;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .btn,
+    .btn-ghost {
+      transition: none;
+    }
+  }
+</style>

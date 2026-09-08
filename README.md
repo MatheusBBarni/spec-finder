@@ -2,6 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/spec-finder.svg)](https://www.npmjs.com/package/spec-finder)
 [![Bun](https://img.shields.io/badge/bun-%3E%3D1.3-black)](https://bun.sh)
+[![Website](https://img.shields.io/badge/website-GitHub%20Pages-0f1115)](https://matheusbbarni.github.io/spec-finder/)
 
 A skill-driven specification framework with a local ACP cockpit, heavily inspired by Compozy. It brings back the compact workflow that made pre-0.3 Compozy useful—idea → PRD → TechSpec → executable tasks—without adding a daemon or a second source of truth.
 

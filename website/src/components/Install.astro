@@ -1,0 +1,138 @@
+---
+interface Props {
+  group: string
+}
+
+const { group } = Astro.props
+
+const managers = [
+  {
+    id: "npm",
+    label: "npm",
+    command: "npm install --global spec-finder",
+  },
+  {
+    id: "bun",
+    label: "bun",
+    command: "bun add --global spec-finder",
+  },
+  {
+    id: "pnpm",
+    label: "pnpm",
+    command: "pnpm add --global spec-finder",
+  },
+  {
+    id: "yarn",
+    label: "yarn",
+    command: "yarn global add spec-finder",
+  },
+]
+---
+
+<div class="pkg">
+  {
+    managers.map((manager, index) => (
+      <input
+        class:list={["sel", `sel-${manager.id}`]}
+        type="radio"
+        name={group}
+        id={`${group}-${manager.id}`}
+        checked={index === 0}
+      />
+    ))
+  }
+  <div class="pkg-tabs" role="tablist" aria-label="Package manager">
+    {
+      managers.map((manager) => (
+        <label for={`${group}-${manager.id}`}>{manager.label}</label>
+      ))
+    }
+  </div>
+  {
+    managers.map((manager) => (
+      <pre class:list={["panel", `panel-${manager.id}`]}><code>{manager.command}</code></pre>
+    ))
+  }
+</div>
+
+<style>
+  .pkg {
+    position: relative;
+    max-width: 46rem;
+    margin: 0 0 1.25rem;
+    background: var(--bg-code);
+    border: 1px solid var(--line);
+  }
+
+  .sel {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .pkg-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .pkg-tabs label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding: 0 1rem;
+    color: var(--muted);
+    cursor: pointer;
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85rem;
+  }
+
+  .pkg-tabs label:hover {
+    color: var(--fg);
+  }
+  .panel {
+    display: none;
+    margin: 0;
+    border: 0;
+    background: transparent;
+    padding: 1rem 1.1rem;
+  }
+
+  .sel-npm:checked ~ .pkg-tabs label[for$="-npm"],
+  .sel-bun:checked ~ .pkg-tabs label[for$="-bun"],
+  .sel-pnpm:checked ~ .pkg-tabs label[for$="-pnpm"],
+  .sel-yarn:checked ~ .pkg-tabs label[for$="-yarn"] {
+    color: var(--fg);
+    box-shadow: inset 0 -2px 0 var(--accent);
+  }
+
+  .sel-npm:checked ~ .panel-npm,
+  .sel-bun:checked ~ .panel-bun,
+  .sel-pnpm:checked ~ .panel-pnpm,
+  .sel-yarn:checked ~ .panel-yarn {
+    display: block;
+  }
+
+  .sel:focus-visible + .pkg-tabs,
+  .sel-npm:focus-visible ~ .pkg-tabs label[for$="-npm"],
+  .sel-bun:focus-visible ~ .pkg-tabs label[for$="-bun"],
+  .sel-pnpm:focus-visible ~ .pkg-tabs label[for$="-pnpm"],
+  .sel-yarn:focus-visible ~ .pkg-tabs label[for$="-yarn"] {
+    outline: none;
+  }
+
+  .sel-npm:focus-visible ~ .pkg-tabs label[for$="-npm"],
+  .sel-bun:focus-visible ~ .pkg-tabs label[for$="-bun"],
+  .sel-pnpm:focus-visible ~ .pkg-tabs label[for$="-pnpm"],
+  .sel-yarn:focus-visible ~ .pkg-tabs label[for$="-yarn"] {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+</style>

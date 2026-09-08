@@ -1,0 +1,138 @@
+---
+import Layout from "../layouts/Layout.astro"
+import Install from "../components/Install.astro"
+
+const base = import.meta.env.BASE_URL.endsWith("/")
+  ? import.meta.env.BASE_URL
+  : `${import.meta.env.BASE_URL}/`
+---
+
+<Layout
+  title="Getting started · Spec Finder"
+  description="Install Spec Finder, run setup, and execute a feature packet."
+>
+  <h1>Getting started</h1>
+  <p class="lede">
+    Requires Bun 1.3 or newer and one supported ACP provider already usable on
+    the machine.
+  </p>
+
+  <h2>Install and run</h2>
+  <Install group="getting-started-install" />
+  <pre><code>cd /path/to/project
+spec-finder setup
+spec-finder run my-feature</code></pre>
+  <p>
+    Once the package is current, <code>spec-finder refresh</code> recopies
+    managed skills into this workspace's saved destination and scope without
+    changing provider, model, or scope.
+  </p>
+
+  <h2>What setup creates</h2>
+  <pre><code>.spec-finder/
+├── .gitignore
+├── config.json
+├── specs/
+└── tasks/</code></pre>
+  <p>
+    <code>.spec-finder/.gitignore</code> ignores <code>tasks/</code>,
+    <code>tasks_done/</code>, and <code>specs/</code> when those entries are
+    missing. Packet and spec files stay out of git. The workspace root
+    <code>.gitignore</code> is left alone. <code>.spec-finder/config.json</code>
+    remains eligible to commit.
+  </p>
+
+  <h2>Setup options</h2>
+  <p>
+    In an interactive terminal, <code>setup</code> resolves exactly one provider
+    and asks for its installation scope, model, and speed. Supplying a flag
+    skips only that choice's picker. <code>--copy</code> remains accepted for
+    compatibility and is the only installation mode.
+  </p>
+  <pre><code>spec-finder setup [--agent claude|codex|cursor|grok|pi] [--model auto|CURATED] \
+  [--speed auto|normal|fast] [--local|--global] [--copy]</code></pre>
+  <p>
+    Fresh setup defaults to Codex, <code>gpt-5.6-luna</code>,
+    <code>normal</code> speed, and local scope.
+  </p>
+
+  <h2>Skill destinations</h2>
+  <p>
+    Scaffolding always stays in the current project. Skill destinations are
+    derived from the selected provider and scope:
+  </p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Provider</th>
+          <th>Local skills</th>
+          <th>Global skills</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Claude</td>
+          <td><code>.claude/skills</code></td>
+          <td><code>~/.claude/skills</code></td>
+        </tr>
+        <tr>
+          <td>Codex</td>
+          <td><code>.agents/skills</code></td>
+          <td><code>~/.agents/skills</code></td>
+        </tr>
+        <tr>
+          <td>Cursor</td>
+          <td><code>.agents/skills</code></td>
+          <td><code>~/.agents/skills</code></td>
+        </tr>
+        <tr>
+          <td>Grok Build</td>
+          <td><code>.agents/skills</code></td>
+          <td><code>~/.agents/skills</code></td>
+        </tr>
+        <tr>
+          <td>Pi</td>
+          <td><code>.agents/skills</code></td>
+          <td><code>~/.agents/skills</code></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    Cursor's existing <code>.cursor/skills</code> and leftover
+    <code>.pi/skills</code> content are preserved untouched. Setup copies
+    managed skills only to the provider destination above.
+  </p>
+
+  <h2>Using skills after setup</h2>
+  <div class="grid split">
+    <article class="card">
+      <h3>One-shot spec</h3>
+      <p>
+        Ask the agent for <code>sf-write-spec</code> when the request is already
+        clear. That skill writes
+        <code>.spec-finder/specs/&lt;slug&gt;-spec.md</code> and the runner
+        packet.
+      </p>
+    </article>
+    <article class="card">
+      <h3>Full pipeline</h3>
+      <p>
+        <code>sf-idea-factory</code> → <code>sf-create-prd</code> →
+        <code>sf-create-techspec</code> → <code>sf-create-tasks</code>, then
+        <code>spec-finder run my-feature</code>.
+      </p>
+    </article>
+  </div>
+  <pre><code>spec-finder run my-feature --no-ui
+spec-finder run my-feature --provider pi --model auto --reasoning auto
+spec-finder loop my-feature --dry-run
+spec-finder loop my-feature</code></pre>
+  <p>
+    Grok Build and Pi are packet-only. Authenticate those providers outside Spec
+    Finder. Full operator notes stay in the
+    <a href="https://github.com/MatheusBBarni/spec-finder">repository README</a>.
+    Back to <a href={base}>home</a>.
+  </p>
+</Layout>
