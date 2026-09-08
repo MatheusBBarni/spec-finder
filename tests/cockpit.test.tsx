@@ -1409,6 +1409,109 @@ describe("read-only progress cockpit", () => {
       await destroy(batchScreen)
     }
   })
+
+  test("presents loop no_op as successful already-complete stop chrome", async () => {
+    const store = loopFinishedStore("no_op")
+    const screen = await render(store, 80, 24)
+    try {
+      const frame = screen.captureCharFrame()
+      expect(frame).toContain("LOOP.STATUS")
+      expect(frame).toContain("LOOP NO_OP")
+      expect(frame).toContain("Already complete")
+      expect(frame).toContain("nothing to do")
+      expect(frame).toContain("EXIT")
+      expect(frame).not.toContain("RUN.FAILURES")
+      expect(frame).not.toContain("All Tasks Complete")
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+  test("presents exhausted and stalled as cap-stops not complete or failed-task-only", async () => {
+    for (const terminal of ["exhausted", "stalled"] as const) {
+      const store = loopFinishedStore(terminal)
+      const screen = await render(store, 80, 24)
+      try {
+        const frame = screen.captureCharFrame()
+        expect(frame).toContain("LOOP.STATUS")
+        expect(frame).toContain(`LOOP ${terminal.toUpperCase()}`)
+        expect(frame).not.toContain("All Tasks Complete")
+        expect(frame).not.toContain("RUN.FAILURES")
+        expect(frame).not.toContain("FAIL task_01")
+        expect(frame).toContain("DISMISS")
+      } finally {
+        await destroy(screen)
+      }
+    }
+  })
+
+  test("keeps the surfaced task error on loop failed and distinguishes blocked", async () => {
+    const failedStore = new CockpitStore()
+    failedStore.consume({
+      type: "loop_started",
+      slug: "demo",
+      iteration: 0,
+      maxIterations: 50,
+      noProgressWindow: 3,
+    })
+    failedStore.consume({ type: "run_started", slug: "demo", config: DEFAULT_CONFIG, tasks: [task(1, "Boom")] })
+    failedStore.consume({ type: "task_status", taskId: "task_01", status: "failed" })
+    failedStore.consume({ type: "activity", taskId: "task_01", message: "Provider connection failed" })
+    failedStore.consume({
+      type: "loop_finished",
+      slug: "demo",
+      terminal: "failed",
+      reason: "task failed",
+      iteration: 1,
+      maxIterations: 50,
+      noProgressWindow: 3,
+    })
+    const failedScreen = await render(failedStore, 120, 40)
+    try {
+      const frame = failedScreen.captureCharFrame()
+      expect(frame).toContain("LOOP.STATUS")
+      expect(frame).toContain("Loop failed")
+      expect(frame).toContain("OUTCOME: FAILED")
+      expect(frame).toContain("Provider connection failed")
+    } finally {
+      await destroy(failedScreen)
+    }
+
+    const blockedStore = loopFinishedStore("blocked")
+    const blockedScreen = await render(blockedStore, 80, 24)
+    try {
+      const frame = blockedScreen.captureCharFrame()
+      expect(frame).toContain("LOOP.STATUS")
+      expect(frame).toContain("LOOP BLOCKED")
+      expect(frame).toContain("not ordinary task failure")
+      expect(frame).not.toContain("RUN.FAILURES")
+      expect(frame).not.toContain("FAIL task_01")
+    } finally {
+      await destroy(blockedScreen)
+    }
+  })
+
+  test("uses cancellation language for loop cancelled and leaves run overlays unchanged", async () => {
+    const cancelledStore = loopFinishedStore("cancelled")
+    const cancelledScreen = await render(cancelledStore, 80, 24)
+    try {
+      const frame = cancelledScreen.captureCharFrame()
+      expect(frame).toContain("LOOP CANCELLED")
+      expect(frame).toContain("Loop cancelled")
+      expect(frame).not.toContain("RUN.FAILURES")
+      expect(frame).not.toContain("FAIL task_01")
+    } finally {
+      await destroy(cancelledScreen)
+    }
+
+    const runScreen = await render(startedStore([task(1, "Single run")]), 80, 24)
+    try {
+      expect(runScreen.captureCharFrame()).not.toContain("LOOP.STATUS")
+    } finally {
+      await destroy(runScreen)
+    }
+  })
+
 })
 
 describe("cockpit session lifecycle", () => {
@@ -1462,6 +1565,29 @@ function startedStore(
   store.consume({ type: "run_started", slug: "demo", config, tasks })
   return store
 }
+
+function loopFinishedStore(terminal: "done" | "no_op" | "blocked" | "failed" | "exhausted" | "stalled" | "cancelled"): CockpitStore {
+  const store = new CockpitStore()
+  store.consume({
+    type: "loop_started",
+    slug: "demo",
+    iteration: 0,
+    maxIterations: 50,
+    noProgressWindow: 3,
+  })
+  store.consume({ type: "run_started", slug: "demo", config: DEFAULT_CONFIG, tasks: [task(1, "Live")] })
+  store.consume({
+    type: "loop_finished",
+    slug: "demo",
+    terminal,
+    reason: `${terminal} reason`,
+    iteration: 1,
+    maxIterations: 50,
+    noProgressWindow: 3,
+  })
+  return store
+}
+
 
 function startedBatchStore(
   slugs: string[],

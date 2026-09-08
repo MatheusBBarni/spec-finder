@@ -306,6 +306,7 @@ export class CockpitStore {
 
   private consumeLoopFinished(event: LoopFinishedEvent): void {
     if (!acceptedLoopMetrics(event) || this.state.loopSession === null) return
+    const ok = event.terminal === "done" || event.terminal === "no_op"
     this.set({
       ...this.state,
       loopSession: {
@@ -317,6 +318,11 @@ export class CockpitStore {
         terminal: event.terminal,
         reason: event.reason,
       },
+      finished: {
+        ok,
+        message: event.reason,
+      },
+      activeTaskId: null,
     })
   }
 

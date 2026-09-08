@@ -1554,6 +1554,40 @@ dependencies: []
       await rm(root, { recursive: true, force: true })
     }
   })
+
+  test("keeps no_op wait-for-exit and dismisses non-success except cancelled", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-loop-waits-"))
+    try {
+      async function waitsFor(terminal: "done" | "no_op" | "blocked" | "failed" | "exhausted" | "stalled" | "cancelled") {
+        let exits = 0
+        let dismissals = 0
+        await loopCommand(["demo"], {
+          root,
+          input: { isTTY: true },
+          output: commandOutput(true).output,
+          loadConfig: async () => DEFAULT_CONFIG,
+          startCockpit: async () => ({
+            close() {},
+            waitForDismissal: async () => { dismissals += 1 },
+            waitForExit: async () => { exits += 1 },
+          }),
+          runLoop: async () => ({ terminal, reason: terminal, iteration: 0, slug: "demo" }),
+        })
+        return { exits, dismissals }
+      }
+
+      expect(await waitsFor("no_op")).toEqual({ exits: 1, dismissals: 0 })
+      expect(await waitsFor("blocked")).toEqual({ exits: 0, dismissals: 1 })
+      expect(await waitsFor("failed")).toEqual({ exits: 0, dismissals: 1 })
+      expect(await waitsFor("exhausted")).toEqual({ exits: 0, dismissals: 1 })
+      expect(await waitsFor("stalled")).toEqual({ exits: 0, dismissals: 1 })
+      expect(await waitsFor("done")).toEqual({ exits: 0, dismissals: 0 })
+      expect(await waitsFor("cancelled")).toEqual({ exits: 0, dismissals: 0 })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
 })
 
 describe("refresh command", () => {

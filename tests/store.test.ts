@@ -1077,7 +1077,55 @@ describe("cockpit store", () => {
     expect(store.getSnapshot().loopSession).toBeNull()
   })
 
-  test("stores loop_finished terminal without opening run finished chrome", () => {
+  test("maps loop_finished done and no_op to finished.ok", () => {
+    for (const terminal of ["done", "no_op"] as const) {
+      const store = new CockpitStore()
+      store.consume({
+        type: "loop_started",
+        slug: "demo",
+        iteration: 0,
+        maxIterations: 50,
+        noProgressWindow: 3,
+      })
+      store.consume({
+        type: "loop_finished",
+        slug: "demo",
+        terminal,
+        reason: `${terminal} reason`,
+        iteration: 0,
+        maxIterations: 50,
+        noProgressWindow: 3,
+      })
+      expect(store.getSnapshot().loopSession?.terminal).toBe(terminal)
+      expect(store.getSnapshot().finished).toEqual({ ok: true, message: `${terminal} reason` })
+    }
+  })
+
+  test("maps blocked failed exhausted and stalled to finished.ok false", () => {
+    for (const terminal of ["blocked", "failed", "exhausted", "stalled"] as const) {
+      const store = new CockpitStore()
+      store.consume({
+        type: "loop_started",
+        slug: "demo",
+        iteration: 0,
+        maxIterations: 50,
+        noProgressWindow: 3,
+      })
+      store.consume({
+        type: "loop_finished",
+        slug: "demo",
+        terminal,
+        reason: `${terminal} reason`,
+        iteration: 1,
+        maxIterations: 50,
+        noProgressWindow: 3,
+      })
+      expect(store.getSnapshot().finished?.ok).toBe(false)
+      expect(store.getSnapshot().loopSession?.terminal).toBe(terminal)
+    }
+  })
+
+  test("records cancelled without treating it as a run task failure payload", () => {
     const store = new CockpitStore()
     store.consume({
       type: "loop_started",
@@ -1089,15 +1137,17 @@ describe("cockpit store", () => {
     store.consume({
       type: "loop_finished",
       slug: "demo",
-      terminal: "no_op",
-      reason: "nothing pending",
+      terminal: "cancelled",
+      reason: "operator or ACP abort",
       iteration: 0,
       maxIterations: 50,
       noProgressWindow: 3,
     })
-    expect(store.getSnapshot().loopSession?.terminal).toBe("no_op")
-    expect(store.getSnapshot().finished).toBeNull()
+    expect(store.getSnapshot().loopSession?.terminal).toBe("cancelled")
+    expect(store.getSnapshot().finished).toEqual({ ok: false, message: "operator or ACP abort" })
+    expect(store.getSnapshot().finished?.outcome).toBeUndefined()
   })
+
 })
 
 function startedStore(tasks: TaskFile[]): CockpitStore {
