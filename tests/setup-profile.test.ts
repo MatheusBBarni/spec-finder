@@ -90,6 +90,7 @@ describe("setup provider policy", () => {
   test("canonicalizes selected skills and rejects empty, unknown, or duplicate names", () => {
     expect(resolveSetupSkills()).toEqual([...SPEC_FINDER_SKILLS])
     expect(resolveSetupSkills(["sf-memory", "sf-write-spec"])).toEqual(["sf-write-spec", "sf-memory"])
+    expect(resolveSetupSkills(["sf-review"])).toEqual(["sf-archive-tasks", "sf-review"])
     expect(() => resolveSetupSkills([])).toThrow("at least one skill")
     expect(() => resolveSetupSkills(["sf-memory", "nope"])).toThrow("unsupported setup skill: nope")
     expect(() => resolveSetupSkills(["sf-memory", "sf-memory"])).toThrow("duplicate setup skill: sf-memory")

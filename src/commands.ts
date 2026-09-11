@@ -1365,6 +1365,13 @@ function writeJson(output: Writable, value: unknown): void {
   output.write(`${JSON.stringify(value)}\n`)
 }
 
+function sanitizeTerminalText(value: string): string {
+  return value.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/gu, (character) => {
+    const codePoint = character.codePointAt(0) ?? 0
+    return `\\u${codePoint.toString(16).padStart(4, "0")}`
+  })
+}
+
 export interface LsCommandOptions {
   root?: string
   output?: Writable
@@ -1384,7 +1391,7 @@ export async function lsCommand(args: readonly string[], options: LsCommandOptio
     if (json) {
       writeJson(error, { ok: false, code: "invalid_invocation", message })
     } else {
-      error.write(`${message}\n${LS_USAGE}\n`)
+      error.write(`${sanitizeTerminalText(message)}\n${LS_USAGE}\n`)
     }
     return 2
   }
@@ -1393,7 +1400,7 @@ export async function lsCommand(args: readonly string[], options: LsCommandOptio
   const result = await listActivePackets(root)
   if (!result.ok) {
     if (json) writeJson(error, result)
-    else error.write(`${result.message}\n`)
+    else error.write(`${sanitizeTerminalText(result.message)}\n`)
     return 2
   }
   if (json) {
@@ -1405,8 +1412,8 @@ export async function lsCommand(args: readonly string[], options: LsCommandOptio
     return 0
   }
   for (const row of result.rows) {
-    const detail = row.kind === "invalid" && row.detail !== undefined ? ` ${row.detail}` : ""
-    output.write(`${row.slug} ${row.kind} ${row.completed}/${row.total}${detail}\n`)
+    const detail = row.kind === "invalid" && row.detail !== undefined ? ` ${sanitizeTerminalText(row.detail)}` : ""
+    output.write(`${sanitizeTerminalText(row.slug)} ${row.kind} ${row.completed}/${row.total}${detail}\n`)
   }
   return 0
 }
@@ -1440,7 +1447,7 @@ export async function inspectCommand(args: readonly string[], options: InspectCo
     if (json) {
       writeJson(error, { ok: false, code: "invalid_invocation", message: invocationMessage })
     } else {
-      error.write(`${invocationMessage}\n${INSPECT_USAGE}\n`)
+      error.write(`${sanitizeTerminalText(invocationMessage)}\n${INSPECT_USAGE}\n`)
     }
     return 2
   }
@@ -1449,7 +1456,7 @@ export async function inspectCommand(args: readonly string[], options: InspectCo
   if (!isValidTaskSlug(argument)) {
     const result = { ok: false as const, code: "invalid_slug" as const, message: `invalid task slug: ${argument}` }
     if (json) writeJson(error, result)
-    else error.write(`${result.message}\n${INSPECT_USAGE}\n`)
+    else error.write(`${sanitizeTerminalText(result.message)}\n${INSPECT_USAGE}\n`)
     return 2
   }
 
@@ -1458,8 +1465,8 @@ export async function inspectCommand(args: readonly string[], options: InspectCo
   if (!result.ok) {
     if (json) writeJson(error, result)
     else {
-      const issues = result.issues?.map((issue) => `- ${issue}`).join("\n")
-      error.write(issues === undefined ? `${result.message}\n` : `${result.message}\n${issues}\n`)
+      const issues = result.issues?.map((issue) => `- ${sanitizeTerminalText(issue)}`).join("\n")
+      error.write(issues === undefined ? `${sanitizeTerminalText(result.message)}\n` : `${sanitizeTerminalText(result.message)}\n${issues}\n`)
     }
     return 2
   }
@@ -1468,16 +1475,16 @@ export async function inspectCommand(args: readonly string[], options: InspectCo
     return 0
   }
 
-  const remaining = result.remaining.map((task) => task.id).join(" ")
-  output.write(`${result.slug} ${result.kind} ${result.completed}/${result.total}\n`)
+  const remaining = result.remaining.map((task) => sanitizeTerminalText(task.id)).join(" ")
+  output.write(`${sanitizeTerminalText(result.slug)} ${result.kind} ${result.completed}/${result.total}\n`)
   output.write(`remaining: ${remaining}\n`)
   for (const blocker of result.blockers) {
-    output.write(`${blocker.taskId} ${blocker.kind}: ${blocker.message}\n`)
+    output.write(`${sanitizeTerminalText(blocker.taskId)} ${blocker.kind}: ${sanitizeTerminalText(blocker.message)}\n`)
   }
   if (result.loop.state === "absent") output.write("loop: absent\n")
   else if (result.loop.state === "none") output.write("loop: none\n")
-  else if (result.loop.state === "terminal") output.write(`loop: terminal ${result.loop.terminal}\n`)
-  else output.write(`loop: ledger invalid: ${result.loop.message}\n`)
+  else if (result.loop.state === "terminal") output.write(`loop: terminal ${sanitizeTerminalText(result.loop.terminal)}\n`)
+  else output.write(`loop: ledger invalid: ${sanitizeTerminalText(result.loop.message)}\n`)
   return 0
 }
 

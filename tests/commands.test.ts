@@ -1897,6 +1897,39 @@ ${body}
       await rm(root, { recursive: true, force: true })
     }
   })
+  test("escapes control characters in human-readable inspection output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-inspection-controls-"))
+    try {
+      const tasks = join(root, ".spec-finder", "tasks")
+      const invalidSlug = "bad\nslug"
+      const blocked = join(tasks, "blocked")
+      await mkdir(join(tasks, invalidSlug), { recursive: true })
+      await mkdir(blocked, { recursive: true })
+      await writeFile(join(blocked, "task_01.md"), task(
+        1,
+        "Blocked delivery",
+        "completed",
+        `handoff:
+  phase: report
+  error: "blocked-\\u001b[31m"
+`,
+      ))
+
+      const listOutput = commandOutput()
+      const listError = commandOutput()
+      expect(await lsCommand([], { root, output: listOutput.output, error: listError.output })).toBe(0)
+      expect(listOutput.text()).toContain("bad\\u000aslug invalid")
+      expect(listOutput.text()).not.toContain(invalidSlug)
+
+      const inspectOutput = commandOutput()
+      const inspectError = commandOutput()
+      expect(await inspectCommand(["blocked"], { root, output: inspectOutput.output, error: inspectError.output })).toBe(0)
+      expect(inspectOutput.text()).toContain("blocked-\\u001b[31m")
+      expect(inspectOutput.text()).not.toContain(`${String.fromCharCode(27)}[31m`)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 
   test("rejects ls arguments and missing tasks directory", async () => {
     const root = await mkdtemp(join(tmpdir(), "spec-finder-ls-errors-"))

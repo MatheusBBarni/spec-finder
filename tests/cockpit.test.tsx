@@ -365,6 +365,24 @@ describe("read-only progress cockpit", () => {
     }
   })
 
+  test("keeps the batch footer complete at the standard terminal width", async () => {
+    const store = startedBatchStore(
+      ["alpha", "beta"],
+      0,
+      [task(1, "Alpha task")],
+      DEFAULT_CONFIG,
+      [[task(1, "Alpha task")], [task(1, "Beta task")]],
+    )
+    const screen = await render(store, 80, 24)
+    try {
+      const frame = screen.captureCharFrame()
+      expect(frame).toContain("[TAB/⇧] FOCUS")
+      expect(frame).toContain("[Q] EXIT")
+    } finally {
+      await destroy(screen)
+    }
+  })
+
   test("shows the failed packet diagnostic and approved recovery guidance", async () => {
     const store = startedBatchStore(["alpha", "beta", "gamma"], 0, [task(1, "Alpha task")])
     store.consume({ type: "batch_packet_finished", slug: "alpha", index: 0, outcome: "succeeded", detail: "completed" })
@@ -873,7 +891,7 @@ describe("read-only progress cockpit", () => {
       await pressTab(screen)
       expect(store.getSnapshot().focusedPane).toBe("transcript")
       expect(screen.captureCharFrame()).toContain("FOCUS TRANSCRIPT")
-      expect(screen.captureCharFrame()).toContain("[TAB/SHIFT+TAB] FOCUS")
+      expect(screen.captureCharFrame()).toContain("[TAB/⇧] FOCUS")
       await press(screen, KeyCodes.HOME)
       expect(transcript.scrollTop).toBe(0)
       expect(screen.captureCharFrame()).toContain("HISTORY-LINE-000")

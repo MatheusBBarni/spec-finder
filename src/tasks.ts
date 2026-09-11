@@ -1,4 +1,5 @@
-import { readdir, readFile, realpath, writeFile } from "node:fs/promises"
+import { constants } from "node:fs"
+import { open, readdir, readFile, realpath, writeFile } from "node:fs/promises"
 import { basename, isAbsolute, join } from "node:path"
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml"
 import { z } from "zod"
@@ -101,6 +102,15 @@ function splitFrontmatter(source: string): { raw: string; body: string } {
   return { raw: match[1], body: match[2] ?? "" }
 }
 
+async function readTaskSource(path: string): Promise<string> {
+  const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+  try {
+    return await handle.readFile("utf8")
+  } finally {
+    await handle.close()
+  }
+}
+
 export function parseTask(path: string, source: string): TaskFile {
   const file = basename(path)
   const nameMatch = file.match(TASK_PATTERN)
@@ -122,14 +132,16 @@ export async function snapshotTaskPacket(
   if (!isValidTaskSlug(slug)) throw new Error(`invalid task slug: ${slug}`)
   const directory = specPath(root, TASKS_DIR, slug)
   const canonicalRoot = options.enforceContainment === true ? await realpath(root) : undefined
+  const readDirectory = canonicalRoot === undefined ? directory : await realpath(directory)
   if (canonicalRoot !== undefined) {
-    assertInsideWorkspace(canonicalRoot, await realpath(directory))
+    assertInsideWorkspace(canonicalRoot, readDirectory)
   }
-  const files = (await readdir(directory)).filter((name) => TASK_PATTERN.test(name)).sort()
+  const files = (await readdir(readDirectory)).filter((name) => TASK_PATTERN.test(name)).sort()
   const tasks = await Promise.all(files.map(async (name) => {
-    const path = join(directory, name)
-    if (canonicalRoot !== undefined) assertInsideWorkspace(canonicalRoot, await realpath(path))
-    return parseTask(path, await readFile(path, "utf8"))
+    const taskPath = join(directory, name)
+    const readPath = join(readDirectory, name)
+    if (canonicalRoot !== undefined) assertInsideWorkspace(canonicalRoot, await realpath(readPath))
+    return parseTask(taskPath, await readTaskSource(readPath))
   }))
   return { directory, tasks: tasks.sort((a, b) => a.number - b.number) }
 }

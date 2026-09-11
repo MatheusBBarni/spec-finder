@@ -1289,11 +1289,11 @@ function taskStatusText(status: TaskStatus): string {
 
 function footerText(state: CockpitState, compact: boolean): string {
   if (isBatchCockpit(state) && state.focusedPane === "tasks") {
-    return "FOCUS TASKS  [←→/HL] PACKET  [↑↓/JK] TASK  [TAB/SHIFT+TAB] FOCUS  [?] HELP  [Q] EXIT"
+    return "FOCUS TASKS  [←→/HL] PACKET  [↑↓/JK] TASK  [TAB/⇧] FOCUS  [?] HELP  [Q] EXIT"
   }
-  if (compact) return "FOCUS TASKS  [↑↓/JK] TASK  [TAB/SHIFT+TAB] FOCUS  [?] HELP  [Q] EXIT"
-  if (state.focusedPane === "tasks") return "FOCUS TASKS  [↑↓/JK] TASK  [TAB/SHIFT+TAB] FOCUS  [?] HELP  [Q] EXIT"
-  return "FOCUS TRANSCRIPT  [↑↓] LINE  [PG/HOME/END] SCROLL  [TAB/SHIFT+TAB] FOCUS  [?] HELP  [Q] EXIT"
+  if (compact) return "FOCUS TASKS  [↑↓/JK] TASK  [TAB/⇧] FOCUS  [?] HELP  [Q] EXIT"
+  if (state.focusedPane === "tasks") return "FOCUS TASKS  [↑↓/JK] TASK  [TAB/⇧] FOCUS  [?] HELP  [Q] EXIT"
+  return "FOCUS TRANSCRIPT  [↑↓] LINE  [PG/HOME/END] SCROLL  [TAB/⇧] FOCUS  [?] HELP  [Q] EXIT"
 }
 
 function isBatchCockpit(state: CockpitState): boolean {

@@ -28,7 +28,7 @@ export function isSpecFinderSkill(value: string): value is SpecFinderSkill {
   return (SPEC_FINDER_SKILLS as readonly string[]).includes(value)
 }
 
-/** Canonicalize a skill selection. Omitted means every managed skill. */
+/** Canonicalize a skill selection; review also requires archive support. */
 export function resolveSetupSkills(skills?: readonly string[]): SpecFinderSkill[] {
   if (skills === undefined) return [...SPEC_FINDER_SKILLS]
   if (skills.length === 0) throw new Error("setup requires at least one skill")
@@ -38,6 +38,7 @@ export function resolveSetupSkills(skills?: readonly string[]): SpecFinderSkill[
     if (seen.has(skill)) throw new Error(`duplicate setup skill: ${skill}`)
     seen.add(skill)
   }
+  if (seen.has("sf-review")) seen.add("sf-archive-tasks")
   return SPEC_FINDER_SKILLS.filter((skill) => seen.has(skill))
 }
 

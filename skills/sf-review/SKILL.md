@@ -24,6 +24,9 @@ under `.spec-finder/tasks/`. Without `ship`, perform only the review. The word
 never authorizes movement. Reject invalid slugs and extra tokens before reading
 or writing anything.
 
+`sf-review` requires `sf-archive-tasks` for its explicit ship phase. Setup
+automatically includes that dependency whenever `sf-review` is selected.
+
 ## Review phase
 
 1. Read the execution, report, and archive skill contracts, then read the full
