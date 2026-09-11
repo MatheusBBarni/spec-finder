@@ -177,6 +177,22 @@ One or more tasks (packet unmarked):
 
 `{ "version": 1 }` is valid and means all core. Clear the choice by deleting `tdd.json` or removing the `packet` / `tasks` marks.
 
+## Packet inspection
+
+Glance active packets, then inspect one slug, without starting `run` or `loop`:
+
+```bash
+spec-finder ls
+spec-finder inspect my-feature
+```
+
+`spec-finder ls` lists active packets as remaining, early-stage, blocked, or invalid in plain text. Empty ls succeeds with no active packets. Invalid rows do not fail the command.
+
+`spec-finder inspect <task_slug>` shows remaining task ids, checkpoint and report-handoff blockers, and loop state when a ledger exists. Missing or invalid packets exit 2.
+
+Inspection exits 0 or 2 only. It starts no provider, takes no run-lock, and writes nothing. It is not archive-ready.
+
+
 ## Run tasks
 
 ```bash
@@ -404,6 +420,8 @@ spec-finder loop <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoni
 spec-finder exec "<prompt>" [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
 spec-finder checkpoint begin <task_slug> <task_id>
 spec-finder checkpoint complete <task_slug> <task_id>
+spec-finder ls
+spec-finder inspect <task_slug>
 spec-finder config
 spec-finder version
 ```

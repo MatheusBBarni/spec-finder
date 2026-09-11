@@ -1,8 +1,8 @@
-import { readdir, readFile, writeFile } from "node:fs/promises"
+import { readdir, readFile, realpath, writeFile } from "node:fs/promises"
 import { basename, isAbsolute, join } from "node:path"
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml"
 import { z } from "zod"
-import { specPath, TASKS_DIR } from "./paths.ts"
+import { assertInsideWorkspace, specPath, TASKS_DIR } from "./paths.ts"
 
 const TASK_PATTERN = /^task_(\d+)\.md$/
 const TASK_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
@@ -113,16 +113,30 @@ export function parseTask(path: string, source: string): TaskFile {
   return { id: `task_${nameMatch[1]}`, number, path, body, source, frontmatter: parsed.data }
 }
 
-export async function loadTaskPacket(root: string, slug: string): Promise<{ directory: string; tasks: TaskFile[] }> {
+export async function snapshotTaskPacket(
+  root: string,
+  slug: string,
+  options: { enforceContainment?: boolean } = {},
+): Promise<{ directory: string; tasks: TaskFile[] }> {
   if (!isValidTaskSlug(slug)) throw new Error(`invalid task slug: ${slug}`)
   const directory = specPath(root, TASKS_DIR, slug)
+  const canonicalRoot = options.enforceContainment === true ? await realpath(root) : undefined
+  if (canonicalRoot !== undefined) {
+    assertInsideWorkspace(canonicalRoot, await realpath(directory))
+  }
   const files = (await readdir(directory)).filter((name) => TASK_PATTERN.test(name)).sort()
-  if (files.length === 0) throw new Error(`no task_XX.md files found in ${directory}`)
   const tasks = await Promise.all(files.map(async (name) => {
     const path = join(directory, name)
+    if (canonicalRoot !== undefined) assertInsideWorkspace(canonicalRoot, await realpath(path))
     return parseTask(path, await readFile(path, "utf8"))
   }))
   return { directory, tasks: tasks.sort((a, b) => a.number - b.number) }
+}
+
+export async function loadTaskPacket(root: string, slug: string): Promise<{ directory: string; tasks: TaskFile[] }> {
+  const packet = await snapshotTaskPacket(root, slug)
+  if (packet.tasks.length === 0) throw new Error(`no task_XX.md files found in ${packet.directory}`)
+  return packet
 }
 
 function normalizeDependency(value: string): string {

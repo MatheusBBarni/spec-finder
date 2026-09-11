@@ -3,9 +3,11 @@ import { ConfigError } from "./config.ts"
 import {
   checkpointCommand,
   configCommand,
+  inspectCommand,
   execCommand,
   loopCommand,
   refreshCommand,
+  lsCommand,
   runCommand,
   setupCommand,
   upgradeCommand,
@@ -17,7 +19,8 @@ const HELP = `spec-finder — skill-driven specifications with an ACP cockpit
 Usage:
   spec-finder setup [--agent claude|codex|cursor|grok|pi] [--model auto|CURATED] [--speed auto|normal|fast] [--local|--global] [--copy]
   spec-finder upgrade
-  spec-finder refresh
+  spec-finder ls
+  spec-finder inspect <task_slug>
   spec-finder run <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
   spec-finder run --multiple <slug1,slug2,...> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
   spec-finder loop <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE] [--max-iterations N] [--no-progress-window N] [--dry-run] [--reset-state]
@@ -75,6 +78,13 @@ Loop mode:
   loop does not support --multiple and adds no required loop config key.
   Cockpit iteration meters, a portable loop skill, QA/review/ship, continue-on-error, and multi-packet loop are later.
 
+Inspection:
+  spec-finder ls glances active packets. Kinds are remaining, early-stage, blocked, or invalid in plain text.
+  Empty ls succeeds with no active packets. Invalid rows do not fail the command.
+  spec-finder inspect <task_slug> shows remaining task ids, blockers, and loop state.
+  Missing or invalid packets exit 2. Inspection exits 0 or 2 only.
+  Inspection starts no provider, takes no run-lock, and writes nothing. It is not archive-ready.
+
 TDD opt-in:
   spec-finder run, loop, and --multiple default to core execute/report.
   Opt in with packet-local tdd.json: { "version": 1, "packet": "tdd" } for every task,
@@ -113,9 +123,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     case "setup": return setupCommand(args)
     case "upgrade": return upgradeCommand()
     case "refresh": return refreshCommand(args)
-    case "run": return runCommand(args)
-    case "loop": return loopCommand(args)
-    case "checkpoint": return checkpointCommand(args)
+    case "ls": return lsCommand(args)
+    case "inspect": return inspectCommand(args)
     case "exec": return execCommand(args)
     case "config": return configCommand()
     case "version":

@@ -7,6 +7,7 @@ import {
   clearTaskHandoff,
   executionOrder,
   loadTaskPacket,
+  snapshotTaskPacket,
   parseTask,
   updateTaskCheckpoint,
   updateTaskHandoff,
@@ -83,6 +84,16 @@ describe("task packets", () => {
 
     await updateTaskStatus(packet.tasks[0]!, "completed")
     expect(await readFile(packet.tasks[0]!.path, "utf8")).toContain("status: completed")
+  })
+
+  test("empty packet snapshots as zero tasks while loadTaskPacket still throws", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-empty-packet-"))
+    roots.push(root)
+    const directory = join(root, ".spec-finder", "tasks", "empty")
+    await mkdir(directory, { recursive: true })
+
+    expect(await snapshotTaskPacket(root, "empty")).toEqual({ directory, tasks: [] })
+    await expect(loadTaskPacket(root, "empty")).rejects.toThrow("no task_XX.md")
   })
 
   test("detects unknown and circular dependencies", async () => {
