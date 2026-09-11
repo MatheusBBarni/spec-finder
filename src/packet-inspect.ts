@@ -1,7 +1,7 @@
 import { readdir, realpath, stat } from "node:fs/promises"
 import type { Dirent } from "node:fs"
 import { join } from "node:path"
-import { LoopStateError, loadLoopState, type LoopTerminal } from "./loop-state.ts"
+import { LoopStateError, describeLoopPaths, loadLoopState, type LoopTerminal } from "./loop-state.ts"
 import { assertInsideWorkspace, specPath, TASKS_DIR } from "./paths.ts"
 import {
   executionOrder,
@@ -72,6 +72,12 @@ function isMissingPath(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT"
 }
 
+function safeTaskIssueMessage(message: string): string {
+  return message.startsWith("frontmatter title must match H1")
+    ? "frontmatter title does not match task heading"
+    : message
+}
+
 function isGlanceBlocked(task: TaskFile): boolean {
   return isCheckpointBlocked(task)
     || (task.frontmatter.handoff?.phase === "report" && task.frontmatter.handoff.error !== undefined)
@@ -97,15 +103,22 @@ function inspectBlockers(tasks: TaskFile[]): InspectBlocker[] {
   return blockers
 }
 
-async function inspectLoop(packetDirectory: string): Promise<LoopInspect> {
+async function inspectLoop(root: string, packetDirectory: string): Promise<LoopInspect> {
+  const { directory: loopDirectory, statePath } = describeLoopPaths(packetDirectory)
+  try {
+    const canonicalRoot = await realpath(root)
+    assertInsideWorkspace(canonicalRoot, await realpath(loopDirectory))
+    assertInsideWorkspace(canonicalRoot, await realpath(statePath))
+  } catch (error) {
+    if (isMissingPath(error)) return { state: "absent" }
+    return { state: "invalid", message: errorMessage(error) }
+  }
+
   try {
     const ledger = await loadLoopState(packetDirectory)
     if (ledger.terminal === null) return { state: "none", terminal: null }
     return { state: "terminal", terminal: ledger.terminal }
   } catch (error) {
-    if (error instanceof LoopStateError && error.message.startsWith("missing loop ledger")) {
-      return { state: "absent" }
-    }
     return { state: "invalid", message: errorMessage(error) }
   }
 }
@@ -152,7 +165,7 @@ async function classifyPacket(root: string, slug: string, absolutePath: string):
 
   const issues = validateTasks(tasks)
   if (issues.length > 0) {
-    return invalid(issues.map((issue) => issue.message).join("; "))
+    return invalid(issues.map((issue) => safeTaskIssueMessage(issue.message)).join("; "))
   }
 
   return {
@@ -224,7 +237,7 @@ export async function inspectPacket(root: string, slug: string): Promise<Inspect
         ok: false,
         code: "invalid_packet",
         message: `packet ${slug} is invalid`,
-        issues: issues.map((issue) => issue.message),
+        issues: issues.map((issue) => safeTaskIssueMessage(issue.message)),
       }
     }
   }
@@ -244,6 +257,6 @@ export async function inspectPacket(root: string, slug: string): Promise<Inspect
       status: task.frontmatter.status,
     })),
     blockers: inspectBlockers(tasks),
-    loop: await inspectLoop(directory),
+    loop: await inspectLoop(root, directory),
   }
 }

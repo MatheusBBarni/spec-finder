@@ -1903,7 +1903,7 @@ ${body}
     try {
       const stdout = commandOutput()
       const stderr = commandOutput()
-      expect(await lsCommand(["--json"], { root, output: stdout.output, error: stderr.output })).toBe(2)
+      expect(await lsCommand(["--yaml"], { root, output: stdout.output, error: stderr.output })).toBe(2)
       expect(stderr.text()).toContain(LS_USAGE)
       const missingStdout = commandOutput()
       const missingStderr = commandOutput()
@@ -1966,6 +1966,69 @@ ${body}
       expect(await inspectCommand(["Bad_Slug"], { root, output: invalidOut.output, error: invalidErr.output })).toBe(2)
       expect(invalidErr.text()).toContain("invalid task slug")
       expect(invalidErr.text()).toContain(INSPECT_USAGE)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("emits typed JSON envelopes for list and inspect", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-json-"))
+    try {
+      const packet = join(root, ".spec-finder", "tasks", "json-work")
+      await mkdir(packet, { recursive: true })
+      await writeFile(join(packet, "task_01.md"), task(1, "JSON work"))
+
+      const listOutput = commandOutput()
+      const listError = commandOutput()
+      expect(await lsCommand(["--json"], { root, output: listOutput.output, error: listError.output })).toBe(0)
+      expect(JSON.parse(listOutput.text())).toEqual({
+        ok: true,
+        rows: [{ slug: "json-work", kind: "remaining", completed: 0, total: 1 }],
+      })
+      expect(listError.text()).toBe("")
+
+      const inspectOutput = commandOutput()
+      const inspectError = commandOutput()
+      expect(await inspectCommand(["--json", "json-work"], { root, output: inspectOutput.output, error: inspectError.output })).toBe(0)
+      expect(JSON.parse(inspectOutput.text())).toMatchObject({
+        ok: true,
+        slug: "json-work",
+        kind: "remaining",
+        completed: 0,
+        total: 1,
+        remaining: [{ id: "task_01", status: "pending" }],
+        blockers: [],
+        loop: { state: "absent" },
+      })
+      expect(inspectError.text()).toBe("")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("emits typed JSON errors on stderr without usage prose", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-json-errors-"))
+    try {
+      const listOutput = commandOutput()
+      const listError = commandOutput()
+      expect(await lsCommand(["--json"], { root, output: listOutput.output, error: listError.output })).toBe(2)
+      expect(listOutput.text()).toBe("")
+      expect(JSON.parse(listError.text())).toEqual({
+        ok: false,
+        code: "tasks_unreadable",
+        message: expect.stringContaining("cannot read .spec-finder/tasks"),
+      })
+
+      await mkdir(join(root, ".spec-finder", "tasks"), { recursive: true })
+      const inspectOutput = commandOutput()
+      const inspectError = commandOutput()
+      expect(await inspectCommand(["missing", "--json"], { root, output: inspectOutput.output, error: inspectError.output })).toBe(2)
+      expect(inspectOutput.text()).toBe("")
+      expect(JSON.parse(inspectError.text())).toEqual({
+        ok: false,
+        code: "missing",
+        message: "packet is missing: missing",
+      })
     } finally {
       await rm(root, { recursive: true, force: true })
     }

@@ -1360,6 +1360,9 @@ export function versionCommand(): number {
 }
 
 export const LS_USAGE = "usage: spec-finder ls"
+function writeJson(output: Writable, value: unknown): void {
+  output.write(`${JSON.stringify(value)}\n`)
+}
 
 export interface LsCommandOptions {
   root?: string
@@ -1370,20 +1373,31 @@ export interface LsCommandOptions {
 export async function lsCommand(args: readonly string[], options: LsCommandOptions = {}): Promise<number> {
   const output = options.output ?? process.stdout
   const error = options.error ?? process.stderr
-  if (args.length > 0) {
-    const argument = args[0]!
+  const json = args.includes("--json")
+  const invalidArgument = args.find((argument) => argument !== "--json")
+  if (args.length > 0 && (args.length !== 1 || !json)) {
+    const argument = invalidArgument ?? args[0]!
     const message = argument.startsWith("-")
       ? `unsupported ls option: ${argument}`
       : `ls accepts no arguments; unexpected positional argument: ${argument}`
-    error.write(`${message}\n${LS_USAGE}\n`)
+    if (json) {
+      writeJson(error, { ok: false, code: "invalid_invocation", message })
+    } else {
+      error.write(`${message}\n${LS_USAGE}\n`)
+    }
     return 2
   }
 
   const root = options.root ?? await findWorkspaceRoot()
   const result = await listActivePackets(root)
   if (!result.ok) {
-    error.write(`${result.message}\n`)
+    if (json) writeJson(error, result)
+    else error.write(`${result.message}\n`)
     return 2
+  }
+  if (json) {
+    writeJson(output, result)
+    return 0
   }
   if (result.rows.length === 0) {
     output.write("no active packets\n")
@@ -1407,29 +1421,50 @@ export interface InspectCommandOptions {
 export async function inspectCommand(args: readonly string[], options: InspectCommandOptions = {}): Promise<number> {
   const output = options.output ?? process.stdout
   const error = options.error ?? process.stderr
-  const argument = args[0]
-  if (argument === undefined) {
-    error.write(`inspect requires exactly one packet slug\n${INSPECT_USAGE}\n`)
+  const jsonCount = args.filter((argument) => argument === "--json").length
+  const json = jsonCount > 0
+  const positional = args.filter((argument) => argument !== "--json")
+  const invalidOption = positional.find((argument) => argument.startsWith("-"))
+  let invocationMessage: string | undefined
+  if (invalidOption !== undefined) {
+    invocationMessage = `unsupported inspect option: ${invalidOption}`
+  } else if (positional.length === 0) {
+    invocationMessage = "inspect requires exactly one packet slug"
+  } else if (positional.length > 1) {
+    invocationMessage = `inspect accepts exactly one packet slug; unexpected positional argument: ${positional[1]}`
+  } else if (jsonCount > 1) {
+    invocationMessage = "inspect accepts --json at most once"
+  }
+  if (invocationMessage !== undefined) {
+    if (json) {
+      writeJson(error, { ok: false, code: "invalid_invocation", message: invocationMessage })
+    } else {
+      error.write(`${invocationMessage}\n${INSPECT_USAGE}\n`)
+    }
     return 2
   }
-  if (argument.startsWith("-")) {
-    error.write(`unsupported inspect option: ${argument}\n${INSPECT_USAGE}\n`)
-    return 2
-  }
-  if (args.length > 1) {
-    error.write(`inspect accepts exactly one packet slug; unexpected positional argument: ${args[1]}\n${INSPECT_USAGE}\n`)
+
+  const argument = positional[0]!
+  if (!isValidTaskSlug(argument)) {
+    const result = { ok: false as const, code: "invalid_slug" as const, message: `invalid task slug: ${argument}` }
+    if (json) writeJson(error, result)
+    else error.write(`${result.message}\n${INSPECT_USAGE}\n`)
     return 2
   }
 
   const root = options.root ?? await findWorkspaceRoot()
   const result = await inspectPacket(root, argument)
   if (!result.ok) {
-    const issues = result.issues?.map((issue) => `- ${issue}`).join("\n")
-    error.write(issues === undefined ? `${result.message}\n` : `${result.message}\n${issues}\n`)
-    if (result.code === "invalid_invocation" || result.code === "invalid_slug") {
-      error.write(`${INSPECT_USAGE}\n`)
+    if (json) writeJson(error, result)
+    else {
+      const issues = result.issues?.map((issue) => `- ${issue}`).join("\n")
+      error.write(issues === undefined ? `${result.message}\n` : `${result.message}\n${issues}\n`)
     }
     return 2
+  }
+  if (json) {
+    writeJson(output, result)
+    return 0
   }
 
   const remaining = result.remaining.map((task) => task.id).join(" ")

@@ -263,4 +263,58 @@ describe("inspectPacket", () => {
     expect(result.completed).toBe(0)
     expect(result.total).toBe(0)
   })
+
+  test("rejects escaped loop ledgers and line-terminator slugs", async () => {
+    const { root, tasks } = await workspace()
+    const packet = await packetDir(tasks, "loop-escape")
+    await writeFile(join(packet, "task_01.md"), taskMarkdown(1, "Loop escape"))
+    const outside = await tempRoot()
+    await initLoopState(outside, { slug: "loop-escape" })
+    await symlink(join(outside, "loop"), join(packet, "loop"))
+
+    const escaped = await inspectPacket(root, "loop-escape")
+    expect(escaped.ok).toBe(true)
+    if (escaped.ok) {
+      expect(escaped.loop.state).toBe("invalid")
+      if (escaped.loop.state === "invalid") expect(escaped.loop.message).toContain("path escapes workspace")
+    }
+
+    const newlineSlug = `line-break\n`
+    await packetDir(tasks, newlineSlug)
+    const listed = await listActivePackets(root)
+    expect(listed.ok).toBe(true)
+    if (listed.ok) {
+      const row = listed.rows.find((candidate) => candidate.slug === newlineSlug)
+      expect(row?.kind).toBe("invalid")
+    }
+    expect(await inspectPacket(root, newlineSlug)).toEqual({
+      ok: false,
+      code: "invalid_slug",
+      message: `invalid task slug: ${newlineSlug}`,
+    })
+  })
+
+  test("does not expose task headings through invalid details", async () => {
+    const { root, tasks } = await workspace()
+    const directory = await packetDir(tasks, "private-invalid")
+    const source = taskMarkdown(1, "Declared title", "", "# SECRET_H1_PROSE")
+      .replace("# Task 1: Declared title", "# SECRET_H1_PROSE")
+    await writeFile(join(directory, "task_01.md"), source)
+
+    const listed = await listActivePackets(root)
+    expect(listed.ok).toBe(true)
+    if (listed.ok) {
+      const row = listed.rows.find((candidate) => candidate.slug === "private-invalid")
+      expect(row?.kind).toBe("invalid")
+      expect(row?.detail).toBe("frontmatter title does not match task heading")
+      expect(row?.detail).not.toContain("SECRET_H1_PROSE")
+    }
+
+    const inspected = await inspectPacket(root, "private-invalid")
+    expect(inspected.ok).toBe(false)
+    if (!inspected.ok) {
+      expect(inspected.issues).toEqual(["frontmatter title does not match task heading"])
+      expect(inspected.issues?.join("\n")).not.toContain("SECRET_H1_PROSE")
+    }
+  })
 })

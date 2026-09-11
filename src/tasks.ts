@@ -6,6 +6,7 @@ import { assertInsideWorkspace, specPath, TASKS_DIR } from "./paths.ts"
 
 const TASK_PATTERN = /^task_(\d+)\.md$/
 const TASK_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+const TASK_SLUG_CONTROL_PATTERN = /[\u0000-\u001f\u007f\u2028\u2029]/
 const statusSchema = z.enum(["pending", "in_progress", "completed", "done", "finished", "failed", "blocked"])
 export type TaskStatus = z.infer<typeof statusSchema>
 
@@ -91,7 +92,7 @@ export interface TaskIssue {
 }
 
 export function isValidTaskSlug(slug: string): boolean {
-  return TASK_SLUG_PATTERN.test(slug)
+  return TASK_SLUG_PATTERN.test(slug) && !TASK_SLUG_CONTROL_PATTERN.test(slug)
 }
 
 function splitFrontmatter(source: string): { raw: string; body: string } {

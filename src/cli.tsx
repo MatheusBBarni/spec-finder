@@ -19,8 +19,9 @@ const HELP = `spec-finder — skill-driven specifications with an ACP cockpit
 Usage:
   spec-finder setup [--agent claude|codex|cursor|grok|pi] [--model auto|CURATED] [--speed auto|normal|fast] [--local|--global] [--copy]
   spec-finder upgrade
-  spec-finder ls
-  spec-finder inspect <task_slug>
+  spec-finder refresh
+  spec-finder ls [--json]
+  spec-finder inspect <task_slug> [--json]
   spec-finder run <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
   spec-finder run --multiple <slug1,slug2,...> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
   spec-finder loop <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE] [--max-iterations N] [--no-progress-window N] [--dry-run] [--reset-state]
@@ -83,6 +84,7 @@ Inspection:
   Empty ls succeeds with no active packets. Invalid rows do not fail the command.
   spec-finder inspect <task_slug> shows remaining task ids, blockers, and loop state.
   Missing or invalid packets exit 2. Inspection exits 0 or 2 only.
+  JSON mode emits one stable typed envelope per command (ok true rows for ls and the inspect result object); successes go to stdout and failures to stderr.
   Inspection starts no provider, takes no run-lock, and writes nothing. It is not archive-ready.
 
 TDD opt-in:
@@ -125,6 +127,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     case "refresh": return refreshCommand(args)
     case "ls": return lsCommand(args)
     case "inspect": return inspectCommand(args)
+    case "run": return runCommand(args)
+    case "loop": return loopCommand(args)
+    case "checkpoint": return checkpointCommand(args)
     case "exec": return execCommand(args)
     case "config": return configCommand()
     case "version":

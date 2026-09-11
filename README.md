@@ -191,6 +191,7 @@ spec-finder inspect my-feature
 `spec-finder inspect <task_slug>` shows remaining task ids, checkpoint and report-handoff blockers, and loop state when a ledger exists. Missing or invalid packets exit 2.
 
 Inspection exits 0 or 2 only. It starts no provider, takes no run-lock, and writes nothing. It is not archive-ready.
+`--json` emits one stable typed JSON envelope per command (`ls` uses `{ok:true,rows}`; `inspect` uses its typed inspection result). Successful results go to stdout and failures go to stderr.
 
 
 ## Run tasks
@@ -420,8 +421,8 @@ spec-finder loop <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoni
 spec-finder exec "<prompt>" [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
 spec-finder checkpoint begin <task_slug> <task_id>
 spec-finder checkpoint complete <task_slug> <task_id>
-spec-finder ls
-spec-finder inspect <task_slug>
+spec-finder ls [--json]
+spec-finder inspect <task_slug> [--json]
 spec-finder config
 spec-finder version
 ```
