@@ -744,6 +744,7 @@ const SKILL_HINTS: Record<SpecFinderSkill, string> = {
   "sf-tdd-report": "TDD report",
   "sf-tdd-batch": "TDD range",
   "sf-archive-tasks": "archive completed packets",
+  "sf-review": "review and ship a packet",
 }
 
 async function promptForSkills(

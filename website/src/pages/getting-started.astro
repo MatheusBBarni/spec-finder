@@ -53,7 +53,9 @@ spec-finder run my-feature</code></pre>
   [--speed auto|normal|fast] [--local|--global] [--copy]</code></pre>
   <p>
     Fresh setup defaults to Codex, <code>gpt-5.6-luna</code>,
-    <code>normal</code> speed, and local scope.
+    <code>normal</code> speed, local scope, and every managed skill including
+    <code>sf-review</code>. A configured refresh preserves an explicit saved
+    skill subset rather than adding new skills silently.
   </p>
 
   <h2>Skill destinations</h2>
@@ -125,6 +127,22 @@ spec-finder run my-feature</code></pre>
       </p>
     </article>
   </div>
+  <h2>Review before local ship</h2>
+  <p>
+    Once a packet has completed implementation and reporting, install and use
+    <code>sf-review</code> as the final read-only evidence gate:
+  </p>
+  <pre><code>/sf-review my-feature
+/sf-review my-feature ship</code></pre>
+  <p>
+    Review checks the whole active packet. Only the explicit <code>ship</code>
+    suffix reruns review and invokes target-only
+    <code>sf-archive-tasks --slug my-feature</code>. It does not write task
+    status or reports, move unrelated packets, push, open or merge a PR,
+    release, or request remote acceptance. Refresh preserves an existing
+    explicit skill subset and does not silently add <code>sf-review</code>.
+  </p>
+
   <pre><code>spec-finder run my-feature --no-ui
 spec-finder run my-feature --provider pi --model auto --reasoning auto
 spec-finder loop my-feature --dry-run

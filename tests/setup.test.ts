@@ -38,7 +38,7 @@ async function tempRoot(prefix = "spec-finder-setup-"): Promise<string> {
 }
 
 describe("setup", () => {
-  test("installs fourteen managed skills including the simplified write-spec path and the TDD pack at every provider-derived local/global destination", async () => {
+  test("installs fifteen managed skills including review, the simplified write-spec path, and the TDD pack at every provider-derived local/global destination", async () => {
     expect(SPEC_FINDER_SKILLS).toEqual([
       "sf-idea-factory",
       "sf-create-prd",
@@ -54,8 +54,9 @@ describe("setup", () => {
       "sf-tdd-report",
       "sf-tdd-batch",
       "sf-archive-tasks",
+      "sf-review",
     ])
-    expect(SPEC_FINDER_SKILLS).toHaveLength(14)
+    expect(SPEC_FINDER_SKILLS).toHaveLength(15)
     for (const provider of PROVIDERS) {
       for (const scope of ["local", "global"] as const) {
         const root = await tempRoot()
@@ -78,6 +79,7 @@ describe("setup", () => {
         await access(join(base, destination, "sf-write-spec", "references", "doctrine.md"))
         await access(join(base, destination, "sf-write-spec", "references", "spec-template.md"))
         await access(join(base, destination, "sf-write-spec", "references", "quality-bar.md"))
+        await access(join(base, destination, "sf-review", "SKILL.md"))
 
         const config = await loadConfig(root)
         expect(config.setup).toEqual({
@@ -108,6 +110,7 @@ describe("setup", () => {
     expect(await readFile(join(destination, "sf-idea-factory", "SKILL.md"), "utf8")).toBe("prior idea")
     expect(await readFile(join(destination, "unrelated-skill", "SKILL.md"), "utf8")).toBe("keep me")
     await expect(access(join(destination, "sf-create-prd"))).rejects.toThrow()
+    await expect(access(join(destination, "sf-review"))).rejects.toThrow()
     expect((await loadConfig(root)).setup).toMatchObject({ skills: [...selected] })
   })
 
@@ -453,6 +456,7 @@ describe("refreshManagedSkills", () => {
     expect(result.installed).toEqual([join(".agents/skills", "sf-write-spec")])
     await access(join(root, ".agents", "skills", "sf-write-spec", "SKILL.md"))
     await expect(access(join(root, ".agents", "skills", "sf-create-prd"))).rejects.toThrow()
+    await expect(access(join(root, ".agents", "skills", "sf-review"))).rejects.toThrow()
   })
 
 

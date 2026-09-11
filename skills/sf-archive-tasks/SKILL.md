@@ -18,11 +18,15 @@ Sweep completed packets from `.spec-finder/tasks/` into `.spec-finder/tasks_done
 ## Invocation
 
 ```text
-/sf-archive-tasks [tasks-dir=.spec-finder/tasks] [report-only]
+/sf-archive-tasks [tasks-dir=.spec-finder/tasks] [report-only] [--slug TASK_SLUG]
 ```
 
 - `tasks-dir` is the source directory; its archive sibling is `tasks_done/`.
 - `report-only` classifies and writes reports without moving packets.
+- `--slug` accepts exactly one lowercase kebab-case active packet slug. It
+  limits classification, movement, and report entries to that packet. Invalid,
+  repeated, missing, or absent target values fail before movement.
+- Omit `--slug` to preserve the full-directory sweep.
 
 ## Classification
 
@@ -52,10 +56,12 @@ Archive progress:
 Resolve this skill's installed directory, read `references/report-template.md`, then run:
 
 ```bash
-bash <skill-dir>/scripts/scan-tasks.sh .spec-finder/tasks
+bash <skill-dir>/scripts/scan-tasks.sh .spec-finder/tasks [report-only] [--slug TASK_SLUG]
 ```
 
-Use the emitted tab-separated `VERDICT` records as the source of truth. Do not reclassify by eye.
+For a targeted run, pass the exact reviewed slug with `--slug`. The emitted
+tab-separated `VERDICT` records are the source of truth; do not reclassify by
+eye or inspect unrelated packets as part of a targeted run.
 
 ### 2. Print the plan
 

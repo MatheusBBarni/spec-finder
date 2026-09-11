@@ -93,6 +93,7 @@ describe("setup provider policy", () => {
     expect(() => resolveSetupSkills([])).toThrow("at least one skill")
     expect(() => resolveSetupSkills(["sf-memory", "nope"])).toThrow("unsupported setup skill: nope")
     expect(() => resolveSetupSkills(["sf-memory", "sf-memory"])).toThrow("duplicate setup skill: sf-memory")
+    expect(SPEC_FINDER_SKILLS).toContain("sf-review")
   })
 
 })

@@ -20,6 +20,7 @@ export const SPEC_FINDER_SKILLS = [
   "sf-tdd-report",
   "sf-tdd-batch",
   "sf-archive-tasks",
+  "sf-review",
 ] as const
 export type SpecFinderSkill = (typeof SPEC_FINDER_SKILLS)[number]
 
