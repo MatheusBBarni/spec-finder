@@ -1,13 +1,65 @@
 #!/usr/bin/env bash
 # Classify Spec Finder task packets without modifying them.
-# Usage: scan-tasks.sh [tasks-dir] (default: .spec-finder/tasks)
+# Usage: scan-tasks.sh [tasks-dir] [report-only] [--slug TASK_SLUG]
+# The optional slug limits every classifier record to one active packet.
 set -u
 
-TASKS_DIR="${1:-.spec-finder/tasks}"
+TASKS_DIR=".spec-finder/tasks"
+TARGET_SLUG=""
+REPORT_ONLY=0
+POSITIONAL=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --slug)
+      if [ "$#" -lt 2 ] || [ -z "$2" ] || [[ "$2" == -* ]]; then
+        echo "error: --slug requires one task slug" >&2
+        exit 2
+      fi
+      if [ -n "$TARGET_SLUG" ]; then
+        echo "error: --slug may be supplied only once" >&2
+        exit 2
+      fi
+      TARGET_SLUG="$2"
+      shift 2
+      ;;
+    report-only)
+      if [ "$REPORT_ONLY" -eq 1 ]; then
+        echo "error: report-only may be supplied only once" >&2
+        exit 2
+      fi
+      REPORT_ONLY=1
+      shift
+      ;;
+    --*)
+      echo "error: unknown option: $1" >&2
+      exit 2
+      ;;
+    *)
+      if [ "$POSITIONAL" -eq 1 ]; then
+        echo "error: expected one tasks directory" >&2
+        exit 2
+      fi
+      TASKS_DIR="$1"
+      POSITIONAL=1
+      shift
+      ;;
+  esac
+done
+
+if [ -n "$TARGET_SLUG" ] && [[ ! "$TARGET_SLUG" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+  echo "error: invalid task slug: $TARGET_SLUG" >&2
+  exit 2
+fi
 
 if [ ! -d "$TASKS_DIR" ]; then
   echo "error: tasks dir not found: $TASKS_DIR" >&2
   exit 2
+fi
+
+if [ -n "$TARGET_SLUG" ] && [ ! -d "$TASKS_DIR/$TARGET_SLUG" ]; then
+  echo "error: target packet not found: $TARGET_SLUG" >&2
+  exit 4
 fi
 
 status_of() {
@@ -58,7 +110,13 @@ printf '%-32s %-12s %-9s %-9s %-14s %s\n' "------" "-------" "----" "-------" "-
 
 verdicts=""
 found=0
-for directory in "$TASKS_DIR"/*/; do
+if [ -n "$TARGET_SLUG" ]; then
+  directories=("$TASKS_DIR/$TARGET_SLUG/")
+else
+  directories=("$TASKS_DIR"/*/)
+fi
+
+for directory in "${directories[@]}"; do
   [ -d "$directory" ] || continue
   found=1
   name="$(basename "$directory")"

@@ -1,11 +1,13 @@
-import { readdir, readFile, writeFile } from "node:fs/promises"
+import { constants } from "node:fs"
+import { open, readdir, readFile, realpath, writeFile } from "node:fs/promises"
 import { basename, isAbsolute, join } from "node:path"
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml"
 import { z } from "zod"
-import { specPath, TASKS_DIR } from "./paths.ts"
+import { assertInsideWorkspace, specPath, TASKS_DIR } from "./paths.ts"
 
 const TASK_PATTERN = /^task_(\d+)\.md$/
 const TASK_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+const TASK_SLUG_CONTROL_PATTERN = /[\u0000-\u001f\u007f\u2028\u2029]/
 const statusSchema = z.enum(["pending", "in_progress", "completed", "done", "finished", "failed", "blocked"])
 export type TaskStatus = z.infer<typeof statusSchema>
 
@@ -91,13 +93,22 @@ export interface TaskIssue {
 }
 
 export function isValidTaskSlug(slug: string): boolean {
-  return TASK_SLUG_PATTERN.test(slug)
+  return TASK_SLUG_PATTERN.test(slug) && !TASK_SLUG_CONTROL_PATTERN.test(slug)
 }
 
 function splitFrontmatter(source: string): { raw: string; body: string } {
   const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/)
   if (!match?.[1]) throw new Error("missing YAML frontmatter")
   return { raw: match[1], body: match[2] ?? "" }
+}
+
+async function readTaskSource(path: string): Promise<string> {
+  const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+  try {
+    return await handle.readFile("utf8")
+  } finally {
+    await handle.close()
+  }
 }
 
 export function parseTask(path: string, source: string): TaskFile {
@@ -113,16 +124,32 @@ export function parseTask(path: string, source: string): TaskFile {
   return { id: `task_${nameMatch[1]}`, number, path, body, source, frontmatter: parsed.data }
 }
 
-export async function loadTaskPacket(root: string, slug: string): Promise<{ directory: string; tasks: TaskFile[] }> {
+export async function snapshotTaskPacket(
+  root: string,
+  slug: string,
+  options: { enforceContainment?: boolean } = {},
+): Promise<{ directory: string; tasks: TaskFile[] }> {
   if (!isValidTaskSlug(slug)) throw new Error(`invalid task slug: ${slug}`)
   const directory = specPath(root, TASKS_DIR, slug)
-  const files = (await readdir(directory)).filter((name) => TASK_PATTERN.test(name)).sort()
-  if (files.length === 0) throw new Error(`no task_XX.md files found in ${directory}`)
+  const canonicalRoot = options.enforceContainment === true ? await realpath(root) : undefined
+  const readDirectory = canonicalRoot === undefined ? directory : await realpath(directory)
+  if (canonicalRoot !== undefined) {
+    assertInsideWorkspace(canonicalRoot, readDirectory)
+  }
+  const files = (await readdir(readDirectory)).filter((name) => TASK_PATTERN.test(name)).sort()
   const tasks = await Promise.all(files.map(async (name) => {
-    const path = join(directory, name)
-    return parseTask(path, await readFile(path, "utf8"))
+    const taskPath = join(directory, name)
+    const readPath = join(readDirectory, name)
+    if (canonicalRoot !== undefined) assertInsideWorkspace(canonicalRoot, await realpath(readPath))
+    return parseTask(taskPath, await readTaskSource(readPath))
   }))
   return { directory, tasks: tasks.sort((a, b) => a.number - b.number) }
+}
+
+export async function loadTaskPacket(root: string, slug: string): Promise<{ directory: string; tasks: TaskFile[] }> {
+  const packet = await snapshotTaskPacket(root, slug)
+  if (packet.tasks.length === 0) throw new Error(`no task_XX.md files found in ${packet.directory}`)
+  return packet
 }
 
 function normalizeDependency(value: string): string {

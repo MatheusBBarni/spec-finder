@@ -5,6 +5,17 @@ import { join } from "node:path"
 
 const roots: string[] = []
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))))
+const classifier = join(import.meta.dir, "..", "skills", "sf-archive-tasks", "scripts", "scan-tasks.sh")
+
+async function runClassifier(...args: string[]): Promise<{ exitCode: number; output: string; error: string }> {
+  const child = Bun.spawn(["bash", classifier, ...args], { stdout: "pipe", stderr: "pipe" })
+  const [output, error, exitCode] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  return { output, error, exitCode }
+}
 
 describe("archive skill classifier", () => {
   test("classifies completed, incomplete, and early-stage packets", async () => {
@@ -112,5 +123,40 @@ dependencies: []
     expect(output).toContain("VERDICT\tabsent-delivery\tDONE\t1/1\tuntracked\tnoIndex")
     expect(output).toContain("VERDICT\tmixed-delivery\tREMAINING\t2/2\tuntracked\tnoIndex")
     expect(await readFile(blockedTaskPath, "utf8")).toBe(blockedTask)
+  })
+  test("filters classification to one exact target and retains unrelated packets", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-archive-target-"))
+    roots.push(root)
+    const tasks = join(root, ".spec-finder", "tasks")
+    await mkdir(join(tasks, "demo"), { recursive: true })
+    await mkdir(join(tasks, "other"), { recursive: true })
+    await writeFile(join(tasks, "demo", "task_01.md"), "---\nstatus: completed\n---\n\n# Demo\n")
+    await writeFile(join(tasks, "other", "task_01.md"), "---\nstatus: blocked\n---\n\n# Other\n")
+
+    const result = await runClassifier(tasks, "--slug", "demo")
+
+    expect(result.exitCode).toBe(0)
+    expect(result.error).toBe("")
+    expect(result.output).toContain("VERDICT\tdemo\tDONE\t1/1")
+    expect(result.output).not.toContain("other")
+  })
+
+  test("rejects invalid, repeated, missing, and absent target slugs before classification", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-archive-target-errors-"))
+    roots.push(root)
+    const tasks = join(root, ".spec-finder", "tasks")
+    await mkdir(join(tasks, "demo"), { recursive: true })
+
+    for (const args of [
+      ["--slug", "Demo"],
+      ["--slug"],
+      ["--slug", "demo", "--slug", "other"],
+      ["--slug", "missing"],
+    ]) {
+      const result = await runClassifier(tasks, ...args)
+      expect(result.exitCode).not.toBe(0)
+      expect(result.output).toBe("")
+      expect(result.error).toContain("error:")
+    }
   })
 })

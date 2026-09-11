@@ -259,4 +259,25 @@ describe("CLI help", () => {
     expect(help).toContain("There is no spec-finder tdd command")
     expect(README).toContain("there is no `spec-finder tdd` command")
   })
+
+  test("documents ls and inspect grammar, empty success, and 0/2 exits", async () => {
+    const help = await captureHelp()
+    for (const text of [help, README]) {
+      expect(text).toContain("spec-finder ls [--json]")
+      expect(text).toContain("spec-finder inspect <task_slug> [--json]")
+      expect(text).toContain("no active packets")
+      expect(text).toContain("Missing or invalid packets exit 2")
+      expect(text).toContain("exits 0 or 2 only")
+      expect(text).toContain("starts no provider")
+      expect(text).toContain("takes no run-lock")
+      expect(text).toContain("writes nothing")
+      expect(text).toContain("not archive-ready")
+      expect(text).toContain("early-stage")
+      expect(text).toContain("--json")
+      expect(text).not.toContain("archive moves")
+      expect(text).not.toContain("DONE/REMAINING")
+    }
+    expect(help).not.toContain("daemon")
+    expect(help).not.toContain("tasks_done")
+  })
 })

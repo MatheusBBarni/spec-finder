@@ -37,6 +37,7 @@ import {
   type ExecRuntimeOverrides,
 } from "./exec-config.ts"
 import { CONFIG_FILE, SPEC_DIR, findWorkspaceRoot } from "./paths.ts"
+import { inspectPacket, listActivePackets } from "./packet-inspect.ts"
 import { acquireRunLock } from "./run-lock.ts"
 import {
   refreshManagedSkills,
@@ -743,6 +744,7 @@ const SKILL_HINTS: Record<SpecFinderSkill, string> = {
   "sf-tdd-report": "TDD report",
   "sf-tdd-batch": "TDD range",
   "sf-archive-tasks": "archive completed packets",
+  "sf-review": "review and ship a packet",
 }
 
 async function promptForSkills(
@@ -1355,6 +1357,134 @@ function parseSingleLineVersion(raw: string): string | undefined {
 
 export function versionCommand(): number {
   process.stdout.write(`${VERSION}\n`)
+  return 0
+}
+
+export const LS_USAGE = "usage: spec-finder ls"
+function writeJson(output: Writable, value: unknown): void {
+  output.write(`${JSON.stringify(value)}\n`)
+}
+
+function sanitizeTerminalText(value: string): string {
+  return value.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/gu, (character) => {
+    const codePoint = character.codePointAt(0) ?? 0
+    return `\\u${codePoint.toString(16).padStart(4, "0")}`
+  })
+}
+
+export interface LsCommandOptions {
+  root?: string
+  output?: Writable
+  error?: Writable
+}
+
+export async function lsCommand(args: readonly string[], options: LsCommandOptions = {}): Promise<number> {
+  const output = options.output ?? process.stdout
+  const error = options.error ?? process.stderr
+  const json = args.includes("--json")
+  const invalidArgument = args.find((argument) => argument !== "--json")
+  if (args.length > 0 && (args.length !== 1 || !json)) {
+    const argument = invalidArgument ?? args[0]!
+    const message = argument.startsWith("-")
+      ? `unsupported ls option: ${argument}`
+      : `ls accepts no arguments; unexpected positional argument: ${argument}`
+    if (json) {
+      writeJson(error, { ok: false, code: "invalid_invocation", message })
+    } else {
+      error.write(`${sanitizeTerminalText(message)}\n${LS_USAGE}\n`)
+    }
+    return 2
+  }
+
+  const root = options.root ?? await findWorkspaceRoot()
+  const result = await listActivePackets(root)
+  if (!result.ok) {
+    if (json) writeJson(error, result)
+    else error.write(`${sanitizeTerminalText(result.message)}\n`)
+    return 2
+  }
+  if (json) {
+    writeJson(output, result)
+    return 0
+  }
+  if (result.rows.length === 0) {
+    output.write("no active packets\n")
+    return 0
+  }
+  for (const row of result.rows) {
+    const detail = row.kind === "invalid" && row.detail !== undefined ? ` ${sanitizeTerminalText(row.detail)}` : ""
+    output.write(`${sanitizeTerminalText(row.slug)} ${row.kind} ${row.completed}/${row.total}${detail}\n`)
+  }
+  return 0
+}
+
+export const INSPECT_USAGE = "usage: spec-finder inspect <task_slug>"
+
+export interface InspectCommandOptions {
+  root?: string
+  output?: Writable
+  error?: Writable
+}
+
+export async function inspectCommand(args: readonly string[], options: InspectCommandOptions = {}): Promise<number> {
+  const output = options.output ?? process.stdout
+  const error = options.error ?? process.stderr
+  const jsonCount = args.filter((argument) => argument === "--json").length
+  const json = jsonCount > 0
+  const positional = args.filter((argument) => argument !== "--json")
+  const invalidOption = positional.find((argument) => argument.startsWith("-"))
+  let invocationMessage: string | undefined
+  if (invalidOption !== undefined) {
+    invocationMessage = `unsupported inspect option: ${invalidOption}`
+  } else if (positional.length === 0) {
+    invocationMessage = "inspect requires exactly one packet slug"
+  } else if (positional.length > 1) {
+    invocationMessage = `inspect accepts exactly one packet slug; unexpected positional argument: ${positional[1]}`
+  } else if (jsonCount > 1) {
+    invocationMessage = "inspect accepts --json at most once"
+  }
+  if (invocationMessage !== undefined) {
+    if (json) {
+      writeJson(error, { ok: false, code: "invalid_invocation", message: invocationMessage })
+    } else {
+      error.write(`${sanitizeTerminalText(invocationMessage)}\n${INSPECT_USAGE}\n`)
+    }
+    return 2
+  }
+
+  const argument = positional[0]!
+  if (!isValidTaskSlug(argument)) {
+    const result = { ok: false as const, code: "invalid_slug" as const, message: `invalid task slug: ${argument}` }
+    if (json) writeJson(error, result)
+    else error.write(`${sanitizeTerminalText(result.message)}\n${INSPECT_USAGE}\n`)
+    return 2
+  }
+
+  const root = options.root ?? await findWorkspaceRoot()
+  const result = await inspectPacket(root, argument)
+  if (!result.ok) {
+    if (json) writeJson(error, result)
+    else {
+      const issues = result.issues?.map((issue) => `- ${sanitizeTerminalText(issue)}`).join("\n")
+      error.write(issues === undefined ? `${sanitizeTerminalText(result.message)}\n` : `${sanitizeTerminalText(result.message)}\n${issues}\n`)
+    }
+    return 2
+  }
+  if (json) {
+    writeJson(output, result)
+    return 0
+  }
+
+  const remaining = result.remaining.map((task) => sanitizeTerminalText(task.id)).join(" ")
+  output.write(`${sanitizeTerminalText(result.slug)} ${result.kind} ${result.completed}/${result.total}\n`)
+  output.write(`remaining: ${remaining}\n`)
+  for (const blocker of result.blockers) {
+    output.write(`${sanitizeTerminalText(blocker.taskId)} ${blocker.kind}: ${sanitizeTerminalText(blocker.message)}\n`)
+  }
+  if (result.loop.state === "absent") output.write("loop: absent\n")
+  else if (result.loop.state === "none") output.write("loop: none\n")
+  else if (result.loop.state === "terminal") output.write(`loop: terminal ${sanitizeTerminalText(result.loop.terminal)}\n`)
+  else output.write(`loop: ledger invalid: ${sanitizeTerminalText(result.loop.message)}\n`)
   return 0
 }
 

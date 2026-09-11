@@ -6,9 +6,10 @@ import { PassThrough } from "node:stream"
 import type { SessionUpdate } from "@agentclientprotocol/sdk"
 import { DEFAULT_CONFIG, parseConfig, type SpecFinderConfig } from "../src/config.ts"
 import type { CheckpointServiceContract } from "../src/checkpoints.ts"
-import { checkpointCommand, loopCommand, npmCliCommand, refreshCommand, REFRESH_USAGE, runCommand, resolveSetupOptions, setupCommand } from "../src/commands.ts"
+import { checkpointCommand, inspectCommand, INSPECT_USAGE, loopCommand, lsCommand, LS_USAGE, npmCliCommand, refreshCommand, REFRESH_USAGE, runCommand, resolveSetupOptions, setupCommand } from "../src/commands.ts"
 import { describeLoopPaths } from "../src/loop-state.ts"
 import { SPEC_FINDER_SKILLS, setupLockPath } from "../src/setup.ts"
+import { acquireRunLock } from "../src/run-lock.ts"
 import { CockpitStore } from "../src/ui/store.ts"
 import type { BatchResult } from "../src/batch.ts"
 import { parseTask, type TaskFile } from "../src/tasks.ts"
@@ -1818,3 +1819,251 @@ async function writeConfiguredRefresh(root: string): Promise<void> {
     setup: { status: "configured", scope: "local", destination: ".agents/skills" },
   }, null, 2)}\n`)
 }
+
+describe("packet inspection commands", () => {
+  const task = (number: number, title: string, status = "pending", extra = "", body = "Test task."): string => `---
+status: ${status}
+title: ${title}
+type: backend
+complexity: low
+dependencies: []
+${extra}---
+
+# Task ${number}: ${title}
+
+## Overview
+${body}
+`
+
+  test("prints an empty active packet glance", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-ls-empty-"))
+    try {
+      await mkdir(join(root, ".spec-finder", "tasks"), { recursive: true })
+      const stdout = commandOutput()
+      const stderr = commandOutput()
+      expect(await lsCommand([], { root, output: stdout.output, error: stderr.output })).toBe(0)
+      expect(stdout.text()).toBe("no active packets\n")
+      expect(stderr.text()).toBe("")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("lists packets and does not take the run lock or leak packet prose", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-ls-mixed-"))
+    try {
+      const tasks = join(root, ".spec-finder", "tasks")
+      const remaining = join(tasks, "remaining-work")
+      const blocked = join(tasks, "blocked-checkpoint")
+      const invalid = join(tasks, "invalid-parse")
+      await mkdir(remaining, { recursive: true })
+      await mkdir(blocked, { recursive: true })
+      await mkdir(invalid, { recursive: true })
+      await mkdir(join(root, ".spec-finder", "tasks_done", "archived"), { recursive: true })
+      await writeFile(join(remaining, "task_01.md"), task(1, "Open work", "pending", "", "SECRET_BODY_PROSE"))
+      await writeFile(join(blocked, "task_01.md"), task(
+        1,
+        "Blocked delivery",
+        "completed",
+        `checkpoint:
+  state: blocked
+  base_head: ${"a".repeat(40)}
+  baseline_digest: ${"b".repeat(64)}
+  paths:
+    - src/example.ts
+  error: blocked delivery
+`,
+      ))
+      await writeFile(join(invalid, "task_01.md"), "not yaml\n")
+      await writeFile(join(root, ".spec-finder", "TASKS_REPORT.md"), "SECRET_REPORT_PROSE\n")
+      await writeFile(join(root, ".spec-finder", "tasks_done", "archived", "task_01.md"), task(1, "Archived"))
+      const lease = await acquireRunLock(root)
+      const stdout = commandOutput()
+      const stderr = commandOutput()
+      try {
+        expect(await lsCommand([], { root, output: stdout.output, error: stderr.output })).toBe(0)
+      } finally {
+        await lease.release()
+      }
+      expect(stdout.text()).toContain("remaining-work remaining 0/1")
+      expect(stdout.text()).toContain("blocked-checkpoint blocked 0/1")
+      expect(stdout.text()).toContain("invalid-parse invalid 0/0")
+      expect(stdout.text()).toContain("missing YAML frontmatter")
+      expect(stdout.text()).not.toContain("archived")
+      expect(stdout.text()).not.toContain("SECRET_BODY_PROSE")
+      expect(stdout.text()).not.toContain("SECRET_REPORT_PROSE")
+      expect(stderr.text()).toBe("")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+  test("escapes control characters in human-readable inspection output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-inspection-controls-"))
+    try {
+      const tasks = join(root, ".spec-finder", "tasks")
+      const invalidSlug = "bad\nslug"
+      const blocked = join(tasks, "blocked")
+      await mkdir(join(tasks, invalidSlug), { recursive: true })
+      await mkdir(blocked, { recursive: true })
+      await writeFile(join(blocked, "task_01.md"), task(
+        1,
+        "Blocked delivery",
+        "completed",
+        `handoff:
+  phase: report
+  error: "blocked-\\u001b[31m"
+`,
+      ))
+
+      const listOutput = commandOutput()
+      const listError = commandOutput()
+      expect(await lsCommand([], { root, output: listOutput.output, error: listError.output })).toBe(0)
+      expect(listOutput.text()).toContain("bad\\u000aslug invalid")
+      expect(listOutput.text()).not.toContain(invalidSlug)
+
+      const inspectOutput = commandOutput()
+      const inspectError = commandOutput()
+      expect(await inspectCommand(["blocked"], { root, output: inspectOutput.output, error: inspectError.output })).toBe(0)
+      expect(inspectOutput.text()).toContain("blocked-\\u001b[31m")
+      expect(inspectOutput.text()).not.toContain(`${String.fromCharCode(27)}[31m`)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("rejects ls arguments and missing tasks directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-ls-errors-"))
+    try {
+      const stdout = commandOutput()
+      const stderr = commandOutput()
+      expect(await lsCommand(["--yaml"], { root, output: stdout.output, error: stderr.output })).toBe(2)
+      expect(stderr.text()).toContain(LS_USAGE)
+      const missingStdout = commandOutput()
+      const missingStderr = commandOutput()
+      expect(await lsCommand([], { root, output: missingStdout.output, error: missingStderr.output })).toBe(2)
+      expect(missingStderr.text()).toContain("cannot read .spec-finder/tasks")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("prints inspect work, blockers, and absent loop without writing or locking", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-inspect-"))
+    try {
+      const packet = join(root, ".spec-finder", "tasks", "blocked-work")
+      await mkdir(packet, { recursive: true })
+      const path = join(packet, "task_01.md")
+      await writeFile(path, task(1, "Blocked delivery", "completed", `checkpoint:
+  state: blocked
+  base_head: ${"a".repeat(40)}
+  baseline_digest: ${"b".repeat(64)}
+  paths:
+    - src/example.ts
+  error: blocked delivery
+`, "SECRET_BODY_PROSE"))
+      const before = await readFile(path, "utf8")
+      const lease = await acquireRunLock(root)
+      const stdout = commandOutput()
+      const stderr = commandOutput()
+      try {
+        expect(await inspectCommand(["blocked-work"], { root, output: stdout.output, error: stderr.output })).toBe(0)
+      } finally {
+        await lease.release()
+      }
+      expect(stdout.text()).toContain("blocked-work blocked 0/1")
+      expect(stdout.text()).toContain("remaining: task_01")
+      expect(stdout.text()).toContain("task_01 checkpoint: blocked delivery")
+      expect(stdout.text()).toContain("loop: absent")
+      expect(stdout.text()).not.toContain("SECRET_BODY_PROSE")
+      expect(stderr.text()).toBe("")
+      expect(await readFile(path, "utf8")).toBe(before)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("returns exit 2 for missing, malformed, and invalid inspect invocations", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-inspect-errors-"))
+    try {
+      await mkdir(join(root, ".spec-finder", "tasks"), { recursive: true })
+      const missingOut = commandOutput()
+      const missingErr = commandOutput()
+      expect(await inspectCommand(["missing"], { root, output: missingOut.output, error: missingErr.output })).toBe(2)
+      expect(missingErr.text()).toContain("packet is missing: missing")
+      const extraOut = commandOutput()
+      const extraErr = commandOutput()
+      expect(await inspectCommand(["one", "two"], { root, output: extraOut.output, error: extraErr.output })).toBe(2)
+      expect(extraErr.text()).toContain(INSPECT_USAGE)
+      const invalidOut = commandOutput()
+      const invalidErr = commandOutput()
+      expect(await inspectCommand(["Bad_Slug"], { root, output: invalidOut.output, error: invalidErr.output })).toBe(2)
+      expect(invalidErr.text()).toContain("invalid task slug")
+      expect(invalidErr.text()).toContain(INSPECT_USAGE)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("emits typed JSON envelopes for list and inspect", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-json-"))
+    try {
+      const packet = join(root, ".spec-finder", "tasks", "json-work")
+      await mkdir(packet, { recursive: true })
+      await writeFile(join(packet, "task_01.md"), task(1, "JSON work"))
+
+      const listOutput = commandOutput()
+      const listError = commandOutput()
+      expect(await lsCommand(["--json"], { root, output: listOutput.output, error: listError.output })).toBe(0)
+      expect(JSON.parse(listOutput.text())).toEqual({
+        ok: true,
+        rows: [{ slug: "json-work", kind: "remaining", completed: 0, total: 1 }],
+      })
+      expect(listError.text()).toBe("")
+
+      const inspectOutput = commandOutput()
+      const inspectError = commandOutput()
+      expect(await inspectCommand(["--json", "json-work"], { root, output: inspectOutput.output, error: inspectError.output })).toBe(0)
+      expect(JSON.parse(inspectOutput.text())).toMatchObject({
+        ok: true,
+        slug: "json-work",
+        kind: "remaining",
+        completed: 0,
+        total: 1,
+        remaining: [{ id: "task_01", status: "pending" }],
+        blockers: [],
+        loop: { state: "absent" },
+      })
+      expect(inspectError.text()).toBe("")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("emits typed JSON errors on stderr without usage prose", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-json-errors-"))
+    try {
+      const listOutput = commandOutput()
+      const listError = commandOutput()
+      expect(await lsCommand(["--json"], { root, output: listOutput.output, error: listError.output })).toBe(2)
+      expect(listOutput.text()).toBe("")
+      expect(JSON.parse(listError.text())).toEqual({
+        ok: false,
+        code: "tasks_unreadable",
+        message: expect.stringContaining("cannot read .spec-finder/tasks"),
+      })
+
+      await mkdir(join(root, ".spec-finder", "tasks"), { recursive: true })
+      const inspectOutput = commandOutput()
+      const inspectError = commandOutput()
+      expect(await inspectCommand(["missing", "--json"], { root, output: inspectOutput.output, error: inspectError.output })).toBe(2)
+      expect(inspectOutput.text()).toBe("")
+      expect(JSON.parse(inspectError.text())).toEqual({
+        ok: false,
+        code: "missing",
+        message: "packet is missing: missing",
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+})

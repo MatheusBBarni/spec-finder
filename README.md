@@ -24,6 +24,7 @@ Task packets stay local in `.spec-finder/tasks/` and `.spec-finder/tasks_done/`.
 - **Ordered batch runs** — `spec-finder run --multiple slug1,slug2` is serial and fail-fast.
 - **Continuous packet loop** — `spec-finder loop <task_slug>` keeps driving one packet through recoveries until a named terminal; `run` stays a single pass.
 - **Local checkpoints** — optional `auto_commit` writes recovery commits after verified tasks; never pushes.
+- **Packet review and local ship** — `sf-review <slug>` reconciles contracts and evidence read-only; `sf-review <slug> ship` archives only that reviewed slug.
 - **Optional TDD pack** — red-before-green skills when a task changes product behavior.
 - **Packet-free `exec`** — one-turn ACP prompt (currently uncertified for every real provider).
 
@@ -150,6 +151,7 @@ Setup does not launch a provider or perform live capability discovery. Completio
 | `sf-tdd-report` | red+green evidence report, or a one-line not-applicable reason |
 | `sf-tdd-batch` | TDD-only range runner; stop on failure |
 | `sf-archive-tasks` | completed-packet archival and reports |
+| `sf-review` | packet-wide evidence review and explicit target-only local ship |
 
 Every stage keeps the approval gates from the original Compozy skills. Research and interactive decisions happen before artifacts are saved. Tasks form an acyclic dependency graph and carry their own tests.
 
@@ -176,6 +178,23 @@ One or more tasks (packet unmarked):
 ```
 
 `{ "version": 1 }` is valid and means all core. Clear the choice by deleting `tdd.json` or removing the `packet` / `tasks` marks.
+
+## Packet inspection
+
+Glance active packets, then inspect one slug, without starting `run` or `loop`:
+
+```bash
+spec-finder ls
+spec-finder inspect my-feature
+```
+
+`spec-finder ls` lists active packets as remaining, early-stage, blocked, or invalid in plain text. Empty ls succeeds with no active packets. Invalid rows do not fail the command.
+
+`spec-finder inspect <task_slug>` shows remaining task ids, checkpoint and report-handoff blockers, and loop state when a ledger exists. Missing or invalid packets exit 2.
+
+Inspection exits 0 or 2 only. It starts no provider, takes no run-lock, and writes nothing. It is not archive-ready.
+`--json` emits one stable typed JSON envelope per command (`ls` uses `{ok:true,rows}`; `inspect` uses its typed inspection result). Successful results go to stdout and failures go to stderr.
+
 
 ## Run tasks
 
@@ -208,7 +227,29 @@ spec-finder loop my-feature --reset-state
 
 Every invocation ends as one of: `done`, `no_op`, `blocked`, `failed`, `exhausted`, `stalled`, or cancelled. Exits are `0` (`done`/`no_op`), `1` (`blocked`/`failed`/`exhausted`/`stalled`), `2` (invalid invocation, packet, or ledger), and `130` (cancelled). `run` still exits `0`/`1` only.
 
-Cockpit iteration meters, a portable loop skill, QA/review/ship-as-done, continue-on-error, and multi-packet loop are later.
+## Review and ship a packet
+
+After implementation and reporting, use the portable `sf-review` skill as a
+packet-wide final gate:
+
+```text
+/sf-review my-feature
+/sf-review my-feature ship
+```
+
+The first form is read-only. It reconciles canonical task status, substantive
+reports, TechSpec requirements, staged/unstaged/untracked changes, checkpoint
+and handoff metadata, required documents, and fresh named command evidence. It
+prints `REVIEW: PASS` or `REVIEW: BLOCKED` and never writes packet state.
+
+The explicit `ship` form reruns review, then invokes the archive classifier with
+`--slug my-feature`. Only that exact reviewed packet can move to
+`.spec-finder/tasks_done/`; an existing destination or any blocker stops without
+overwrite. Unfiltered `sf-archive-tasks` remains the all-packet sweep.
+
+Review and ship are local-only. They do not change task status or reports, push,
+open or merge a PR, release, or request remote acceptance. Refresh preserves an
+existing explicit saved skill subset; it does not silently add `sf-review`.
 
 ### Ordered batch runs
 
@@ -404,6 +445,8 @@ spec-finder loop <task_slug> [--no-ui] [--provider NAME] [--model ID] [--reasoni
 spec-finder exec "<prompt>" [--provider NAME] [--model ID] [--reasoning LEVEL] [--speed MODE]
 spec-finder checkpoint begin <task_slug> <task_id>
 spec-finder checkpoint complete <task_slug> <task_id>
+spec-finder ls [--json]
+spec-finder inspect <task_slug> [--json]
 spec-finder config
 spec-finder version
 ```

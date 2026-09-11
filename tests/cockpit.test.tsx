@@ -321,12 +321,20 @@ describe("read-only progress cockpit", () => {
       const taskLine = frame.split("\n").find((line) => line.includes("task_01"))
       expect(taskLine).not.toContain("task_02")
       expect(frame).toContain("[←→/HL] PACKET  [↑↓/JK] TASK")
+      expect(store.getSnapshot().activePacket?.index).toBe(0)
 
-      for (let index = 0; index < 6; index += 1) await press(screen, KeyCodes.ARROW_DOWN)
+      await press(screen, KeyCodes.ARROW_DOWN)
+      expect(store.getSnapshot().selectedTaskId).toBe("task_02")
+      expect(store.getSnapshot().activePacket?.index).toBe(0)
+      frame = screen.captureCharFrame()
+      expect(frame).toContain("packet-01")
+      expect(frame).toContain("BATCH-TRANSCRIPT-task_02")
+
+      for (let index = 0; index < 5; index += 1) await press(screen, "j")
       expect(store.getSnapshot().selectedTaskId).toBe("task_07")
       expect(screen.captureCharFrame()).toContain("BATCH-TRANSCRIPT-task_07")
 
-      for (let index = 0; index < 6; index += 1) await press(screen, KeyCodes.ARROW_RIGHT)
+      for (let index = 0; index < 6; index += 1) await press(screen, "l")
       const batchScroll = renderable<ScrollBoxRenderable>(screen, "batch-sequence-scroll")
       frame = screen.captureCharFrame()
       expect(store.getSnapshot().selectedTaskId).toBe("task_07")
@@ -335,10 +343,11 @@ describe("read-only progress cockpit", () => {
       expect(frame).toContain("PACKET 7 CHILD ONE")
       expect(frame).not.toContain("BATCH-TRANSCRIPT-task_07")
 
-      await press(screen, KeyCodes.ARROW_DOWN)
+      await press(screen, "j")
       frame = screen.captureCharFrame()
       expect(frame).toContain("PACKET 7 CHILD TWO")
       expect(frame).toContain("TRANSCRIPT · task_02 · INSPECTING HISTORY")
+      expect(frame).toContain("[←→/HL] PACKET  [↑↓/JK] TASK")
 
       await press(screen, KeyCodes.ARROW_LEFT)
       expect(store.getSnapshot().selectedTaskId).toBe("task_07")
@@ -346,8 +355,29 @@ describe("read-only progress cockpit", () => {
       expect(screen.captureCharFrame()).toContain("PACKET 6 CHILD ONE")
 
       await press(screen, "?")
-      expect(screen.captureCharFrame()).toContain("Browse the parent packet strip")
-      expect(screen.captureCharFrame()).toContain("Select a child task while Tasks has focus")
+      const help = screen.captureCharFrame()
+      expect(help).toContain("← / → or h / l")
+      expect(help).toContain("↑ / ↓ or j / k")
+      expect(help).toContain("Browse the parent packet strip")
+      expect(help).toContain("Select a child task while Tasks has focus")
+    } finally {
+      await destroy(screen)
+    }
+  })
+
+  test("keeps the batch footer complete at the standard terminal width", async () => {
+    const store = startedBatchStore(
+      ["alpha", "beta"],
+      0,
+      [task(1, "Alpha task")],
+      DEFAULT_CONFIG,
+      [[task(1, "Alpha task")], [task(1, "Beta task")]],
+    )
+    const screen = await render(store, 80, 24)
+    try {
+      const frame = screen.captureCharFrame()
+      expect(frame).toContain("[TAB/⇧] FOCUS")
+      expect(frame).toContain("[Q] EXIT")
     } finally {
       await destroy(screen)
     }
@@ -468,11 +498,44 @@ describe("read-only progress cockpit", () => {
       expect(frame).not.toContain(reportReference)
       const batchScroll = renderable<ScrollBoxRenderable>(screen, "batch-run-scroll")
       expect(batchScroll.scrollHeight).toBeGreaterThan(8)
+      const livePacketIndex = store.getSnapshot().activePacket?.index
+      const liveTaskId = store.getSnapshot().selectedTaskId
+      expect(frame).toContain("[↑↓/PG/HOME/END] PACKETS")
+      expect(frame).not.toContain("[←→/HL] PACKET")
+
+      await press(screen, KeyCodes.HOME)
+      const summaryStart = batchScroll.scrollTop
+      const startFrame = screen.captureCharFrame()
+      expect(summaryStart).toBe(0)
+      expect(startFrame).toContain("packet-01")
+
+      await press(screen, KeyCodes.ARROW_DOWN)
+      const afterDown = batchScroll.scrollTop
+      const downFrame = screen.captureCharFrame()
+      expect(afterDown).toBeGreaterThan(summaryStart)
+      expect(downFrame).not.toBe(startFrame)
+      expect(store.getSnapshot().activePacket?.index).toBe(livePacketIndex)
+      expect(store.getSnapshot().selectedTaskId).toBe(liveTaskId)
+
+      await press(screen, KeyCodes.ARROW_UP)
+      const afterUp = batchScroll.scrollTop
+      expect(afterUp).toBeLessThan(afterDown)
+
+      await press(screen, "\u001b[6~")
+      const afterPageDown = batchScroll.scrollTop
+      expect(afterPageDown).toBeGreaterThan(afterUp)
+      await press(screen, "\u001b[5~")
+      expect(batchScroll.scrollTop).toBeLessThan(afterPageDown)
+
+      await press(screen, KeyCodes.END)
+      expect(screen.captureCharFrame()).toContain("packet-30")
+      expect(store.getSnapshot().activePacket?.index).toBe(livePacketIndex)
+      expect(store.getSnapshot().selectedTaskId).toBe(liveTaskId)
 
       await press(screen, KeyCodes.HOME)
       expect(screen.captureCharFrame()).toContain("packet-01")
-      await press(screen, KeyCodes.END)
-      expect(screen.captureCharFrame()).toContain("packet-30")
+      expect(screen.captureCharFrame()).toContain("[↑↓/PG/HOME/END] PACKETS")
+      expect(screen.captureCharFrame()).not.toContain("[←→/HL] PACKET")
 
       await pressEscape(screen)
       frame = screen.captureCharFrame()
@@ -827,6 +890,8 @@ describe("read-only progress cockpit", () => {
 
       await pressTab(screen)
       expect(store.getSnapshot().focusedPane).toBe("transcript")
+      expect(screen.captureCharFrame()).toContain("FOCUS TRANSCRIPT")
+      expect(screen.captureCharFrame()).toContain("[TAB/⇧] FOCUS")
       await press(screen, KeyCodes.HOME)
       expect(transcript.scrollTop).toBe(0)
       expect(screen.captureCharFrame()).toContain("HISTORY-LINE-000")
@@ -854,8 +919,15 @@ describe("read-only progress cockpit", () => {
       await mutate(screen, () => store.consume({ type: "activity", taskId: "task_01", message: "RESUMED-TAIL-302" }))
       expect(screen.captureCharFrame()).toContain("RESUMED-TAIL-302")
 
+      await pressTab(screen)
+      expect(store.getSnapshot().focusedPane).toBe("tasks")
+      expect(screen.captureCharFrame()).toContain("FOCUS TASKS")
+      await pressTab(screen, { shift: true })
+      expect(store.getSnapshot().focusedPane).toBe("transcript")
+      expect(screen.captureCharFrame()).toContain("FOCUS TRANSCRIPT")
       await pressTab(screen, { shift: true })
       expect(store.getSnapshot().focusedPane).toBe("tasks")
+      expect(screen.captureCharFrame()).toContain("FOCUS TASKS")
     } finally {
       await destroy(screen)
     }
@@ -1283,7 +1355,7 @@ describe("read-only progress cockpit", () => {
       const help = screen.captureCharFrame()
       expect(store.getSnapshot().helpOpen).toBeTrue()
       expect(help).toContain("READ-ONLY COCKPIT HELP")
-      expect(help).toContain("Shift+Tab")
+      expect(help).toContain("Tab / Shift+Tab   Switch task and transcript focus")
       expect(help).toContain("PageUp / PageDown")
       expect(help).toContain("View only")
       expect(help).toContain("observation, not an automatic stall verdict")

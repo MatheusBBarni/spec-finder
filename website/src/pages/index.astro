@@ -205,6 +205,10 @@ const gettingStartedHref = `${base}getting-started/`
           <td><code>sf-archive-tasks</code></td>
           <td>completed-packet archival and reports</td>
         </tr>
+        <tr>
+          <td><code>sf-review</code></td>
+          <td>packet-wide evidence review and explicit target-only local ship</td>
+        </tr>
       </tbody>
     </table>
   </div>
@@ -213,6 +217,21 @@ const gettingStartedHref = `${base}getting-started/`
     changes product behavior and you need a failing public-seam test first.
     <code>spec-finder run</code> stays on core skills until a separate opt-in
     design; invoking TDD skills is a manual choice.
+  </p>
+
+  <h2>Review and ship locally</h2>
+  <p>
+    After implementation and reporting, use <code>sf-review</code> for a
+    packet-wide, read-only reconciliation:
+  </p>
+  <pre><code>/sf-review my-feature
+/sf-review my-feature ship</code></pre>
+  <p>
+    The explicit <code>ship</code> phase reruns review and archives only the
+    exact reviewed slug through the target-filtered
+    <code>sf-archive-tasks --slug my-feature</code> workflow. It never writes
+    task status or reports, moves an unrelated packet, pushes, opens or merges
+    a PR, releases, or requests remote acceptance.
   </p>
 
   <h2>Providers</h2>

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import {
@@ -7,6 +7,7 @@ import {
   clearTaskHandoff,
   executionOrder,
   loadTaskPacket,
+  snapshotTaskPacket,
   parseTask,
   updateTaskCheckpoint,
   updateTaskHandoff,
@@ -83,6 +84,27 @@ describe("task packets", () => {
 
     await updateTaskStatus(packet.tasks[0]!, "completed")
     expect(await readFile(packet.tasks[0]!.path, "utf8")).toContain("status: completed")
+  })
+
+  test("empty packet snapshots as zero tasks while loadTaskPacket still throws", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-empty-packet-"))
+    roots.push(root)
+    const directory = join(root, ".spec-finder", "tasks", "empty")
+    await mkdir(directory, { recursive: true })
+
+    expect(await snapshotTaskPacket(root, "empty")).toEqual({ directory, tasks: [] })
+    await expect(loadTaskPacket(root, "empty")).rejects.toThrow("no task_XX.md")
+  })
+  test("rejects symlinked task files when containment is enforced", async () => {
+    const root = await mkdtemp(join(tmpdir(), "spec-finder-symlink-task-"))
+    roots.push(root)
+    const directory = join(root, ".spec-finder", "tasks", "linked")
+    const target = join(root, "task-source.md")
+    await mkdir(directory, { recursive: true })
+    await writeFile(target, task(1, "Outside task"))
+    await symlink(target, join(directory, "task_01.md"))
+
+    await expect(snapshotTaskPacket(root, "linked", { enforceContainment: true })).rejects.toThrow()
   })
 
   test("detects unknown and circular dependencies", async () => {
