@@ -38,7 +38,7 @@ async function tempRoot(prefix = "spec-finder-setup-"): Promise<string> {
 }
 
 describe("setup", () => {
-  test("installs fifteen managed skills including review, the simplified write-spec path, and the TDD pack at every provider-derived local/global destination", async () => {
+  test("installs sixteen managed skills including one-file spec paths, review, and the TDD pack at every provider-derived local/global destination", async () => {
     expect(SPEC_FINDER_SKILLS).toEqual([
       "sf-idea-factory",
       "sf-create-prd",
@@ -50,13 +50,14 @@ describe("setup", () => {
       "sf-task-report",
       "sf-batch-tasks",
       "sf-tdd-plan",
+      "sf-tdd-write-spec",
       "sf-tdd-execute",
       "sf-tdd-report",
       "sf-tdd-batch",
       "sf-archive-tasks",
       "sf-review",
     ])
-    expect(SPEC_FINDER_SKILLS).toHaveLength(15)
+    expect(SPEC_FINDER_SKILLS).toHaveLength(16)
     for (const provider of PROVIDERS) {
       for (const scope of ["local", "global"] as const) {
         const root = await tempRoot()
@@ -93,7 +94,7 @@ describe("setup", () => {
     }
   })
 
-  test("copies only the selected managed skills and leaves unselected entries untouched", async () => {
+  test("copies selected skills, refreshes installed managed skills, and leaves unrelated entries untouched", async () => {
     const root = await tempRoot()
     const destination = join(root, ".agents", "skills")
     await mkdir(join(destination, "sf-idea-factory"), { recursive: true })
@@ -102,16 +103,17 @@ describe("setup", () => {
     await writeFile(join(destination, "unrelated-skill", "SKILL.md"), "keep me")
 
     const selected = ["sf-write-spec", "sf-memory"] as const
+    const expected = ["sf-idea-factory", ...selected]
     const result = await setupWorkspace(root, { ...request("codex"), skills: [...selected] })
 
-    expect(result.installed).toEqual(selected.map((skill) => join(".agents/skills", skill)))
+    expect(result.installed).toEqual(expected.map((skill) => join(".agents/skills", skill)))
     await access(join(destination, "sf-write-spec", "SKILL.md"))
     await access(join(destination, "sf-memory", "SKILL.md"))
-    expect(await readFile(join(destination, "sf-idea-factory", "SKILL.md"), "utf8")).toBe("prior idea")
+    expect(await readFile(join(destination, "sf-idea-factory", "SKILL.md"), "utf8")).not.toBe("prior idea")
     expect(await readFile(join(destination, "unrelated-skill", "SKILL.md"), "utf8")).toBe("keep me")
     await expect(access(join(destination, "sf-create-prd"))).rejects.toThrow()
     await expect(access(join(destination, "sf-review"))).rejects.toThrow()
-    expect((await loadConfig(root)).setup).toMatchObject({ skills: [...selected] })
+    expect((await loadConfig(root)).setup).toMatchObject({ skills: expected })
   })
 
 

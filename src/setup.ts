@@ -250,7 +250,11 @@ export async function setupWorkspace(
   }
   await preflightPaths(workspace, base, targetRoot, configPath, gitignorePath, request.scope)
   const previousConfig = await loadPreviousConfig(workspace)
-  const candidate = createConfigCandidate(previousConfig.config, request, profile.destination)
+  const requestedSkills = resolveSetupSkills(request.skills)
+  const installedSkills = await readInstalledManagedSkills(targetRoot)
+  const skills = SPEC_FINDER_SKILLS.filter((skill) => requestedSkills.includes(skill) || installedSkills.includes(skill))
+  const effectiveRequest = { ...request, skills }
+  const candidate = createConfigCandidate(previousConfig.config, effectiveRequest, profile.destination)
   const legacyCursor = await readLegacyStatus(base)
   const transaction = createTransaction({
     workspace,
@@ -258,7 +262,7 @@ export async function setupWorkspace(
     configPath,
     candidate,
     configExisted: previousConfig.existed,
-    request,
+    request: effectiveRequest,
     legacyCursor,
     options,
   })
@@ -505,6 +509,15 @@ async function readLegacyStatus(base: string): Promise<"preserved" | "absent"> {
     throw error
   }
 }
+
+async function readInstalledManagedSkills(targetRoot: string): Promise<SpecFinderSkill[]> {
+  const installed: SpecFinderSkill[] = []
+  for (const skill of SPEC_FINDER_SKILLS) {
+    if (await pathExists(join(targetRoot, skill))) installed.push(skill)
+  }
+  return installed
+}
+
 
 function createTransaction(input: {
   workspace: string

@@ -740,6 +740,7 @@ const SKILL_HINTS: Record<SpecFinderSkill, string> = {
   "sf-task-report": "evidence report",
   "sf-batch-tasks": "run a task range",
   "sf-tdd-plan": "TDD plan",
+  "sf-tdd-write-spec": "one-shot TDD spec",
   "sf-tdd-execute": "red-green execute",
   "sf-tdd-report": "TDD report",
   "sf-tdd-batch": "TDD range",

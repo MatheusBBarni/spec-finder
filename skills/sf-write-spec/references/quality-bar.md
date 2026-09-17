@@ -2,7 +2,6 @@
 
 Read this before drafting and again before presenting the spec.
 This bar applies only to `.spec-finder/specs/<slug>-spec.md`.
-Packet files are a thinner projection and are not scored here.
 The saved spec is the prompt the operator will point an agent at.
 Reject and rewrite the spec if any item fails.
 Do not present a failing spec.
@@ -15,6 +14,7 @@ NO FILE PATHS WITHOUT VERIFICATION.
 NO ALGORITHM THAT STEALS THE AGENT'S JOB.
 NO AMBIGUOUS SUCCESS.
 NO PLACEHOLDERS IN THE SAVED SPEC.
+NO RUNNER PACKET OUTPUT.
 ```
 
 ## Reject if
@@ -22,6 +22,7 @@ NO PLACEHOLDERS IN THE SAVED SPEC.
 - Outcome is "make it better", "clean it up", "add support for X", or "follow best practices".
 - Paths are guessed and not marked `create`.
 - The spec contains the implementation the agent should invent (after-code, patch, step-by-step algorithm).
+- The spec tells `sf-write-spec` to create `.spec-finder/tasks/`, `_prd.md`, `_techspec.md`, `_tasks.md`, `task_NN.md`, ADRs, or memory files.
 - Fewer than two **Never** lines.
 - No copy-pastable command as done-when.
 - Current behavior is not distinguished from desired behavior.
@@ -99,10 +100,3 @@ Good:
 When the file does not exist yet, mark it `create`.
 Current System still cites the adjacent module, test, and convention the new file must follow.
 Do not invent a parallel architecture.
-
-## Packet projection
-
-The spec stays dense.
-`_prd.md` / `_techspec.md` / `task_NN.md` share scope, contracts, slice order, and verification commands.
-They may omit excerpts and the prompt protocol.
-They must not add capabilities the spec does not have.

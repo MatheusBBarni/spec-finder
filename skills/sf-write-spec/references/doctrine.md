@@ -9,12 +9,13 @@ They are the spec contract, not style notes.
 The operator later points an agent at that path and nothing else.
 An executor that reads only this file plus the repository must implement, verify, and stop without chat history.
 If the executor would need to ask a question, reverse-engineer the seam, or guess a public contract, the spec is not done.
-
-Packet files (`_prd.md`, `_techspec.md`, `task_NN.md`) are the runner projection of the same decisions.
-They must not contradict the spec.
-They may be shorter.
-The spec stays the dense prompt; do not shrink it to match packet brevity.
 Do not leave intent only in chat.
+
+## Single output only
+
+`sf-write-spec` writes exactly one saved artifact: `.spec-finder/specs/<slug>-spec.md`.
+It never writes a runner packet, PRD, TechSpec, task index, task file, ADR, or memory file.
+The spec must carry every decision those files would otherwise have projected.
 
 ## Current system is mandatory
 
@@ -78,7 +79,7 @@ Split by user/operator outcome, not by layer.
 A slice is independently testable once declared dependencies are done.
 No foundation-only task.
 No separate test-only task.
-Numeric IDs are the execution order and always depend backward.
+Slices stay inside `.spec-finder/specs/<slug>-spec.md`; do not project them into `.spec-finder/tasks/`.
 
 ## Research, then ask, then approve
 

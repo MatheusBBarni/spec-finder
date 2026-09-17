@@ -50,7 +50,7 @@ For a binary decision, use `A.` and `B.`; add `C. Other` when another answer is 
 For whole-draft approval:
 
 ```text
-A. Approve and write the packet
+A. Approve and write the spec
 B. Adjust the draft
 C. Rewrite
 D. Discard

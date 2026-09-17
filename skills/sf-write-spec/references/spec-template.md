@@ -1,13 +1,11 @@
 # [Feature] Spec
 
-This file is the complete implementation prompt.
+This file is the complete implementation prompt and the only saved artifact from `sf-write-spec`.
 An executor that reads only this file plus the repository must implement, verify, and stop without chat history.
 The operator will point an agent at this path. Do not ask the user questions.
 
 - **Slug:** `<slug>`
 - **This file:** `.spec-finder/specs/<slug>-spec.md`
-- **Runner packet:** `.spec-finder/tasks/<slug>/`
-
 ## Execution
 
 **Outcome:** [one-sentence user/operator result]
