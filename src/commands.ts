@@ -735,6 +735,7 @@ const SKILL_HINTS: Record<SpecFinderSkill, string> = {
   "sf-create-techspec": "technical design",
   "sf-create-tasks": "task plan",
   "sf-write-spec": "one-shot spec",
+  "sf-refinement": "ticket/prompt refinement",
   "sf-memory": "packet memory",
   "sf-execute-task": "implement a task",
   "sf-task-report": "evidence report",

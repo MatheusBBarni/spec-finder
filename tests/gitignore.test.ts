@@ -29,21 +29,24 @@ describe("packet gitignore", () => {
     expect(merged.content).toContain("/tasks/\n")
     expect(merged.content).toContain("/tasks_done/\n")
     expect(merged.content).toContain("/specs/\n")
+    expect(merged.content).toContain("/refinements/\n")
     expect(merged.content.match(/\/tasks\//g)).toHaveLength(1)
     expect(merged.content.match(/\/specs\//g)).toHaveLength(1)
+    expect(merged.content.match(/\/refinements\//g)).toHaveLength(1)
   })
 
   test("leaves an already complete gitignore byte-for-byte unchanged", () => {
-    const existing = "*.tmp\n/tasks/\n/tasks_done/\n/specs/\n"
+    const existing = "*.tmp\n/tasks/\n/tasks_done/\n/specs/\n/refinements/\n"
     expect(mergeWorkspaceGitignore(existing)).toEqual({ content: existing, changed: false })
   })
 
-  test("treats unanchored tasks/, tasks_done/, and specs/ as already covering those dirs", () => {
+  test("treats unanchored tasks/, tasks_done/, specs/, and refinements/ as already covering those dirs", () => {
     expect(gitignoreCovers("tasks/\n", "/tasks/")).toBe(true)
     expect(gitignoreCovers("/tasks_done/\n", "/tasks_done/")).toBe(true)
     expect(gitignoreCovers("specs/\n", "/specs/")).toBe(true)
-    expect(mergeWorkspaceGitignore("tasks/\ntasks_done/\nspecs/\n")).toEqual({
-      content: "tasks/\ntasks_done/\nspecs/\n",
+    expect(gitignoreCovers("refinements/\n", "/refinements/")).toBe(true)
+    expect(mergeWorkspaceGitignore("tasks/\ntasks_done/\nspecs/\nrefinements/\n")).toEqual({
+      content: "tasks/\ntasks_done/\nspecs/\nrefinements/\n",
       changed: false,
     })
   })

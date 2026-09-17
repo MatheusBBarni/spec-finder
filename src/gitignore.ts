@@ -1,4 +1,4 @@
-import { SPECS_DIR, TASKS_DIR } from "./paths.ts"
+import { REFINEMENTS_DIR, SPECS_DIR, TASKS_DIR } from "./paths.ts"
 
 export const TASKS_DONE_DIR = "tasks_done"
 export const GITIGNORE_FILE = ".gitignore"
@@ -10,6 +10,7 @@ export const PACKET_GITIGNORE_PATHS = [
   `/${TASKS_DIR}/`,
   `/${TASKS_DONE_DIR}/`,
   `/${SPECS_DIR}/`,
+  `/${REFINEMENTS_DIR}/`,
 ] as const
 
 export type GitignoreStatus = "created" | "updated" | "unchanged"

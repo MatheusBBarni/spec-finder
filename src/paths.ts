@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url"
 export const SPEC_DIR = ".spec-finder"
 export const TASKS_DIR = "tasks"
 export const SPECS_DIR = "specs"
+export const REFINEMENTS_DIR = "refinements"
 export const CONFIG_FILE = "config.json"
 
 async function exists(path: string): Promise<boolean> {

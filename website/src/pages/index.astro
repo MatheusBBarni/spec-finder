@@ -59,6 +59,14 @@ const gettingStartedHref = `${base}getting-started/`
       </p>
     </article>
     <article class="card">
+      <h3>Refinement path</h3>
+      <p>
+        <code>sf-refinement</code> turns a prompt or tracker ticket into
+        <code>.spec-finder/refinements/&lt;task_slug&gt;.md</code> without
+        writing a runner packet or a one-shot spec.
+      </p>
+    </article>
+    <article class="card">
       <h3>Five ACP providers</h3>
       <p>
         Claude, Codex, Cursor, plus packet-only Grok Build and Pi. Spec Finder
@@ -128,6 +136,15 @@ const gettingStartedHref = `${base}getting-started/`
       </p>
     </article>
     <article class="card">
+      <h3>Prompt or ticket: refinement</h3>
+      <p>
+        Use <code>sf-refinement</code> to turn a prompt or tracker ticket into
+        stories and technical specs at
+        <code>.spec-finder/refinements/&lt;task_slug&gt;.md</code>. It does not
+        write a runner packet or a one-shot spec.
+      </p>
+    </article>
+    <article class="card">
       <h3>Discovery or regeneration</h3>
       <p>
         Keep using idea, PRD, TechSpec, and tasks when you need discovery, a
@@ -151,6 +168,15 @@ const gettingStartedHref = `${base}getting-started/`
             <code>.spec-finder/specs/&lt;slug&gt;-spec.md</code> plus runner
             packet (<code>_prd.md</code>, <code>_techspec.md</code>,
             <code>_tasks.md</code>, <code>task_NN.md</code>)
+          </td>
+        </tr>
+        <tr>
+          <td><code>sf-refinement</code></td>
+          <td>
+            <code>.spec-finder/refinements/&lt;task_slug&gt;.md</code> from a
+            prompt or issue ticket. Does not write
+            <code>.spec-finder/tasks/</code> or
+            <code>.spec-finder/specs/</code>
           </td>
         </tr>
         <tr>

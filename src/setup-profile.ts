@@ -11,6 +11,7 @@ export const SPEC_FINDER_SKILLS = [
   "sf-create-techspec",
   "sf-create-tasks",
   "sf-write-spec",
+  "sf-refinement",
   "sf-memory",
   "sf-execute-task",
   "sf-task-report",

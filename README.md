@@ -12,12 +12,13 @@
 
 A skill-driven specification framework with a local ACP cockpit, heavily inspired by Compozy. It brings back the compact workflow that made pre-0.3 Compozy useful—idea → PRD → TechSpec → executable tasks—without adding a daemon or a second source of truth.
 
-Task packets stay local in `.spec-finder/tasks/` and `.spec-finder/tasks_done/`. Simplified-path specs stay local in `.spec-finder/specs/`. Setup writes `.spec-finder/.gitignore` so committed specs cannot poison later agent context. Skills are portable Agent Skills. Claude, Codex, Cursor, Grok Build, and Pi run through their own ACP harnesses while Spec Finder owns task ordering, lifecycle state, permissions, and evidence reports.
+Task packets stay local in `.spec-finder/tasks/` and `.spec-finder/tasks_done/`. Simplified-path specs stay local in `.spec-finder/specs/`. Refinements stay local in `.spec-finder/refinements/`. Setup writes `.spec-finder/.gitignore` so committed specs cannot poison later agent context. Skills are portable Agent Skills. Claude, Codex, Cursor, Grok Build, and Pi run through their own ACP harnesses while Spec Finder owns task ordering, lifecycle state, permissions, and evidence reports.
 
 ## Features
 
 - **Closed specification pipeline** — idea, PRD, TechSpec, and numbered tasks live in `.spec-finder/tasks/<slug>/`.
 - **Simplified spec path** - `sf-write-spec` writes `.spec-finder/specs/<slug>-spec.md` as the implementation prompt an agent runs when pointed at that file, plus the same runner packet, in one research-and-approve pass.
+- **Refinement path** — `sf-refinement` turns a prompt or tracker ticket into `.spec-finder/refinements/<task_slug>.md` without writing a runner packet or a one-shot spec.
 - **Five ACP providers** — Claude, Codex, Cursor, plus packet-only Grok Build and Pi.
 - **Read-only cockpit** — watch provider, task graph, ACP activity, and tool calls without extra UI chrome.
 - **One session per task** — implementation and the final report share one ACP session.
@@ -115,7 +116,7 @@ Before selecting Pi in `setup` or running a packet with `--provider pi`:
 
 ### Skill destinations
 
-The `.spec-finder/config.json`, `.spec-finder/tasks/`, and `.spec-finder/specs/` scaffolding always remain in the current project. Packet and spec directories are ignored by `.spec-finder/.gitignore`. Skill destinations are derived from the selected provider and scope:
+The `.spec-finder/config.json`, `.spec-finder/tasks/`, `.spec-finder/specs/`, and `.spec-finder/refinements/` scaffolding always remain in the current project. Packet, spec, and refinement directories are ignored by `.spec-finder/.gitignore`. Skill destinations are derived from the selected provider and scope:
 
 | Provider | Curated setup models | Default model | Local skills | Global skills |
 |---|---|---|---|---|
@@ -138,6 +139,7 @@ Setup does not launch a provider or perform live capability discovery. Completio
 | Skill | Artifact |
 |---|---|
 | `sf-write-spec` | Simplified path: `.spec-finder/specs/<slug>-spec.md` (implementation prompt an agent runs from that file) plus the runner packet (`_prd.md`, `_techspec.md`, `_tasks.md`, `task_NN.md`) |
+| `sf-refinement` | Tracker-agnostic refinement: `.spec-finder/refinements/<task_slug>.md` from a prompt or issue ticket. Does not write `.spec-finder/tasks/` or `.spec-finder/specs/` |
 | `sf-idea-factory` | `.spec-finder/tasks/<slug>/_idea.md` |
 | `sf-create-prd` | `.spec-finder/tasks/<slug>/_prd.md` |
 | `sf-create-techspec` | `.spec-finder/tasks/<slug>/_techspec.md` |
@@ -157,6 +159,7 @@ Every stage keeps the approval gates from the original Compozy skills. Research 
 
 Use `sf-write-spec` when a feature request is clear enough for one research-and-approve pass.
 It writes `.spec-finder/specs/<slug>-spec.md` as the implementation prompt: point an agent at that file and it should implement without chat history. The runner packet is still written for `spec-finder run`.
+Use `sf-refinement` when a prompt or tracker ticket needs stories and technical specs before implementation. It writes only `.spec-finder/refinements/<task_slug>.md`.
 Keep using idea, PRD, TechSpec, and tasks when you need discovery, a product-only PRD, a design-only TechSpec, or task regeneration.
 
 ### When to use TDD versus core

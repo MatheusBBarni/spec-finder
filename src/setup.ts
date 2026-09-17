@@ -28,7 +28,7 @@ import {
   mergeWorkspaceGitignore,
   type GitignoreStatus,
 } from "./gitignore.ts"
-import { CONFIG_FILE, SPEC_DIR, SPECS_DIR, TASKS_DIR, bundledSkillsPath } from "./paths.ts"
+import { CONFIG_FILE, REFINEMENTS_DIR, SPEC_DIR, SPECS_DIR, TASKS_DIR, bundledSkillsPath } from "./paths.ts"
 
 export const SKILL_TARGETS = {
   claude: getSetupProfile("claude").destination,
@@ -679,6 +679,7 @@ class SetupTransaction {
       await mkdir(dirname(this.paths.configPath), { recursive: true })
       await mkdir(join(this.input.workspace, SPEC_DIR, TASKS_DIR), { recursive: true })
       await mkdir(join(this.input.workspace, SPEC_DIR, SPECS_DIR), { recursive: true })
+      await mkdir(join(this.input.workspace, SPEC_DIR, REFINEMENTS_DIR), { recursive: true })
     }
     await mkdir(this.paths.targetParent, { recursive: true })
     await mkdir(this.paths.stageRoot, { recursive: true })
