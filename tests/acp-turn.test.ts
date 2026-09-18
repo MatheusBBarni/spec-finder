@@ -9,6 +9,7 @@ import {
 } from "../src/process-supervisor.ts"
 import {
   runAcpTurn,
+  type AcpTurnEvent,
   type AcpTurnRequest,
   type AcpTurnResult,
   type PermissionBroker,
@@ -270,7 +271,8 @@ describe("neutral ACP v1 turn core", () => {
   test("semantically cancels, settles pending permission once, and consumes trailing updates", async () => {
     const { root, lifecycleLog } = await fixtureContext()
     const permission = new BlockingPermissionBroker()
-    const events: import("../src/acp-turn.ts").AcpTurnEvent[] = []
+    const events: AcpTurnEvent[] = []
+    const permissionRequested = Promise.withResolvers<void>()
     const controller = new AbortController()
     const request = makeRequest(root, lifecycleLog, {
       SPEC_FINDER_TEST_REQUEST_PERMISSION: "1",
@@ -279,11 +281,15 @@ describe("neutral ACP v1 turn core", () => {
     }, undefined, {
       signal: controller.signal,
       permission,
-      emit: (event) => events.push(event),
+      emit: (event) => {
+        events.push(event)
+        if (event.type === "permission_requested") permissionRequested.resolve()
+      },
     })
 
     const running = runAcpTurn(request)
     await waitForLifecycle(lifecycleLog, "session/prompt")
+    await permissionRequested.promise
     controller.abort()
     const result = await running
 
@@ -350,16 +356,21 @@ describe("neutral ACP v1 turn core", () => {
 
 class BlockingPermissionBroker implements PermissionBroker {
   cancelCalls = 0
-  #resolve: ((outcome: { decision: "cancelled" }) => void) | undefined
+  #cancelled = false
+  #pending: PromiseWithResolvers<{ decision: "cancelled" }> | undefined
 
   request(): Promise<{ decision: "cancelled" }> {
-    return new Promise((resolve) => { this.#resolve = resolve })
+    if (this.#cancelled) return Promise.resolve({ decision: "cancelled" })
+    const pending = Promise.withResolvers<{ decision: "cancelled" }>()
+    this.#pending = pending
+    return pending.promise
   }
 
   async cancelPending(): Promise<void> {
     this.cancelCalls += 1
-    this.#resolve?.({ decision: "cancelled" })
-    this.#resolve = undefined
+    this.#cancelled = true
+    this.#pending?.resolve({ decision: "cancelled" })
+    this.#pending = undefined
   }
 }
 
