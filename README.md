@@ -12,12 +12,12 @@
 
 A skill-driven specification framework with a local ACP cockpit, heavily inspired by Compozy. It brings back the compact workflow that made pre-0.3 Compozy useful—idea → PRD → TechSpec → executable tasks—without adding a daemon or a second source of truth.
 
-Task packets stay local in `.spec-finder/tasks/` and `.spec-finder/tasks_done/`. Simplified-path specs stay local in `.spec-finder/specs/`. Refinements stay local in `.spec-finder/refinements/`. Setup writes `.spec-finder/.gitignore` so committed specs cannot poison later agent context. Skills are portable Agent Skills. Claude, Codex, Cursor, Grok Build, and Pi run through their own ACP harnesses while Spec Finder owns task ordering, lifecycle state, permissions, and evidence reports.
+Task packets stay local in `.spec-finder/tasks/` and `.spec-finder/tasks_done/`. Simplified-path specs are the `## Implementation Spec` section of `.spec-finder/tasks/<slug>/_prd.md`. Refinements stay local in `.spec-finder/refinements/`. Setup writes `.spec-finder/.gitignore` so committed specs cannot poison later agent context. Skills are portable Agent Skills. Claude, Codex, Cursor, Grok Build, and Pi run through their own ACP harnesses while Spec Finder owns task ordering, lifecycle state, permissions, and evidence reports.
 
 ## Features
 
 - **Closed specification pipeline** — idea, PRD, TechSpec, and numbered tasks live in `.spec-finder/tasks/<slug>/`.
-- **Simplified spec path** - `sf-write-spec` writes `.spec-finder/specs/<slug>-spec.md` as the implementation prompt an agent runs when pointed at that file, plus the same runner packet, in one research-and-approve pass.
+- **Simplified spec path** - `sf-write-spec` and `sf-tdd-write-spec` write `## Implementation Spec` inside `.spec-finder/tasks/<slug>/_prd.md`, then print that path. A thin task goes through `sf-create-prd` first.
 - **Refinement path** — `sf-refinement` turns a prompt or tracker ticket into `.spec-finder/refinements/<task_slug>.md` without writing a runner packet or a one-shot spec.
 - **Five ACP providers** — Claude, Codex, Cursor, plus packet-only Grok Build and Pi.
 - **Read-only cockpit** — watch provider, task graph, ACP activity, and tool calls without extra UI chrome.
@@ -138,10 +138,12 @@ Setup does not launch a provider or perform live capability discovery. Completio
 
 | Skill | Artifact |
 |---|---|
-| `sf-write-spec` | Simplified path: `.spec-finder/specs/<slug>-spec.md` (implementation prompt an agent runs from that file) plus the runner packet (`_prd.md`, `_techspec.md`, `_tasks.md`, `task_NN.md`) |
+| `sf-write-spec` | `## Implementation Spec` inside `.spec-finder/tasks/<slug>/_prd.md`. Prints that path. Does not write `.spec-finder/specs/` or a runner packet. |
+| `sf-tdd-write-spec` | Same file and heading, with confirmed public-seam red-green slices. Prints that path. |
 | `sf-refinement` | Tracker-agnostic refinement: `.spec-finder/refinements/<task_slug>.md` from a prompt or issue ticket. Does not write `.spec-finder/tasks/` or `.spec-finder/specs/` |
 | `sf-idea-factory` | `.spec-finder/tasks/<slug>/_idea.md` |
 | `sf-create-prd` | `.spec-finder/tasks/<slug>/_prd.md` |
+| `humanizer` | Removes AI-writing patterns. `sf-create-prd` runs it on the saved `_prd.md`. Installed with Spec Finder skills. |
 | `sf-create-techspec` | `.spec-finder/tasks/<slug>/_techspec.md` |
 | `sf-create-tasks` | `_tasks.md` and `task_NN.md` |
 | `sf-memory` | `memory/MEMORY.md` and `memory/task_NN.md` |
@@ -157,10 +159,11 @@ Setup does not launch a provider or perform live capability discovery. Completio
 
 Every stage keeps the approval gates from the original Compozy skills. Research and interactive decisions happen before artifacts are saved. Tasks form an acyclic dependency graph and carry their own tests.
 
-Use `sf-write-spec` when a feature request is clear enough for one research-and-approve pass.
-It writes `.spec-finder/specs/<slug>-spec.md` as the implementation prompt: point an agent at that file and it should implement without chat history. The runner packet is still written for `spec-finder run`.
+Use `sf-create-prd` when a task is thin or poorly written and lacks product context. It writes `.spec-finder/tasks/<slug>/_prd.md`, then asks whether the next artifact is a normal spec, a TDD spec, or a TechSpec.
+Use `sf-write-spec` when the request is already clear, or when an approved PRD should gain `## Implementation Spec` in `.spec-finder/tasks/<slug>/_prd.md`. It prints that path.
+Use `sf-tdd-write-spec` for the same file and heading when implementation must follow public-seam red-green slices.
 Use `sf-refinement` when a prompt or tracker ticket needs stories and technical specs before implementation. It writes only `.spec-finder/refinements/<task_slug>.md`.
-Keep using idea, PRD, TechSpec, and tasks when you need discovery, a product-only PRD, a design-only TechSpec, or task regeneration.
+Keep using idea, PRD, TechSpec, and tasks when you need discovery, a design-only TechSpec, or task regeneration.
 
 ### When to use TDD versus core
 

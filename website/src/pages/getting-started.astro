@@ -110,12 +110,12 @@ spec-finder run my-feature</code></pre>
   <h2>Using skills after setup</h2>
   <div class="grid split">
     <article class="card">
-      <h3>One-shot spec</h3>
+      <h3>Thin task, then spec</h3>
       <p>
-        Ask the agent for <code>sf-write-spec</code> when the request is already
-        clear. That skill writes
-        <code>.spec-finder/specs/&lt;slug&gt;-spec.md</code> and the runner
-        packet.
+        Ask for <code>sf-create-prd</code> when the task is thin. After the
+        approved PRD, ask for <code>sf-write-spec</code> or
+        <code>sf-tdd-write-spec</code>. Those skills write
+        <code>## Implementation Spec</code> inside the task <code>_prd.md</code> and print that path.
       </p>
     </article>
     <article class="card">

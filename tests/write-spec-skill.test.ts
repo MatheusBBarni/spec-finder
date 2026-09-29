@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { SPECS_DIR } from "../src/paths.ts"
+import { TASKS_DIR } from "../src/paths.ts"
 
 const roots: string[] = []
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))))
@@ -21,9 +21,14 @@ describe("sf-write-spec contract", () => {
     expect(skill).toContain("sf-write-spec")
     expect(skill).toContain("This is not `sf-idea-factory`, `sf-create-prd`, `sf-create-techspec`, and `sf-create-tasks` run in sequence.")
     expect(skill).toContain("Write exactly one file")
-    expect(skill).toContain("NEVER write or replace `.spec-finder/tasks/`")
+    expect(skill).toContain("NEVER write `.spec-finder/specs/`")
     expect(skill).toContain("Do not point to `spec-finder run <slug>` or `sf-execute-task`")
     expect(doctrine).toContain("Single output only")
+    expect(skill).toContain("approved `.spec-finder/tasks/<slug>/_prd.md`")
+    expect(skill).toContain("Copy this path and point an agent at it:")
+    expect(skill).toContain("Stop and offer `sf-create-prd`")
+    expect(skill).toContain("sf-tdd-write-spec")
+    expect(doctrine).toContain("Approved product sections stay above the spec")
     expect(quality).toContain("NO RUNNER PACKET OUTPUT")
 
     for (const needle of [
@@ -33,7 +38,7 @@ describe("sf-write-spec contract", () => {
       "Always",
       "Ask first",
       "Never",
-      ".spec-finder/specs/<slug>-spec.md",
+      ".spec-finder/tasks/<slug>/_prd.md",
       "whole-draft",
       "complete implementation prompt",
       "Current System",
@@ -79,27 +84,28 @@ describe("sf-write-spec contract", () => {
     expect(spec).toContain("Invalid:")
     expect(doctrine).toContain("The spec is the prompt")
     expect(quality).toContain("NO PROMPT WITHOUT CURRENT-SYSTEM EVIDENCE")
-    expect(skill).toContain("against `.spec-finder/specs/<slug>-spec.md`")
-    expect(quality).toContain("This bar applies only to `.spec-finder/specs/<slug>-spec.md`")
+    expect(skill).toContain("against the `## Implementation Spec` draft")
+    expect(quality).toContain("This bar applies only to the `## Implementation Spec` section of `.spec-finder/tasks/<slug>/_prd.md`")
     expect(quality).toContain("every template token must be replaced")
 
     expect(skill).toContain("references/quality-bar.md")
   })
 
-  test("writes only the agent-executable spec at .spec-finder/specs/<slug>-spec.md from the shipped template", async () => {
+  test("writes the agent-executable spec under Implementation Spec in the task PRD", async () => {
     const root = await mkdtemp(join(tmpdir(), "spec-finder-write-spec-file-"))
     roots.push(root)
     const slug = "write-spec-demo"
     const template = await readFile(join(skillDir, "references", "spec-template.md"), "utf8")
     const filled = template.replaceAll("<slug>", slug).replaceAll("[Feature]", "Write spec demo")
-    const specPath = join(root, ".spec-finder", SPECS_DIR, `${slug}-spec.md`)
-    await mkdir(join(root, ".spec-finder", SPECS_DIR), { recursive: true })
+    const specPath = join(root, ".spec-finder", TASKS_DIR, slug, "_prd.md")
+    await mkdir(join(root, ".spec-finder", TASKS_DIR, slug), { recursive: true })
     await writeFile(specPath, filled)
 
-    expect(specPath.endsWith(`.spec-finder/specs/${slug}-spec.md`)).toBe(true)
+    expect(specPath.endsWith(`.spec-finder/tasks/${slug}/_prd.md`)).toBe(true)
     const body = await readFile(specPath, "utf8")
-    expect(body).toContain(`.spec-finder/specs/${slug}-spec.md`)
-    expect(body).not.toContain(`.spec-finder/tasks/${slug}/`)
+    expect(body).toContain(`.spec-finder/tasks/${slug}/_prd.md`)
+    expect(body).toContain("## Implementation Spec")
+    expect(body).not.toContain(".spec-finder/specs/")
     expect(body).not.toContain("Runner packet")
     expect(body).not.toContain("<slug>")
     expect(body).toContain("## Execution")

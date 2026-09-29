@@ -732,6 +732,7 @@ async function promptForSpeed(
 const SKILL_HINTS: Record<SpecFinderSkill, string> = {
   "sf-idea-factory": "idea discovery",
   "sf-create-prd": "product requirements",
+  "humanizer": "plain human-readable prose",
   "sf-create-techspec": "technical design",
   "sf-create-tasks": "task plan",
   "sf-write-spec": "one-shot spec",

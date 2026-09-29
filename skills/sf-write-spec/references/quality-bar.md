@@ -1,7 +1,7 @@
 # Spec quality bar
 
 Read this before drafting and again before presenting the spec.
-This bar applies only to `.spec-finder/specs/<slug>-spec.md`.
+This bar applies only to the `## Implementation Spec` section of `.spec-finder/tasks/<slug>/_prd.md`.
 The saved spec is the prompt the operator will point an agent at.
 Reject and rewrite the spec if any item fails.
 Do not present a failing spec.
@@ -22,7 +22,7 @@ NO RUNNER PACKET OUTPUT.
 - Outcome is "make it better", "clean it up", "add support for X", or "follow best practices".
 - Paths are guessed and not marked `create`.
 - The spec contains the implementation the agent should invent (after-code, patch, step-by-step algorithm).
-- The spec tells `sf-write-spec` to create `.spec-finder/tasks/`, `_prd.md`, `_techspec.md`, `_tasks.md`, `task_NN.md`, ADRs, or memory files.
+- The spec tells `sf-write-spec` to create `.spec-finder/specs/`, `_techspec.md`, `_tasks.md`, `task_NN.md`, ADRs, or memory files.
 - Fewer than two **Never** lines.
 - No copy-pastable command as done-when.
 - Current behavior is not distinguished from desired behavior.
@@ -34,6 +34,9 @@ NO RUNNER PACKET OUTPUT.
 - Writer-facing template prose remains ("Write exclusions before…", "Who is affected…", "The system as it is. Not the design.").
 - Any `[…]` fill-in token or `<slug>` remains. The listed examples are not exhaustive; every template token must be replaced.
 - The executor would still need chat history, a question, or a repo-wide hunt to start.
+- An approved PRD exists and an in-scope capability or story is dropped without an explicit exclusion and the PRD rationale.
+- The spec tells the executor to read the PRD instead of containing the product decisions.
+- The spec tells `sf-write-spec` to rewrite approved product sections above `## Implementation Spec`.
 
 ## Density by section
 

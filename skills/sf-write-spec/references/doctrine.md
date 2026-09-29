@@ -5,17 +5,27 @@ They are the spec contract, not style notes.
 
 ## The spec is the prompt
 
-`.spec-finder/specs/<slug>-spec.md` is the complete implementation prompt.
-The operator later points an agent at that path and nothing else.
-An executor that reads only this file plus the repository must implement, verify, and stop without chat history.
+`.spec-finder/tasks/<slug>/_prd.md` is the file an agent is pointed at.
+The `## Implementation Spec` section is the complete implementation prompt.
+An executor that reads that file plus the repository must implement, verify, and stop without chat history.
 If the executor would need to ask a question, reverse-engineer the seam, or guess a public contract, the spec is not done.
 Do not leave intent only in chat.
 
 ## Single output only
 
-`sf-write-spec` writes exactly one saved artifact: `.spec-finder/specs/<slug>-spec.md`.
-It never writes a runner packet, PRD, TechSpec, task index, task file, ADR, or memory file.
-The spec must carry every decision those files would otherwise have projected.
+`sf-write-spec` changes exactly one file: `.spec-finder/tasks/<slug>/_prd.md`.
+It writes only the `## Implementation Spec` section.
+It never writes `.spec-finder/specs/`, a TechSpec, task index, task file, ADR, or memory file.
+The spec section must carry every implementation decision.
+
+## Approved product sections stay above the spec
+
+Approved product sections in `.spec-finder/tasks/<slug>/_prd.md` stay above `## Implementation Spec`.
+Inline their problem, non-goals, capabilities, and acceptance into the spec section.
+Do not tell the executor to read a different file.
+Do not re-decide product scope the product sections already fixed unless repository evidence conflicts and the user chooses.
+A thin task with no approved PRD is not a spec. Hand it to `sf-create-prd`.
+A clear request may still start here. Create the file with only the spec section.
 
 ## Current system is mandatory
 
@@ -79,7 +89,7 @@ Split by user/operator outcome, not by layer.
 A slice is independently testable once declared dependencies are done.
 No foundation-only task.
 No separate test-only task.
-Slices stay inside `.spec-finder/specs/<slug>-spec.md`; do not project them into `.spec-finder/tasks/`.
+Slices stay under `## Implementation Spec`. Do not project them into `task_NN.md`.
 
 ## Research, then ask, then approve
 

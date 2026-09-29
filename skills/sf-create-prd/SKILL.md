@@ -1,20 +1,34 @@
 ---
 name: sf-create-prd
-description: Creates or updates an approved business-focused Product Requirements Document through codebase and market research, one-at-a-time clarification, explicit product approach selection, ADR capture, and whole-draft approval. Start directly from a clear feature request, idea, or packet slug; `_idea.md` is optional. Use `sf-idea-factory` first only when the problem, opportunity, or V1 boundary still needs discovery. Use for defining product outcomes and requirements, not architecture, task breakdown, or implementation.
+description: Creates or updates an approved, human-readable Product Requirements Document through codebase and market research, one-at-a-time clarification, explicit product approach selection, ADR capture, and whole-draft approval. Start from a feature request, a thin or poorly written task, a ticket, an idea, or a packet slug; `_idea.md` is optional. Use `sf-idea-factory` first only when the problem, opportunity, or V1 boundary still needs discovery. After the PRD is saved, run the bundled `humanizer` skill on it. Then hand off to `sf-write-spec`, `sf-tdd-write-spec`, or `sf-create-techspec`. Use for defining product outcomes and requirements, not architecture, spec authoring, task breakdown, or implementation.
 ---
 
 # Create a Spec Finder PRD
 
+
+## Coexistence with specs
+
+This skill and the spec skills are a sequence, not mutually exclusive paths.
+
+1. A thin or poorly written task with little context starts here and becomes `.spec-finder/tasks/<slug>/_prd.md`.
+2. After that PRD is approved, the user chooses the next artifact:
+   - `sf-write-spec` writes `## Implementation Spec` inside `.spec-finder/tasks/<slug>/_prd.md`, then prints that path.
+   - `sf-tdd-write-spec` writes the same heading in the same file, with confirmed public-seam red-green slices, then prints that path.
+   - `sf-create-techspec` continues the packet path for `spec-finder run`.
+3. This skill does not write the spec. The spec skills preserve approved product sections above `## Implementation Spec`.
+
 <HARD-GATE>
-- NEVER require `_idea.md` or prior `sf-idea-factory` completion. Begin directly when the user provides a sufficiently clear feature request, idea, or packet slug.
+- NEVER require `_idea.md` or prior `sf-idea-factory` completion. Begin directly from a feature request, a thin or poorly written task, a ticket, a prompt, an idea, or a packet slug. Missing product context is resolved by research and clarification, not by refusing the start.
 - NEVER write or replace `_prd.md` before both research tracks, clarification, explicit approach selection, a complete draft review, and explicit user approval are complete.
-- NEVER skip research or interaction because a feature appears simple or technical.
+- NEVER skip research or interaction because a feature appears simple, technical, or poorly written.
 - NEVER infer a material product decision when multiple credible choices remain.
-- NEVER drift into databases, APIs, frameworks, code structure, or testing design.
+- NEVER drift into databases, APIs, frameworks, code structure, testing design, or an implementation spec.
+- NEVER write `.spec-finder/specs/`, `_techspec.md`, `_tasks.md`, or `task_NN.md`.
 - NEVER treat a requested feature or “users want X” as the problem.
 - NEVER expand MVP capabilities before explicit non-goals.
 - NEVER save a goal without a baseline (or explicit unknown plus how it will be measured), target, window, and measurement method.
 - NEVER require section-by-section approval; synthesize one complete draft after the approach decision.
+- NEVER choose the next artifact silently. After approval, ask whether to author a normal spec, a TDD spec, or a TechSpec unless the user already named that next skill.
 </HARD-GATE>
 
 ## Interaction contract
@@ -31,9 +45,11 @@ Read `references/question-protocol.md` before asking questions.
 
 ## Required inputs
 
-- A feature name, idea, or packet slug.
+- A feature name, idea, packet slug, or a thin or poorly written task, ticket, or prompt.
 - Optional `_idea.md` as primary discovery context when it already exists.
 - Optional `_prd.md` for update mode.
+
+A thin task is enough to start. Do not require it to already state the user, failure, success metric, or non-goals. Use `sf-idea-factory` first only when the problem, opportunity, or V1 boundary is still unknown and the user asked for discovery.
 
 ## Mandatory phase checklist
 
@@ -44,7 +60,7 @@ Read `references/question-protocol.md` before asking questions.
 5. Present 2-3 product approaches and obtain an explicit selection.
 6. Record consequential product decisions in ADRs.
 7. Draft the complete PRD and obtain explicit approval.
-8. Save, re-read, validate, and hand off to `sf-create-techspec`.
+8. Save the approved PRD, run the bundled `humanizer` skill on that file, re-read, validate, and ask which next artifact to author.
 
 ## Workflow
 
@@ -53,6 +69,7 @@ Read `references/question-protocol.md` before asking questions.
 - Derive or confirm the slug and target `.spec-finder/tasks/<slug>/`.
 - Read repository instructions and all existing packet artifacts, including `_idea.md` when present, an existing `_prd.md`, downstream artifacts, and every ADR. Read `.spec-finder/config.json` when present.
 - When `_idea.md` exists, treat it as approved input, not immutable truth; surface conflicts with current evidence.
+- A thin or poorly written task is a valid start. Do not stop for missing product context before research and clarification.
 - New PRDs use `references/prd-template.md`. In update mode, identify the requested delta, preserve untouched sections, and keep the existing document structure. Do not migrate Overview / Core Features / Success Metrics layouts unless the user explicitly asks. The PRD is a living document; change only the approved delta.
 
 ### 2. Research before questions
@@ -113,6 +130,7 @@ If external research is unavailable, disclose the missing evidence and ask with 
 - Keep `F-xx` as a thin capability table. Do not write MUST/SHOULD feature specs.
 - Put unresolved non-blocking items in Open Questions and explicitly exclude deferred work.
 - Cite market claims near their source. Label estimates and inference. Never invent a baseline.
+- Write simple sentences a person can read aloud. Do not use promotional language, inflated significance, or chatbot phrasing. The post-save `humanizer` pass is still required.
 
 ### 7. Review and save
 
@@ -129,7 +147,29 @@ If external research is unavailable, disclose the missing evidence and ask with 
   - Evidence is capped, cited, and distinguished from inference;
   - ADRs are linked and no material branch sits in Open Questions;
   - length is in the 800–1600 word target unless the user approved a longer delta.
-- Point to `sf-create-techspec` as the next step.
+- After validation, run the bundled `humanizer` skill on the saved `.spec-finder/tasks/<slug>/_prd.md` before asking what comes next.
+- Read `humanizer` from the Spec Finder skills installed beside this skill, or from `skills/humanizer/SKILL.md` in the Spec Finder package. If neither file is readable, stop and tell the user to install `humanizer` with `spec-finder setup`. Do not invent a partial rewrite.
+- Rewrite the saved PRD with that skill so the prose is simple and human-readable. Preserve product decisions, stable IDs (`G-xx`, `US-xx`, `F-xx`), Given/When/Then, tables, citations, required headings, and approved scope.
+- Do not add first-person opinions, humor, or new claims. A PRD stays neutral product writing. Use the humanizer to remove AI patterns, not to turn the document into an essay.
+- If humanizing would drop a required ID, table, citation, or decision, restore that fact in plain language and humanize the surrounding prose again.
+- Re-read the humanized file and repeat the validation list above. Do not ask the next-artifact question until that file passes.
+- If the user already named the next skill, point to that skill and the PRD path. Do not write the next artifact.
+- Otherwise ask exactly once:
+
+```text
+The approved PRD is `.spec-finder/tasks/<slug>/_prd.md`.
+Which artifact should be authored next from this PRD?
+
+A. (Recommended) Normal spec with `sf-write-spec` — `## Implementation Spec` inside `.spec-finder/tasks/<slug>/_prd.md`. That skill prints the path to paste to an agent.
+B. TDD spec with `sf-tdd-write-spec` — same file and heading, with confirmed public-seam red-green slices. That skill prints the path.
+C. Packet TechSpec with `sf-create-techspec` — `.spec-finder/tasks/<slug>/_techspec.md`, then tasks and `spec-finder run`.
+D. Stop here.
+
+Reply with the letter (for example, A), or the letter plus context.
+```
+
+- Recommend A unless the user already asked for TDD or the packet runner.
+- Do not start spec research, seam confirmation, or TechSpec design in this skill.
 
 ## Anti-patterns
 
@@ -143,6 +183,11 @@ If external research is unavailable, disclose the missing evidence and ask with 
 - Dumping the full research ledger into Evidence.
 - Treating “nice to have” as MVP without a mapped goal or story.
 - Hiding unresolved scope inside vague language such as “support common cases”.
+- Refusing a thin task before research and clarification.
+- Writing the spec, TechSpec, or tasks from this skill.
+- Treating `sf-write-spec` or `sf-tdd-write-spec` as a replacement for this PRD when the task lacks product context.
+- Saving a PRD that still reads like AI copy, or skipping the `humanizer` pass.
+- Letting `humanizer` drop IDs, tables, citations, or approved product decisions.
 
 ## Failure rules
 

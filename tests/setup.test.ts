@@ -38,10 +38,11 @@ async function tempRoot(prefix = "spec-finder-setup-"): Promise<string> {
 }
 
 describe("setup", () => {
-  test("installs seventeen managed skills including refinement, one-file spec paths, review, and the TDD pack at every provider-derived local/global destination", async () => {
+  test("installs eighteen managed skills including humanizer, refinement, one-file spec paths, review, and the TDD pack at every provider-derived local/global destination", async () => {
     expect(SPEC_FINDER_SKILLS).toEqual([
       "sf-idea-factory",
       "sf-create-prd",
+      "humanizer",
       "sf-create-techspec",
       "sf-create-tasks",
       "sf-write-spec",
@@ -58,7 +59,7 @@ describe("setup", () => {
       "sf-archive-tasks",
       "sf-review",
     ])
-    expect(SPEC_FINDER_SKILLS).toHaveLength(17)
+    expect(SPEC_FINDER_SKILLS).toHaveLength(18)
     for (const provider of PROVIDERS) {
       for (const scope of ["local", "global"] as const) {
         const root = await tempRoot()

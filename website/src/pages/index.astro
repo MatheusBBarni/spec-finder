@@ -53,9 +53,9 @@ const gettingStartedHref = `${base}getting-started/`
     <article class="card">
       <h3>Simplified spec path</h3>
       <p>
-        <code>sf-write-spec</code> writes
-        <code>.spec-finder/specs/&lt;slug&gt;-spec.md</code> for an agent to
-        execute, plus the same runner packet, in one research-and-approve pass.
+        <code>sf-write-spec</code> and <code>sf-tdd-write-spec</code> write
+        <code>## Implementation Spec</code> inside the task
+        <code>_prd.md</code>, then print that path. A thin task goes through <code>sf-create-prd</code> first.
       </p>
     </article>
     <article class="card">
@@ -128,11 +128,11 @@ const gettingStartedHref = `${base}getting-started/`
   </ol>
   <div class="grid split">
     <article class="card">
-      <h3>Clear request: one-shot spec</h3>
+      <h3>Thin task, then spec</h3>
       <p>
-        Use <code>sf-write-spec</code> when the feature is clear enough for one
-        research-and-approve pass. It writes the agent-executable spec and still
-        writes the runner packet.
+        Use <code>sf-create-prd</code> when the task lacks product context. After
+        the approved PRD, choose <code>sf-write-spec</code> or
+        <code>sf-tdd-write-spec</code>. They write the spec into that same <code>_prd.md</code> and print the path.
       </p>
     </article>
     <article class="card">
@@ -165,9 +165,15 @@ const gettingStartedHref = `${base}getting-started/`
         <tr>
           <td><code>sf-write-spec</code></td>
           <td>
-            <code>.spec-finder/specs/&lt;slug&gt;-spec.md</code> plus runner
-            packet (<code>_prd.md</code>, <code>_techspec.md</code>,
-            <code>_tasks.md</code>, <code>task_NN.md</code>)
+            <code>## Implementation Spec</code> inside the task
+            <code>_prd.md</code>. Prints that path. Does not write a separate spec file.
+          </td>
+        </tr>
+        <tr>
+          <td><code>sf-tdd-write-spec</code></td>
+          <td>
+            Same file and heading, with confirmed public-seam red-green slices.
+            Prints that path.
           </td>
         </tr>
         <tr>
@@ -186,6 +192,10 @@ const gettingStartedHref = `${base}getting-started/`
         <tr>
           <td><code>sf-create-prd</code></td>
           <td><code>_prd.md</code></td>
+        </tr>
+        <tr>
+          <td><code>humanizer</code></td>
+          <td>Plain human-readable prose. <code>sf-create-prd</code> runs it on the saved PRD.</td>
         </tr>
         <tr>
           <td><code>sf-create-techspec</code></td>

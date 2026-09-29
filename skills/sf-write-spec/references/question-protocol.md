@@ -13,6 +13,10 @@ Ask only dimensions still open after research and existing artifacts:
 5. **Slice or sequencing** only when a split would change user-visible outcomes.
 
 Skip a dimension that research, the request, or an approved artifact already fixed.
+An approved `.spec-finder/tasks/<slug>/_prd.md` fixes need, users, success, non-goals, and in-scope capabilities.
+Skip those dimensions.
+Ask only public contracts, failure, boundaries, and slice forks that the PRD did not decide.
+If the PRD conflicts with the repository, that conflict is the question. Do not silently override the PRD.
 Do not manufacture questions to reach a quota.
 Ask 2-6 remaining questions.
 If none remain, present the complete draft.

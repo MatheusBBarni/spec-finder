@@ -14,7 +14,7 @@ describe("sf-tdd-write-spec contract", () => {
 
     expect(skill).toContain("name: sf-tdd-write-spec")
     expect(skill).toContain("Write exactly one file")
-    expect(skill).toContain(".spec-finder/specs/<slug>-spec.md")
+    expect(skill).toContain(".spec-finder/tasks/<slug>/_prd.md")
     expect(skill).toContain("Read `references/tdd-doctrine.md`")
     expect(skill).toContain("NEVER require")
     expect(skill).toContain("external `tdd` skill")
@@ -40,14 +40,10 @@ describe("sf-tdd-write-spec contract", () => {
     expect(quality).toContain("NO GREEN WITHOUT AN OBSERVED RED")
     expect(quality).toContain("NO EXTERNAL TDD SKILL DEPENDENCY")
 
-    for (const forbidden of [
-      ".spec-finder/tasks/<slug>/",
-      "_prd.md",
-      "_techspec.md",
-      "_tasks.md",
-      "task_NN.md",
-    ]) {
-      expect(body).not.toContain(forbidden)
-    }
+    expect(skill).toContain("approved `.spec-finder/tasks/<slug>/_prd.md`")
+    expect(skill).toContain("Stop and offer `sf-create-prd`")
+    expect(skill).toContain("Copy this path and point an agent at it:")
+    expect(skill).toContain("NEVER write `.spec-finder/specs/`")
+    expect(body).not.toContain("references/prd-template.md")
   })
 })

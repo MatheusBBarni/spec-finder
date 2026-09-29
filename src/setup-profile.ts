@@ -8,6 +8,7 @@ export type SetupDestination = (typeof SETUP_DESTINATIONS)[number]
 export const SPEC_FINDER_SKILLS = [
   "sf-idea-factory",
   "sf-create-prd",
+  "humanizer",
   "sf-create-techspec",
   "sf-create-tasks",
   "sf-write-spec",
