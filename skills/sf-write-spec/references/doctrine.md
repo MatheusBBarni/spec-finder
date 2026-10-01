@@ -5,27 +5,26 @@ They are the spec contract, not style notes.
 
 ## The spec is the prompt
 
-`.spec-finder/tasks/<slug>/_prd.md` is the file an agent is pointed at.
-The `## Implementation Spec` section is the complete implementation prompt.
+`.spec-finder/tasks/<slug>/_spec.md` is the file an agent is pointed at.
+The entire file is the complete implementation prompt.
 An executor that reads that file plus the repository must implement, verify, and stop without chat history.
 If the executor would need to ask a question, reverse-engineer the seam, or guess a public contract, the spec is not done.
 Do not leave intent only in chat.
 
 ## Single output only
 
-`sf-write-spec` changes exactly one file: `.spec-finder/tasks/<slug>/_prd.md`.
-It writes only the `## Implementation Spec` section.
-It never writes `.spec-finder/specs/`, a TechSpec, task index, task file, ADR, or memory file.
-The spec section must carry every implementation decision.
+`sf-write-spec` changes exactly one file: `.spec-finder/tasks/<slug>/_spec.md`.
+It never changes `_prd.md` or writes `.spec-finder/specs/`, a TechSpec, task index, task file, ADR, or memory file.
+The spec file must carry every implementation decision.
 
-## Approved product sections stay above the spec
+## The PRD remains a separate product source
 
-Approved product sections in `.spec-finder/tasks/<slug>/_prd.md` stay above `## Implementation Spec`.
-Inline their problem, non-goals, capabilities, and acceptance into the spec section.
-Do not tell the executor to read a different file.
-Do not re-decide product scope the product sections already fixed unless repository evidence conflicts and the user chooses.
+Approved product sections remain in `.spec-finder/tasks/<slug>/_prd.md`.
+When that PRD exists, `_spec.md` names its exact path as Product source and inlines its problem, non-goals, capabilities, and acceptance.
+The source reference records provenance; it does not make the PRD required reading for execution.
+Do not re-decide product scope the PRD already fixed unless repository evidence conflicts and the user chooses.
 A thin task with no approved PRD is not a spec. Hand it to `sf-create-prd`.
-A clear request may still start here. Create the file with only the spec section.
+A clear request may still start here. Create only `_spec.md` and omit the Product source line.
 
 ## Current system is mandatory
 
@@ -89,7 +88,7 @@ Split by user/operator outcome, not by layer.
 A slice is independently testable once declared dependencies are done.
 No foundation-only task.
 No separate test-only task.
-Slices stay under `## Implementation Spec`. Do not project them into `task_NN.md`.
+Slices stay in `_spec.md`. Do not project them into `task_NN.md`.
 
 ## Research, then ask, then approve
 

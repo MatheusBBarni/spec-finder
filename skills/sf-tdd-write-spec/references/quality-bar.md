@@ -1,6 +1,6 @@
 # TDD spec quality bar
 
-Apply this bar before presenting and after saving the `## Implementation Spec` section of `.spec-finder/tasks/<slug>/_prd.md`.
+Apply this bar before presenting and after saving `.spec-finder/tasks/<slug>/_spec.md`.
 
 ## Iron law
 
@@ -29,9 +29,9 @@ NO PLACEHOLDERS IN THE SAVED SPEC.
 - a mock is used away from a system boundary
 - a red command can pass before implementation without stopping the slice
 - the spec tells the executor to load or invoke an external TDD skill
-- the workflow creates `.spec-finder/specs/`, a TechSpec, task file, ADR, report, or memory artifact, or rewrites approved product sections above `## Implementation Spec`
+- the workflow creates `.spec-finder/specs/`, a TechSpec, task file, ADR, report, or memory artifact, or modifies an approved `_prd.md`
 - an approved PRD exists and an in-scope capability or story is dropped without an explicit exclusion and the PRD rationale
-- the spec tells the executor to read the PRD instead of containing the product decisions
+- the spec tells the executor to read the PRD instead of containing the product decisions, or omits that PRD's exact path as Product source
 - acceptance omits a relevant invalid, empty, conflict, permission, or recovery path
 - public contracts lack a signature, schema, protocol, or CLI grammar plus valid and invalid examples
 - exact focused commands or the repository gate are absent

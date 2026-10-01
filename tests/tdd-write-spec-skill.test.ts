@@ -14,7 +14,8 @@ describe("sf-tdd-write-spec contract", () => {
 
     expect(skill).toContain("name: sf-tdd-write-spec")
     expect(skill).toContain("Write exactly one file")
-    expect(skill).toContain(".spec-finder/tasks/<slug>/_prd.md")
+    expect(skill).toContain(".spec-finder/tasks/<slug>/_spec.md")
+    expect(skill).toContain("Product source")
     expect(skill).toContain("Read `references/tdd-doctrine.md`")
     expect(skill).toContain("NEVER require")
     expect(skill).toContain("external `tdd` skill")
@@ -43,7 +44,7 @@ describe("sf-tdd-write-spec contract", () => {
     expect(skill).toContain("approved `.spec-finder/tasks/<slug>/_prd.md`")
     expect(skill).toContain("Stop and offer `sf-create-prd`")
     expect(skill).toContain("Copy this path and point an agent at it:")
-    expect(skill).toContain("NEVER write `.spec-finder/specs/`")
+    expect(skill).toContain("PRD:")
     expect(body).not.toContain("references/prd-template.md")
   })
 })

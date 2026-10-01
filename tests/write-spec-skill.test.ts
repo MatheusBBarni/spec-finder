@@ -1,11 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { describe, expect, test } from "bun:test"
+import { readFile } from "node:fs/promises"
 import { join } from "node:path"
-import { TASKS_DIR } from "../src/paths.ts"
-
-const roots: string[] = []
-afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))))
 
 const skillDir = join(import.meta.dir, "..", "skills", "sf-write-spec")
 
@@ -21,14 +16,15 @@ describe("sf-write-spec contract", () => {
     expect(skill).toContain("sf-write-spec")
     expect(skill).toContain("This is not `sf-idea-factory`, `sf-create-prd`, `sf-create-techspec`, and `sf-create-tasks` run in sequence.")
     expect(skill).toContain("Write exactly one file")
-    expect(skill).toContain("NEVER write `.spec-finder/specs/`")
+    expect(skill).toContain(".spec-finder/tasks/<slug>/_spec.md")
     expect(skill).toContain("Do not point to `spec-finder run <slug>` or `sf-execute-task`")
     expect(doctrine).toContain("Single output only")
     expect(skill).toContain("approved `.spec-finder/tasks/<slug>/_prd.md`")
     expect(skill).toContain("Copy this path and point an agent at it:")
+    expect(skill).toContain("PRD:")
     expect(skill).toContain("Stop and offer `sf-create-prd`")
     expect(skill).toContain("sf-tdd-write-spec")
-    expect(doctrine).toContain("Approved product sections stay above the spec")
+    expect(doctrine).toContain("The PRD remains a separate product source")
     expect(quality).toContain("NO RUNNER PACKET OUTPUT")
 
     for (const needle of [
@@ -38,7 +34,7 @@ describe("sf-write-spec contract", () => {
       "Always",
       "Ask first",
       "Never",
-      ".spec-finder/tasks/<slug>/_prd.md",
+      ".spec-finder/tasks/<slug>/_spec.md",
       "whole-draft",
       "complete implementation prompt",
       "Current System",
@@ -84,40 +80,11 @@ describe("sf-write-spec contract", () => {
     expect(spec).toContain("Invalid:")
     expect(doctrine).toContain("The spec is the prompt")
     expect(quality).toContain("NO PROMPT WITHOUT CURRENT-SYSTEM EVIDENCE")
-    expect(skill).toContain("against the `## Implementation Spec` draft")
-    expect(quality).toContain("This bar applies only to the `## Implementation Spec` section of `.spec-finder/tasks/<slug>/_prd.md`")
+    expect(skill).toContain("against the complete `_spec.md` draft")
+    expect(quality).toContain("This bar applies to `.spec-finder/tasks/<slug>/_spec.md`")
     expect(quality).toContain("every template token must be replaced")
 
     expect(skill).toContain("references/quality-bar.md")
   })
 
-  test("writes the agent-executable spec under Implementation Spec in the task PRD", async () => {
-    const root = await mkdtemp(join(tmpdir(), "spec-finder-write-spec-file-"))
-    roots.push(root)
-    const slug = "write-spec-demo"
-    const template = await readFile(join(skillDir, "references", "spec-template.md"), "utf8")
-    const filled = template.replaceAll("<slug>", slug).replaceAll("[Feature]", "Write spec demo")
-    const specPath = join(root, ".spec-finder", TASKS_DIR, slug, "_prd.md")
-    await mkdir(join(root, ".spec-finder", TASKS_DIR, slug), { recursive: true })
-    await writeFile(specPath, filled)
-
-    expect(specPath.endsWith(`.spec-finder/tasks/${slug}/_prd.md`)).toBe(true)
-    const body = await readFile(specPath, "utf8")
-    expect(body).toContain(`.spec-finder/tasks/${slug}/_prd.md`)
-    expect(body).toContain("## Implementation Spec")
-    expect(body).not.toContain(".spec-finder/specs/")
-    expect(body).not.toContain("Runner packet")
-    expect(body).not.toContain("<slug>")
-    expect(body).toContain("## Execution")
-    expect(body).toContain("**Given**")
-    expect(body).toContain("**When**")
-    expect(body).toContain("**Then**")
-    expect(body).toContain("### Always")
-    expect(body).toContain("### Ask first")
-    expect(body).toContain("### Never")
-    expect(body).toContain("## Failure and Edge Cases")
-    expect(body).toContain("## Current System")
-    expect(body).toContain("## Output")
-    expect(body).toContain("Read first because")
-  })
 })

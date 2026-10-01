@@ -1,11 +1,12 @@
 # [Feature] TDD Spec
 
-This section is the complete implementation prompt inside `.spec-finder/tasks/<slug>/_prd.md`.
-An executor that reads that file plus the repository must implement and verify without chat history.
+This file is the complete implementation prompt at `.spec-finder/tasks/<slug>/_spec.md`.
+An executor that reads this file plus the repository must implement and verify without chat history.
 
 - **Slug:** `<slug>`
-- **This file:** `.spec-finder/tasks/<slug>/_prd.md`
-Omit this writer note from the saved spec. Start the saved section at `## Implementation Spec`.
+- **This file:** `.spec-finder/tasks/<slug>/_spec.md`
+- **Product source:** `.spec-finder/tasks/<slug>/_prd.md` [include only when that approved PRD exists]
+Omit this writer note from the saved spec. Start the saved file at `# [Feature] TDD Spec`.
 - **Job:** [Feature | Improvement | Bug]
 - **Outcome:** [observable user or operator result]
 

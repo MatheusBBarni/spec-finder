@@ -12,10 +12,10 @@ This skill and the spec skills are a sequence, not mutually exclusive paths.
 
 1. A thin or poorly written task with little context starts here and becomes `.spec-finder/tasks/<slug>/_prd.md`.
 2. After that PRD is approved, the user chooses the next artifact:
-   - `sf-write-spec` writes `## Implementation Spec` inside `.spec-finder/tasks/<slug>/_prd.md`, then prints that path.
-   - `sf-tdd-write-spec` writes the same heading in the same file, with confirmed public-seam red-green slices, then prints that path.
+   - `sf-write-spec` writes `.spec-finder/tasks/<slug>/_spec.md`, references the approved `_prd.md` as its product source, then prints both paths.
+   - `sf-tdd-write-spec` writes the same separate `_spec.md`, with confirmed public-seam red-green slices, references the approved `_prd.md`, then prints both paths.
    - `sf-create-techspec` continues the packet path for `spec-finder run`.
-3. This skill does not write the spec. The spec skills preserve approved product sections above `## Implementation Spec`.
+3. This skill does not write the spec. The spec skills leave `_prd.md` unchanged and write the implementation prompt to `_spec.md`.
 
 <HARD-GATE>
 - NEVER require `_idea.md` or prior `sf-idea-factory` completion. Begin directly from a feature request, a thin or poorly written task, a ticket, a prompt, an idea, or a packet slug. Missing product context is resolved by research and clarification, not by refusing the start.
@@ -160,8 +160,8 @@ If external research is unavailable, disclose the missing evidence and ask with 
 The approved PRD is `.spec-finder/tasks/<slug>/_prd.md`.
 Which artifact should be authored next from this PRD?
 
-A. (Recommended) Normal spec with `sf-write-spec` — `## Implementation Spec` inside `.spec-finder/tasks/<slug>/_prd.md`. That skill prints the path to paste to an agent.
-B. TDD spec with `sf-tdd-write-spec` — same file and heading, with confirmed public-seam red-green slices. That skill prints the path.
+A. (Recommended) Normal spec with `sf-write-spec` — `.spec-finder/tasks/<slug>/_spec.md`, with the approved `_prd.md` named as its product source. That skill shows both paths.
+B. TDD spec with `sf-tdd-write-spec` — the same separate `_spec.md`, with confirmed public-seam red-green slices. That skill shows both paths.
 C. Packet TechSpec with `sf-create-techspec` — `.spec-finder/tasks/<slug>/_techspec.md`, then tasks and `spec-finder run`.
 D. Stop here.
 

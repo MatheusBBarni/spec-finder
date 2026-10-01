@@ -165,15 +165,15 @@ const gettingStartedHref = `${base}getting-started/`
         <tr>
           <td><code>sf-write-spec</code></td>
           <td>
-            <code>## Implementation Spec</code> inside the task
-            <code>_prd.md</code>. Prints that path. Does not write a separate spec file.
+            <code>.spec-finder/tasks/&lt;slug&gt;/_spec.md</code>. References an
+            approved <code>_prd.md</code>, leaves it unchanged, and prints both paths.
           </td>
         </tr>
         <tr>
           <td><code>sf-tdd-write-spec</code></td>
           <td>
-            Same file and heading, with confirmed public-seam red-green slices.
-            Prints that path.
+            The same separate <code>_spec.md</code>, with confirmed public-seam
+            red-green slices. References an approved PRD and prints both paths.
           </td>
         </tr>
         <tr>

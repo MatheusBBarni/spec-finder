@@ -1,6 +1,6 @@
 ---
 name: sf-write-spec
-description: Creates an approved, agent-executable Spec Finder spec from a clear feature request or an approved `.spec-finder/tasks/<slug>/_prd.md`. Researches the repository and current docs before asking, inlines approved PRD decisions, asks only remaining material decisions, and writes nothing until the user approves a complete draft. Writes the spec under `## Implementation Spec` inside `.spec-finder/tasks/<slug>/_prd.md`, then prints that path so the user can paste it to an agent. A thin task with no PRD belongs to `sf-create-prd` first. Do not use for idea-factory discovery, PRD-only, TechSpec-only, task regeneration, packet creation, or TDD-prescribed specs (`sf-tdd-write-spec`).
+description: Creates an approved, agent-executable Spec Finder spec from a clear feature request or an approved `.spec-finder/tasks/<slug>/_prd.md`. Researches the repository and current docs before asking, inlines approved PRD decisions, asks only remaining material decisions, and writes nothing until the user approves a complete draft. Writes `.spec-finder/tasks/<slug>/_spec.md`, references the PRD when one exists, then prints both artifact paths. A thin task with no PRD belongs to `sf-create-prd` first. Do not use for idea-factory discovery, PRD-only, TechSpec-only, task regeneration, packet creation, or TDD-prescribed specs (`sf-tdd-write-spec`).
 ---
 
 # Write a Spec Finder Spec
@@ -8,16 +8,16 @@ description: Creates an approved, agent-executable Spec Finder spec from a clear
 
 ## Coexistence with a PRD
 
-`sf-create-prd` and this skill share `.spec-finder/tasks/<slug>/_prd.md`. They are not a packet pipeline.
+`sf-create-prd` and this skill produce separate artifacts in `.spec-finder/tasks/<slug>/`. They are not a packet pipeline.
 
 1. A thin or poorly written task with little context goes to `sf-create-prd` first. This skill does not invent that product context.
-2. An approved `.spec-finder/tasks/<slug>/_prd.md` is the product source of truth. Preserve every line above `## Implementation Spec`.
-3. This invocation writes the spec only under `## Implementation Spec` in that file. Then it prints the path.
-4. A clear request that already states who is affected, the current failure, testable success, and at least one non-goal may start here with no PRD. Create `.spec-finder/tasks/<slug>/_prd.md` containing only that spec section.
-5. Prescribed red-green slices belong to `sf-tdd-write-spec`, which writes the same heading in the same file.
+2. An approved `.spec-finder/tasks/<slug>/_prd.md` is the product source of truth and remains unchanged.
+3. This invocation writes the implementation prompt to `.spec-finder/tasks/<slug>/_spec.md`. The spec names `_prd.md` as its Product source and inlines its approved decisions.
+4. A clear request that already states who is affected, the current failure, testable success, and at least one non-goal may start here with no PRD. Create only `.spec-finder/tasks/<slug>/_spec.md`.
+5. Prescribed red-green slices belong to `sf-tdd-write-spec`, which writes the same `_spec.md` path.
 
-One invocation changes exactly one file: `.spec-finder/tasks/<slug>/_prd.md`. The `## Implementation Spec` section is the complete implementation prompt an agent runs when pointed at that file.
-It does not write `.spec-finder/specs/`, `_techspec.md`, `_tasks.md`, `task_NN.md`, ADRs, or memory files.
+One invocation changes exactly one file: `.spec-finder/tasks/<slug>/_spec.md`. That file is the complete implementation prompt an agent runs.
+It does not change `_prd.md` or write `.spec-finder/specs/`, `_techspec.md`, `_tasks.md`, `task_NN.md`, ADRs, or memory files.
 This is not `sf-idea-factory`, `sf-create-prd`, `sf-create-techspec`, and `sf-create-tasks` run in sequence.
 Reading an already approved `.spec-finder/tasks/<slug>/_prd.md` is not that sequence. Do not refuse it.
 
@@ -26,9 +26,9 @@ Read `references/quality-bar.md` before drafting.
 
 <HARD-GATE>
 - NEVER require `sf-idea-factory`, `sf-create-prd`, `sf-create-techspec`, or `sf-create-tasks` before starting when the request is already clear. NEVER require a PRD. When an approved `.spec-finder/tasks/<slug>/_prd.md` exists, read it and treat the product sections as the product source of truth.
-- NEVER write `## Implementation Spec` before repository research, remaining-decision clarification, a complete draft review, and explicit whole-draft approval.
+- NEVER write `_spec.md` before repository research, remaining-decision clarification, a complete draft review, and explicit whole-draft approval.
 - NEVER write `.spec-finder/specs/`, `_techspec.md`, `_tasks.md`, `task_NN.md`, ADRs, memory files, or any runner packet artifact.
-- NEVER rewrite approved product sections above `## Implementation Spec`.
+- NEVER modify an approved `.spec-finder/tasks/<slug>/_prd.md`.
 - NEVER invent product scope for a thin task that has no approved PRD. Stop and offer `sf-create-prd`.
 - NEVER tell the executor to read the PRD instead of this spec. Inline the approved product decisions.
 - NEVER re-decide problem, users, goals, non-goals, or in-scope capabilities that the approved PRD already fixed, unless repository evidence conflicts.
@@ -40,8 +40,8 @@ Read `references/quality-bar.md` before drafting.
 - NEVER micromanage private implementation except public contracts (signatures, schemas, CLI grammar, errors, valid and invalid examples).
 - NEVER omit Always / Ask first / Never boundaries, named failure and edge cases, codebase-informed files, or named verification commands.
 - NEVER create a slice that is not independently testable once its declared dependencies are done.
-- NEVER omit `.spec-finder/tasks/<slug>/_prd.md`.
-  The `## Implementation Spec` section is the implementation prompt and must contain everything needed to implement and verify without chat history.
+- NEVER omit `.spec-finder/tasks/<slug>/_spec.md`.
+  The `_spec.md` file is the implementation prompt and must contain everything needed to implement and verify without chat history.
 - NEVER present a draft that fails `references/quality-bar.md` or still contains template placeholders.
 - NEVER omit Current System evidence (verified paths, callers/tests, and a current excerpt when the seam exists).
 - NEVER run idea-factory council, KPI scoring, or 3-7 market-search depth on this path.
@@ -64,7 +64,7 @@ Read `references/question-protocol.md` before asking questions or requesting app
 
 - A clear feature request, idea, or spec slug that already states who is affected, the current failure, testable success, and at least one non-goal.
 - Or an approved `.spec-finder/tasks/<slug>/_prd.md`.
-- Optional existing `## Implementation Spec` in `.spec-finder/tasks/<slug>/_prd.md` for update mode.
+- Optional existing `.spec-finder/tasks/<slug>/_spec.md` for update mode.
 
 If an approved `.spec-finder/tasks/<slug>/_prd.md` exists, read it and continue. Do not send the user back through idea-factory or PRD authoring unless repository evidence conflicts with that PRD.
 If the input is a thin task, ticket, or prompt and no approved PRD exists, stop and offer `sf-create-prd`. Do not invent the missing product decisions inside the spec.
@@ -81,7 +81,7 @@ If they asked for prescribed red-green slices, use `sf-tdd-write-spec`.
 4. Ask only the remaining material questions.
 5. Draft the complete spec as one review.
 6. Obtain explicit whole-draft approval.
-7. Write the spec under `## Implementation Spec` in `.spec-finder/tasks/<slug>/_prd.md`.
+7. Write `.spec-finder/tasks/<slug>/_spec.md`.
 8. Re-read and validate against the quality bar.
 
 ## Workflow
@@ -89,15 +89,15 @@ If they asked for prescribed red-green slices, use `sf-tdd-write-spec`.
 ### 1. Resolve context
 
 - Derive or confirm a descriptive kebab-case slug.
-- Target only `.spec-finder/tasks/<slug>/_prd.md`, under `## Implementation Spec`.
-- Read repository instructions, `.spec-finder/config.json` when present, and the existing `## Implementation Spec` when present.
+- Target only `.spec-finder/tasks/<slug>/_spec.md`.
+- Read repository instructions, `.spec-finder/config.json` when present, and the existing `_spec.md` when present.
 - Read `.spec-finder/tasks/<slug>/_prd.md` and its linked ADRs when that file exists. If it is missing, continue only when the request is not thin.
 - If the PRD exists but is unapproved or still has a material product branch open, stop and offer finishing `sf-create-prd` before drafting the spec.
-- Extract `G-xx`, `US-xx`, `F-xx`, Out of Scope, constraints, and open questions from the product sections. Do not rewrite those sections.
+- Extract `G-xx`, `US-xx`, `F-xx`, Out of Scope, constraints, and open questions from the PRD. Do not rewrite that file.
 - Create `.spec-finder/tasks/<slug>/` as needed.
   Do not write the spec yet.
-- In update mode, replace only `## Implementation Spec` and everything after it.
-  Preserve approved product sections and unrelated repository files.
+- In update mode, replace only `_spec.md`.
+  Preserve the approved PRD and unrelated repository files.
 
 ### 2. Research before questions
 
@@ -141,19 +141,20 @@ Read `references/spec-template.md` and `references/quality-bar.md`.
 
 Fill every required section below with repository facts, not writer notes.
 Strip every template placeholder from the spec file.
-Run `references/quality-bar.md` against the `## Implementation Spec` draft and rewrite until it passes, then present the draft.
+Run `references/quality-bar.md` against the complete `_spec.md` draft and rewrite until it passes, then present the draft.
 The spec stays dense. Do not split it into `_techspec.md`, `_tasks.md`, or `task_NN.md`.
 Do not ask for section-by-section or stage-by-stage approval.
 
-**Agent-executable spec (`## Implementation Spec` in `.spec-finder/tasks/<slug>/_prd.md`)**
+**Agent-executable spec (`.spec-finder/tasks/<slug>/_spec.md`)**
 
 - Read `references/spec-template.md` and fill every section.
+- Include a Product source line with `.spec-finder/tasks/<slug>/_prd.md` when an approved PRD exists.
 - Include outcome, current vs desired, Current System evidence, Out of Scope before In Scope, Given/When/Then plus a failure path, public contracts with examples, Always / Ask first / Never, named failure cases, read-first files, named verification commands, independently testable slices, and Output.
-- When approved product sections exist, inline their problem, non-goals, capabilities, and Given/When/Then into `## Implementation Spec`.
-- Map every in-scope `F-xx` and `US-xx` from those sections. Do not drop one unless this spec names it out of scope with the PRD rationale.
+- When an approved PRD exists, inline its problem, non-goals, capabilities, and Given/When/Then into `_spec.md`.
+- Map every in-scope `F-xx` and `US-xx` from the PRD. Do not drop one unless this spec names it out of scope with the PRD rationale.
 - Translate product outcomes into contracts, files, verification, and slices. Do not paste the product sections as the spec.
-- An executor pointed at `.spec-finder/tasks/<slug>/_prd.md` must be able to implement and verify from `## Implementation Spec`.
-- Keep slices inside that section. Do not project them into `task_NN.md`.
+- An executor pointed at `.spec-finder/tasks/<slug>/_spec.md` must be able to implement and verify from that file.
+- Keep slices inside `_spec.md`. Do not project them into `task_NN.md`.
 
 ### 5. Review and save
 
@@ -161,40 +162,50 @@ Do not ask for section-by-section or stage-by-stage approval.
 - Ask with `A. Approve and write the spec`, `B. Adjust the draft`, `C. Rewrite`, and `D. Discard`.
 - Apply feedback and present the complete current draft again.
 - Write only after explicit approval of that version.
-- Write exactly one file: `.spec-finder/tasks/<slug>/_prd.md`.
-- If the file exists, keep every line above `## Implementation Spec` and replace that heading through the end of the file.
-- If the heading is absent, append it after the approved product sections.
-- If the file does not exist, create it with only `## Implementation Spec` and the approved spec.
+- Write exactly one file: `.spec-finder/tasks/<slug>/_spec.md`.
+- Create or replace that file with the approved complete spec.
+- When an approved PRD exists, include its exact path as the Product source.
+- Do not modify `_prd.md`.
 - Do not write `.spec-finder/specs/`, `_techspec.md`, `_tasks.md`, `task_NN.md`, ADRs, memory files, or any runner packet artifact.
 
 ### 6. Validate before completion
 
-Re-read `.spec-finder/tasks/<slug>/_prd.md` and verify:
+Re-read `.spec-finder/tasks/<slug>/_spec.md` and verify:
 
-- `## Implementation Spec` exists, has no `<slug>` or template placeholder, passes `references/quality-bar.md`, and contains Execution, Problem, Current System, Out of Scope, In Scope, Acceptance, Contracts, Agent Boundaries, Failure and Edge Cases, Relevant Files, Verification, Slices, and Output
+- the file has no `<slug>` or template placeholder, passes `references/quality-bar.md`, and contains Execution, Problem, Current System, Out of Scope, In Scope, Acceptance, Contracts, Agent Boundaries, Failure and Edge Cases, Relevant Files, Verification, Slices, and Output
 - no acceptance line is "works correctly" or another untestable phrase
-- the only write is that file, and approved product sections above the heading are unchanged
+- the only write is `_spec.md`; the approved PRD is unchanged
 - no `.spec-finder/specs/` file, TechSpec, task index, task file, ADR, or memory file was created or changed
-- when an approved PRD was the input, every in-scope `F-xx` and `US-xx` appears in the spec or is named out of scope with the PRD rationale
+- when an approved PRD was the input, `_spec.md` contains its exact path as Product source and every in-scope `F-xx` and `US-xx` appears or is named out of scope with the PRD rationale
 
 Fix validation failures and repeat.
 Do not point to `spec-finder run <slug>` or `sf-execute-task`; this path does not create their runner packet.
 
-### 7. Print the spec location
+### 7. Print the artifact locations
 
-After validation, end the response with this block and nothing after it.
+After validation, end the response with the applicable block and nothing after it.
 Replace `<slug>` with the real slug.
-The path line is what the user copies and pastes to an agent:
+
+When an approved PRD exists:
 
 ```text
 Copy this path and point an agent at it:
-.spec-finder/tasks/<slug>/_prd.md
+.spec-finder/tasks/<slug>/_spec.md
+PRD: .spec-finder/tasks/<slug>/_prd.md
+```
+
+When no PRD exists:
+
+```text
+Copy this path and point an agent at it:
+.spec-finder/tasks/<slug>/_spec.md
+PRD: not created; this spec started from a clear request.
 ```
 
 ## Anti-patterns
 
 - Running the four existing skills in sequence and calling that simplified.
-- Creating a runner packet or projection beside the spec.
+- Creating a runner packet or a second spec projection.
 - A stakeholder outline that restates the feature request with no files, contracts, or current excerpts.
 - Writer instructions or template placeholders left in the spec.
 - Market council, KPI scoring, or invented baselines.
@@ -203,11 +214,11 @@ Copy this path and point an agent at it:
 - Public contracts as prose when a signature, schema, or CLI grammar exists.
 - Layer splits when an outcome slice is possible.
 - Forward dependencies such as Slice 01 depending on Slice 02.
-- Generic "read the PRD" instructions; the spec must contain the executable contract itself.
+- Telling the executor to read the PRD instead of inlining its decisions; the Product source reference is provenance, not a dependency.
 - Ignoring an approved PRD and re-deciding product scope.
 - Drafting from a thin task instead of handing off to `sf-create-prd`.
-- Rewriting approved product sections above `## Implementation Spec`.
-- Shrinking the spec because packet files no longer exist.
+- Modifying the approved PRD while authoring the spec.
+- Shrinking the spec because packet files do not exist.
 
 ## Failure rules
 

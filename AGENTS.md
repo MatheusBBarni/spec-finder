@@ -4,7 +4,7 @@
 
 `src/` contains the Bun/TypeScript CLI and runtime. Keep CLI parsing in `cli.tsx`/`commands.ts`, task and ACP lifecycle behavior in `engine.ts`, `tasks.ts`, and `acp-client.ts`, and terminal UI code in `src/ui/`. Tests in `tests/` mirror their source surface.
 
-Portable workflow skills belong in `skills/sf-*/`; `.spec-finder/` contains repository configuration and task packets. Packet artifacts follow fixed names such as `_idea.md`, `_prd.md`, `_techspec.md`, `task_01.md`, `memory/MEMORY.md`, and `reports/task_01.md`. `sf-write-spec` and `sf-tdd-write-spec` write `## Implementation Spec` inside `.spec-finder/tasks/<slug>/_prd.md` and print that path. That section is the implementation prompt an agent runs when pointed at the file. Refinement documents live at `.spec-finder/refinements/<task_slug>.md` and must not write `.spec-finder/tasks/` or `.spec-finder/specs/`.
+Portable workflow skills belong in `skills/sf-*/`; `.spec-finder/` contains repository configuration and task packets. Packet artifacts follow fixed names such as `_idea.md`, `_prd.md`, `_spec.md`, `_techspec.md`, `task_01.md`, `memory/MEMORY.md`, and `reports/task_01.md`. `sf-write-spec` and `sf-tdd-write-spec` write `.spec-finder/tasks/<slug>/_spec.md`, reference the approved `_prd.md` when one exists, and print both paths. `_spec.md` is the implementation prompt an agent runs. Refinement documents live at `.spec-finder/refinements/<task_slug>.md` and must not write `.spec-finder/tasks/` or `.spec-finder/specs/`.
 
 ## Build, Test, and Development Commands
 
