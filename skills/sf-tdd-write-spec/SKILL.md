@@ -35,6 +35,9 @@ Read `references/spec-template.md` and `references/quality-bar.md` before drafti
 - NEVER place refactoring inside the red-green loop. Put it in the review stage after all slices are green.
 - NEVER skip repository research or ask the user for facts the repository or current primary docs answer.
 - NEVER save acceptance criteria that are not observable Given/When/Then.
+- NEVER omit the core Implementation, Problem and Delta, Scope, Acceptance, Repository Anchors, Public Test Seams, TDD Execution, TDD Slices, Verification, Review, or Output sections.
+- NEVER retain Contract Changes or Risks and Edge Cases when the section does not change executor behavior.
+- NEVER omit the bounded executor clarification protocol: at most six implementation questions, exactly one per turn, recommendation-first labeled choices, and material-decision limits.
 </HARD-GATE>
 
 ## Interaction contract
@@ -70,7 +73,7 @@ If they want a spec without prescribed red-green slices, use `sf-write-spec`.
    - current versus desired behavior
    - public interfaces and candidate test seams
    - callers, consumers, tests, fixtures, and conventions
-   - 1-3 short current-code excerpts showing the seam
+   - optional short current-code excerpts only when they freeze a non-obvious invariant or external contract
    - exact focused commands and repository gate
 4. Consult current primary docs when an evolving dependency, protocol, SDK, CLI, or platform affects the contract.
 5. Distinguish evidence from inference.
@@ -86,19 +89,21 @@ If they want a spec without prescribed red-green slices, use `sf-write-spec`.
 
 Fill `references/spec-template.md` with repository facts. The draft must include:
 
-- outcome, current system, Out of Scope before In Scope, and observable acceptance
-- approved PRD decisions inlined into Problem, Out of Scope, In Scope, and Acceptance when `.spec-finder/tasks/<slug>/_prd.md` exists, plus a Product source line citing that exact path
+- every core section and only conditional sections that change executor behavior
+- Implementation with a maximum of six executor questions, one per turn, recommendation-first labeled choices, and material-decision boundaries
+- current versus desired behavior, Out before In, preserved invariants, and observable acceptance
+- approved PRD implementation decisions carried into Problem and Delta, Scope, and Acceptance when `.spec-finder/tasks/<slug>/_prd.md` exists, plus a Product source line citing that exact path
 - every in-scope `F-xx` and `US-xx` from that PRD, or an explicit exclusion with the PRD rationale
-- public contracts with valid and invalid examples
+- Contract Changes only when a public interface or persisted shape changes, with valid and invalid examples
 - the confirmed public test seams and why each is public
 - test locations and exact focused command identities
-- ordered outcome slices, one vertical slice at a time
+- ordered TDD outcome slices, one vertical slice at a time
 - for every slice: one failing public-seam test, observed red reason, minimal green behavior, and the same focused command
 - anti-pattern stop conditions and system-boundary-only mocking
 - review/refactoring after all slices are green
-- named failure cases, verified relevant files, repository gate, and final output
+- verified Repository Anchors, repository gate, runtime proof, and final output
 
-Apply `references/quality-bar.md`. Remove all placeholders. Do not split the draft into other artifacts.
+Apply `references/quality-bar.md`. Delete unused conditional sections and remove all placeholders. Do not split the draft into other artifacts.
 
 ### 4. Approve and save
 
@@ -123,6 +128,7 @@ Re-read `.spec-finder/tasks/<slug>/_spec.md` and verify:
 - when an approved PRD was the input, its exact path is named as Product source and its in-scope capabilities are inlined or explicitly excluded
 - the approved PRD is unchanged
 - every template token is replaced
+- every core section is present, only earned conditional sections remain, and the bounded implementation-question protocol is complete
 - confirmed seams, test locations, and command identities are explicit
 - each slice is red → minimal green before the next red
 - red and green use the same focused command
@@ -130,7 +136,7 @@ Re-read `.spec-finder/tasks/<slug>/_spec.md` and verify:
 - mocks appear only at system boundaries
 - implementation-coupled, tautological, and horizontal tests are prohibited
 - refactoring is deferred until all slices are green
-- the repository gate and completion output are named
+- the repository gate, runtime proof, and completion output are named
 
 Fix any validation failure before completion.
 

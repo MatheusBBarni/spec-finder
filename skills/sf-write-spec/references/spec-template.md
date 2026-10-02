@@ -1,198 +1,154 @@
-# [Feature] Spec
+# [Outcome] Spec
 
 This file is the complete implementation prompt at `.spec-finder/tasks/<slug>/_spec.md`.
-An executor that reads this file plus the repository must implement, verify, and stop without chat history.
-The operator will point an agent at this path. Do not ask the user questions.
+An executor that reads this file plus the repository must implement and verify without chat history.
 
 - **Slug:** `<slug>`
 - **This file:** `.spec-finder/tasks/<slug>/_spec.md`
 - **Product source:** `.spec-finder/tasks/<slug>/_prd.md` [include only when that approved PRD exists]
-Omit this writer note from the saved spec. Start the saved file at `# [Feature] Spec`.
-## Execution
+- **Job:** [Feature | Improvement | Bug]
+- **Outcome:** [one observable user or operator result]
 
-**Outcome:** [one-sentence user/operator result]
-**Job:** [Feature | Improvement | Bug]
+Omit writer notes and unused conditional sections from the saved spec.
 
-1. Read this file completely before editing.
-2. Read every path in Relevant Files before editing.
-3. Implement slices in numeric order.
-   A slice may start only when every listed dependency is done.
-4. Stay inside Out of Scope and Agent Boundaries.
-5. Match Contracts and Given/When/Then.
-   Private implementation is yours; do not invent extra capabilities.
-6. Run the named verification commands to terminal exit.
-   On failure, fix in scope and re-run until clean.
-7. Do not ask the user questions while executing.
-   Ambiguity is a decision: pick the interpretation that matches Contracts and Given/When/Then, record it under Output, continue.
-8. Do not claim done unless the named commands exited 0.
-9. Stop after Output. Do not start Ask-first follow-ups.
+## Implementation
 
-## Problem
+1. Read this file, inspect Repository Anchors and adjacent tests, and verify the stated current behavior before editing.
+2. Treat Scope, Acceptance, Contract Changes, and Boundaries as the implementation contract. Private implementation choices remain yours.
+3. If repository evidence and current primary docs cannot resolve a material decision, ask at most 6 implementation questions across this run.
+4. Ask exactly one question at a time and wait for its answer. Offer 2-3 concrete uppercase choices, put `A. (Recommended)` first, explain the principal trade-off, and add `Other` only when the choices are not exhaustive.
+5. End each question with: `Reply with the letter (for example, A), or the letter plus context.`
+6. Ask only about unresolved scope, public contracts, data ownership, security, migrations, destructive behavior, or required evidence. Never ask for repository facts, private implementation preferences, or product decisions already fixed here.
+7. If no material decision remains, do not manufacture a question. Implement the smallest coherent diff, fix verification failures before continuing, and stop after Output.
 
-[Who is affected.]
-[Workflow today.]
-[How it fails.]
-[Why this is worth solving now.]
+Example implementation question:
 
-Desired after this spec: [observable change against that baseline].
+```text
+[Material decision and the evidence that leaves it open]
 
-## Current System
+A. (Recommended) [answer] - [principal trade-off]
+B. [answer] - [principal trade-off]
+C. Other - describe a different answer.
 
-### Behavior now
-
-[What happens today, including the failure this spec fixes.]
-
-### Evidence
-
-| Path | Today | Take from it |
-|---|---|---|
-| `path/to/file` | [Shipped behavior] | [Seam, convention, or invariant] |
-
-### Current excerpts
-
-```ts
-// path/to/file — current evidence, not the fix
+Reply with the letter (for example, A), or the letter plus context.
 ```
 
+### Boundaries
 
-### Preserve
+**Always**
 
-- [Invariant this change must not break]
+- [task-specific invariant, repository pattern, or required evidence]
 
-### Callers and tests
+**Ask first**
 
-- `path/to/caller` — [how it uses the seam]
-- `path/to/test` — [existing case to extend or mirror]
+- [material branch that is not already decided; omit this item when none exists]
 
-## Out of Scope
+**Never**
 
-- **[Excluded capability]** - [Rationale]. Reconsider when [trigger].
+- [concrete banned scope expansion or unsafe behavior]
+- [second concrete banned action]
 
-## In Scope
+## Problem and Delta
 
-[One sentence: selected approach and what it gives up.]
+**Current**
+
+- [observable shipped behavior or failure]
+- [who is affected and why it matters]
+
+**Desired**
+
+- [observable behavior after implementation]
+
+## Scope
+
+### Out
+
+- **[excluded capability]** — [rationale]. Reconsider when [trigger].
+
+### In
 
 | ID | Capability | Observable outcome |
 |---|---|---|
-| F-01 | [Capability] | [User-visible result] |
+| F-01 | [capability] | [result] |
+
+### Preserve
+
+- [existing behavior, compatibility rule, or invariant that must not regress]
 
 ## Acceptance
 
-Binary Given/When/Then only.
-Never write "works correctly".
-Include at least one empty, invalid, conflict, permission, or recovery path.
-
-### US-01: [Short name]
+### AC-01 / US-01: [behavior]
 
 - **Given** [precondition]
 - **When** [action]
 - **Then** [observable result]
 
-### US-01 failure: [Short name]
+### AC-02: [failure or recovery behavior]
 
 - **Given** [precondition]
-- **When** [action]
-- **Then** [observable result]
+- **When** [invalid, conflicting, denied, or failing action]
+- **Then** [observable error, unchanged state, or recovery]
 
-## Contracts
+## Contract Changes
 
-Public signatures, schemas, CLI grammar, and error shapes.
-Private implementation is not specified here.
+Delete this section when no public signature, schema, protocol, configuration, storage, CLI, or error contract changes.
+Private implementation does not belong here.
 
-### Public interfaces
+### Public interface
 
 ```ts
-// repository language
+// repository-language signature, schema, protocol, or CLI grammar
 ```
 
-### Examples
-
 - Valid: [input] → [output]
-- Invalid: [input] → [error / observable failure]
+- Invalid: [input] → [observable error]
 
-### Errors
-
-| Name | When | Observable behavior |
+| Error / state | Trigger | Observable behavior |
 |---|---|---|
-| [Error] | [Trigger] | [User/system result] |
+| [named error] | [condition] | [result] |
 
-## Agent Boundaries
+## Repository Anchors
 
-### Always
+Verified paths and symbols only. These are evidence and starting points, not a prescribed patch.
 
-- [Pattern, path, or command the executor follows without asking]
-
-### Ask first
-
-These are out of this spec unless already decided above.
-During execution, record a follow-up; do not invent them.
-
-- [New dependency, schema migration, extra public contract, or security change]
-
-### Never
-
-- [Hard ban]
-- [Second hard ban]
-
-## Failure and Edge Cases
-
-| Failure mode | Detection | User/system behavior | Recovery/rollback | Evidence |
-|---|---|---|---|---|
-| [Named case] | [How it is detected] | [Observable result] | [Recovery] | [Test or command] |
-
-## Relevant Files and Patterns
-
-Read these before editing.
-Verified paths only.
-Say `create` when the file does not exist yet.
-
-| Path | Read first because | Role | Pattern to follow |
+| Path / symbol | Current fact | Why inspect | Expected role |
 |---|---|---|---|
-| `path/to/file` | [What to extract] | [Edit or create] | [Existing convention or file] |
+| `path/to/file#symbol` | [shipped behavior or convention] | [relevant seam or invariant] | [read / edit / create] |
+
+## Risks and Edge Cases
+
+Delete this section when Acceptance already covers every material risk and edge case.
+
+| Case | Detection | Observable behavior | Recovery / preservation | Evidence |
+|---|---|---|---|---|
+| [named case] | [condition] | [result] | [recovery or unchanged state] | [acceptance ID, test, or command] |
 
 ## Verification
 
-Done is these commands exiting 0.
+- **Focused:** `[exact command]` — proves [changed behavior].
+- **Repository gate:** `[exact command]` — proves [regression protection].
+- **Runtime proof:** `[exact scenario, request, CLI invocation, or UI interaction]` — observe [result].
 
-- **Focused:** `[exact command]`
-- **Repository gate:** `[exact command]`
-- **Unit:** [contract, inputs, expected outcome]
-- **Integration:** [boundary, fixture, failure case]
-- **Platform / e2e:** [evidence unit tests cannot prove, or `Not applicable` with reason]
+Completion requires observed command results and runtime evidence, not "tests should pass" or source inspection alone.
 
-Prohibited completion phrases: "tests should pass", "implementation looks correct".
+## Milestones
 
-## Slices
+Delete this section for one small coherent outcome.
+Keep it only when the work has multiple ordered, independently verifiable outcomes.
 
-Split by user/operator outcome, not by layer.
-Numeric order is the execution order.
-Every dependency is a lower-numbered slice.
+| Milestone | Outcome | Acceptance | Verification | Dependencies |
+|---|---|---|---|---|
+| M-01 | [observable result] | AC-01 | `[focused command]` | none |
 
-### Slice 01: [Imperative title]
-
-- **Outcome:** [Independently testable result]
-- **Primary:** US-01 / F-01
-- **Dependencies:** none
-- **Acceptance:**
-  - **Given** [precondition]
-  - **When** [action]
-  - **Then** [observable result]
-- **Files:** `path/to/file` - [role]
-- **Focused tests:** `[exact command]`
-- **Out of scope:** [excluded work]
+Finish and verify each milestone before starting the next.
+Split independent outcomes into separate specs instead of growing this table.
 
 ## Output
 
-After verification, report and stop.
+Report and stop:
 
-- **Done:** named commands exited 0; every In Scope capability and slice acceptance holds
-- **Changed:** [files the executor will list]
-- **Decisions:** ambiguities resolved against Contracts and Given/When/Then
-- **Follow-ups:** Ask-first items not implemented
-
-Do not ask what to do next.
-
-## Open Questions
-
-Non-blocking unresolved items only.
-Do not save with a material branch undecided.
+- changed behavior and files
+- acceptance criteria satisfied
+- focused, repository-gate, and runtime results with observed evidence
+- implementation decisions made within the contract
+- unresolved blockers or Ask-first follow-ups not implemented

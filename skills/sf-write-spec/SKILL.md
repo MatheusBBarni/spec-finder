@@ -38,12 +38,14 @@ Read `references/quality-bar.md` before drafting.
 - NEVER accept acceptance criteria that are not binary Given/When/Then.
   Reject "works correctly" and other untestable phrases.
 - NEVER micromanage private implementation except public contracts (signatures, schemas, CLI grammar, errors, valid and invalid examples).
-- NEVER omit Always / Ask first / Never boundaries, named failure and edge cases, codebase-informed files, or named verification commands.
-- NEVER create a slice that is not independently testable once its declared dependencies are done.
+- NEVER omit the core Implementation, Problem and Delta, Scope, Acceptance, Repository Anchors, Verification, or Output sections.
+- NEVER retain Contract Changes, Risks and Edge Cases, or Milestones when the section does not change executor behavior.
+- NEVER create a milestone that is not independently testable once its declared dependencies are done.
 - NEVER omit `.spec-finder/tasks/<slug>/_spec.md`.
-  The `_spec.md` file is the implementation prompt and must contain everything needed to implement and verify without chat history.
+  The `_spec.md` file is the implementation prompt and must contain every known decision needed to start without chat history.
 - NEVER present a draft that fails `references/quality-bar.md` or still contains template placeholders.
-- NEVER omit Current System evidence (verified paths, callers/tests, and a current excerpt when the seam exists).
+- NEVER omit current-system evidence: current versus desired behavior, verified Repository Anchors, relevant callers/tests, and preserved invariants. Current-code excerpts are optional and must earn their tokens.
+- NEVER omit the bounded executor clarification protocol: at most six implementation questions, exactly one per turn, recommendation-first labeled choices, and material-decision limits.
 - NEVER run idea-factory council, KPI scoring, or 3-7 market-search depth on this path.
 </HARD-GATE>
 
@@ -109,7 +111,7 @@ Run independent tracks concurrently when the runtime can do real parallel work.
 - Current behavior versus desired behavior.
 - Related flows, modules, interfaces, callers, consumers, tests, fixtures, and conventions.
 - Exact verification commands from this repository.
-- 1-3 short current-code excerpts that show the seam (evidence of now, not the fix).
+- Optional short current-code excerpts only when they freeze a non-obvious invariant or external contract; they are evidence of now, not the fix.
 - Distinguish shipped behavior from comments or plans.
 
 **Current-docs track - required when the change depends on an evolving library, SDK, protocol, CLI, or platform**
@@ -139,22 +141,24 @@ Present:
 
 Read `references/spec-template.md` and `references/quality-bar.md`.
 
-Fill every required section below with repository facts, not writer notes.
-Strip every template placeholder from the spec file.
+Fill every core section and every earned conditional section with repository facts, not writer notes.
+Delete unused conditional sections and strip every template placeholder from the spec file.
 Run `references/quality-bar.md` against the complete `_spec.md` draft and rewrite until it passes, then present the draft.
 The spec stays dense. Do not split it into `_techspec.md`, `_tasks.md`, or `task_NN.md`.
 Do not ask for section-by-section or stage-by-stage approval.
 
 **Agent-executable spec (`.spec-finder/tasks/<slug>/_spec.md`)**
 
-- Read `references/spec-template.md` and fill every section.
+- Read `references/spec-template.md`; fill all core sections and only conditional sections that change execution.
 - Include a Product source line with `.spec-finder/tasks/<slug>/_prd.md` when an approved PRD exists.
-- Include outcome, current vs desired, Current System evidence, Out of Scope before In Scope, Given/When/Then plus a failure path, public contracts with examples, Always / Ask first / Never, named failure cases, read-first files, named verification commands, independently testable slices, and Output.
-- When an approved PRD exists, inline its problem, non-goals, capabilities, and Given/When/Then into `_spec.md`.
-- Map every in-scope `F-xx` and `US-xx` from the PRD. Do not drop one unless this spec names it out of scope with the PRD rationale.
-- Translate product outcomes into contracts, files, verification, and slices. Do not paste the product sections as the spec.
-- An executor pointed at `.spec-finder/tasks/<slug>/_spec.md` must be able to implement and verify from that file.
-- Keep slices inside `_spec.md`. Do not project them into `task_NN.md`.
+- Include Implementation with a maximum of six executor questions, one per turn, recommendation-first labeled choices, and material-decision boundaries.
+- Include current versus desired behavior, Out before In, preserved invariants, Given/When/Then plus applicable failure paths, verified Repository Anchors, exact focused and repository commands, runtime proof, and Output.
+- Include Contract Changes only for a changed public interface or persisted shape; include Risks and Edge Cases only when Acceptance does not cover them; include Milestones only for multiple ordered, independently verifiable outcomes.
+- When an approved PRD exists, carry every implementation-relevant decision and map every in-scope `F-xx` and `US-xx`. Do not duplicate unrelated product prose.
+- Do not drop a PRD capability unless this spec names it out of scope with the PRD rationale.
+- Translate product outcomes into acceptance, changed contracts, anchors, verification, and earned milestones. Do not paste the product sections as the spec.
+- An executor pointed at `.spec-finder/tasks/<slug>/_spec.md` must be able to start implementation and verification from that file.
+- Keep earned milestones inside `_spec.md`. Do not project them into `task_NN.md`.
 
 ### 5. Review and save
 
@@ -172,7 +176,7 @@ Do not ask for section-by-section or stage-by-stage approval.
 
 Re-read `.spec-finder/tasks/<slug>/_spec.md` and verify:
 
-- the file has no `<slug>` or template placeholder, passes `references/quality-bar.md`, and contains Execution, Problem, Current System, Out of Scope, In Scope, Acceptance, Contracts, Agent Boundaries, Failure and Edge Cases, Relevant Files, Verification, Slices, and Output
+- the file has no `<slug>` or template placeholder, passes `references/quality-bar.md`, contains every core section, and contains only earned conditional sections
 - no acceptance line is "works correctly" or another untestable phrase
 - the only write is `_spec.md`; the approved PRD is unchanged
 - no `.spec-finder/specs/` file, TechSpec, task index, task file, ADR, or memory file was created or changed
@@ -206,7 +210,7 @@ PRD: not created; this spec started from a clear request.
 
 - Running the four existing skills in sequence and calling that simplified.
 - Creating a runner packet or a second spec projection.
-- A stakeholder outline that restates the feature request with no files, contracts, or current excerpts.
+- A stakeholder outline that restates the feature request with no repository anchors, acceptance, or verification evidence.
 - Writer instructions or template placeholders left in the spec.
 - Market council, KPI scoring, or invented baselines.
 - Writing files before whole-draft approval.

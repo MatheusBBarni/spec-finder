@@ -4,15 +4,15 @@ Read this before drafting and again before presenting the spec.
 This bar applies to `.spec-finder/tasks/<slug>/_spec.md`.
 The saved file is the prompt the operator will point an agent at.
 Reject and rewrite the spec if any item fails.
-Do not present a failing spec.
 
 ## Iron law
 
-```
+```text
 NO PROMPT WITHOUT CURRENT-SYSTEM EVIDENCE.
 NO FILE PATHS WITHOUT VERIFICATION.
 NO ALGORITHM THAT STEALS THE AGENT'S JOB.
 NO AMBIGUOUS SUCCESS.
+NO BOILERPLATE SECTION THAT DOES NOT CHANGE EXECUTION.
 NO PLACEHOLDERS IN THE SAVED SPEC.
 NO RUNNER PACKET OUTPUT.
 ```
@@ -20,61 +20,56 @@ NO RUNNER PACKET OUTPUT.
 ## Reject if
 
 - Outcome is "make it better", "clean it up", "add support for X", or "follow best practices".
-- Paths are guessed and not marked `create`.
-- The spec contains the implementation the agent should invent (after-code, patch, step-by-step algorithm).
+- Current and desired observable behavior are not distinguished.
+- A Repository Anchors row uses a guessed path, omits the relevant fact, or lacks an execution reason.
+- The spec contains after-code, a patch, or a private step-by-step algorithm the executor should choose.
 - The spec tells `sf-write-spec` to create `.spec-finder/specs/`, `_techspec.md`, `_tasks.md`, `task_NN.md`, ADRs, or memory files, or to modify `_prd.md`.
-- Fewer than two **Never** lines.
-- No copy-pastable command as done-when.
-- Current behavior is not distinguished from desired behavior.
-- **Current System** has no verified path, or omits a current excerpt when the seam already exists.
-- **Contracts** are prose only, or lack one valid and one invalid example.
-- **Acceptance** has only the happy path when a failure path exists.
-- A **Relevant Files** row has no "read first because".
-- A section is one vague sentence that does not change executor behavior.
-- Writer-facing template prose remains ("Write exclusions before…", "Who is affected…", "The system as it is. Not the design.").
-- Any `[…]` fill-in token or `<slug>` remains. The listed examples are not exhaustive; every template token must be replaced.
-- The executor would still need chat history, a question, or a repo-wide hunt to start.
-- An approved PRD exists and an in-scope capability or story is dropped without an explicit exclusion and the PRD rationale.
-- The spec tells the executor to read the PRD instead of containing the product decisions.
+- Fewer than two **Never** lines remain in Implementation boundaries.
+- Implementation omits the six-question cap, one-question-per-turn rule, recommendation-first labeled choices, or allowed material decision categories.
+- Implementation questions can reopen approved product decisions, ask repository facts, or solicit private implementation preferences.
+- Acceptance lacks Given/When/Then, observable results, or a materially applicable failure or recovery path.
+- Verification lacks an exact focused command, repository gate, or runtime proof.
+- A section is one vague sentence or retained boilerplate that does not change executor behavior.
+- A conditional section remains as `Not applicable` instead of being deleted.
+- Writer-facing template prose remains.
+- Any `[…]` fill-in token or `<slug>` remains; every template token must be replaced.
+- The executor would need a repo-wide hunt before it can start.
+- An approved PRD exists and an in-scope `F-xx` or `US-xx` is neither mapped nor explicitly excluded with the PRD rationale.
+- The spec tells the executor to read the PRD instead of carrying its implementation-relevant decisions.
 - An approved PRD exists but the spec omits `Product source: .spec-finder/tasks/<slug>/_prd.md`, or the skill modifies that PRD.
 
-## Density by section
+## Core sections
 
 | Section | Minimum that earns the heading |
 |---|---|
-| Execution | Named outcome, job type, and the protocol below. Not "implement the feature". |
-| Problem | Who, workflow today, how it fails, why now. A feature request is not the problem. |
-| Current System | Behavior now, evidence table, preserve-invariants, callers/tests. Excerpt when the seam exists. |
-| Out of Scope | Named exclusion + rationale + reconsideration trigger. At least one. |
-| In Scope | Approach in one sentence including what it gives up, plus observable `F-xx`. |
-| Acceptance | Given/When/Then for the happy path and at least one empty/invalid/conflict/permission/recovery path. |
-| Contracts | Repository-language signature, schema, or CLI grammar; errors; valid and invalid examples. |
-| Agent Boundaries | Concrete Always / Ask first / Never. Never-lines name a banned action, not "be careful". |
-| Failure | Named mode, detection, observable result, recovery, evidence. |
-| Relevant Files | Verified path, why read it, role (`edit`/`create`), pattern to follow. |
-| Verification | Exact focused command and repository gate from this repo. |
-| Slices | Outcome, files, Given/When/Then, focused command, out of scope. Independently testable. |
-| Output | What to report when done. Not "summarize the work". |
+| Implementation | Start procedure, bounded question protocol, task-specific Always / Ask first / Never, smallest coherent diff, and stop rule. |
+| Problem and Delta | Current and desired observable behavior, affected user or operator, and why the delta matters. |
+| Scope | Out before In, mapped capabilities, and preserved behavior or compatibility invariants. |
+| Acceptance | Given/When/Then for success and every materially applicable invalid, conflict, permission, failure, or recovery path. |
+| Repository Anchors | Verified path or symbol, current fact, why inspect, and expected role (`read`, `edit`, or `create`). |
+| Verification | Exact focused command, repository gate, and runtime proof with expected observations. |
+| Output | Changed behavior and files, acceptance evidence, command/runtime results, decisions, and unresolved blockers. |
+
+## Conditional sections
+
+| Section | Include only when | Required content |
+|---|---|---|
+| Contract Changes | A public interface, persisted shape, configuration, CLI, protocol, or observable error changes. | Repository-language contract plus valid and invalid examples and observable errors. |
+| Risks and Edge Cases | Acceptance does not already capture a material risk. | Named case, detection, observable behavior, recovery or preservation, and evidence. |
+| Milestones | One coherent outcome requires multiple ordered verification points. | Independently verifiable outcome, acceptance IDs, command, and dependencies. |
+
+Delete a conditional section when it does not earn its tokens.
+Split independent outcomes into separate specs rather than adding milestones indefinitely.
 
 ## Bad versus good
 
-Bad Current System:
+Bad Repository Anchor:
 
 > Update `src/engine.ts` as needed.
 
 Good:
 
-> Today `runTaskPacket` in `src/engine.ts` does one pass and returns.
-> Callers: `src/commands.ts` `runCommand`.
-> Tests: `tests/engine.test.ts`.
-> Preserve: `run` stays single-pass.
-
-```ts
-// src/engine.ts — current evidence, not the fix
-export async function runTaskPacket(options: RunOptions): Promise<RunResult> {
-  // one pass, then return
-}
-```
+> `src/engine.ts#runTaskPacket` currently performs one pass; inspect it to preserve the single-pass `run` contract while adding the new entry point.
 
 Bad contract:
 
@@ -100,6 +95,6 @@ Good:
 
 ## Greenfield
 
-When the file does not exist yet, mark it `create`.
-Current System still cites the adjacent module, test, and convention the new file must follow.
+When a file does not exist yet, mark its Repository Anchors role `create`.
+Still cite the adjacent module, test, and convention the new file must follow.
 Do not invent a parallel architecture.

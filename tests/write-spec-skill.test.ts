@@ -5,7 +5,7 @@ import { join } from "node:path"
 const skillDir = join(import.meta.dir, "..", "skills", "sf-write-spec")
 
 describe("sf-write-spec contract", () => {
-  test("encodes one-file AI-spec practices as hard gates and required output sections", async () => {
+  test("encodes an adaptive agent-executable spec with bounded implementation questions", async () => {
     const skill = await readFile(join(skillDir, "SKILL.md"), "utf8")
     const doctrine = await readFile(join(skillDir, "references", "doctrine.md"), "utf8")
     const spec = await readFile(join(skillDir, "references", "spec-template.md"), "utf8")
@@ -24,7 +24,7 @@ describe("sf-write-spec contract", () => {
     expect(skill).toContain("PRD:")
     expect(skill).toContain("Stop and offer `sf-create-prd`")
     expect(skill).toContain("sf-tdd-write-spec")
-    expect(doctrine).toContain("The PRD remains a separate product source")
+    expect(doctrine).toContain("Core plus conditional")
     expect(quality).toContain("NO RUNNER PACKET OUTPUT")
 
     for (const needle of [
@@ -37,7 +37,7 @@ describe("sf-write-spec contract", () => {
       ".spec-finder/tasks/<slug>/_spec.md",
       "whole-draft",
       "complete implementation prompt",
-      "Current System",
+      "Problem and Delta",
       "quality-bar.md",
     ]) {
       expect(body).toContain(needle)
@@ -56,32 +56,34 @@ describe("sf-write-spec contract", () => {
       expect(body).not.toContain(forbidden)
     }
 
-    expect(spec).toContain("## Execution")
-    expect(spec).toContain("## Problem")
-    expect(spec).toContain("## Out of Scope")
-    expect(spec.indexOf("## Out of Scope")).toBeLessThan(spec.indexOf("## In Scope"))
+    expect(spec).toContain("## Implementation")
+    expect(spec).toContain("at most 6 implementation questions")
+    expect(spec).toContain("Ask exactly one question at a time")
+    expect(spec).toContain("A. (Recommended)")
+    expect(spec).toContain("Reply with the letter (for example, A), or the letter plus context.")
+    expect(spec).toContain("## Problem and Delta")
+    expect(spec).toContain("## Scope")
+    expect(spec).toContain("### Out")
+    expect(spec).toContain("### In")
+    expect(spec).toContain("### Preserve")
     expect(spec).toContain("## Acceptance")
-    expect(spec).toContain("## Contracts")
-    expect(spec).toContain("## Agent Boundaries")
-    expect(spec).toContain("### Always")
-    expect(spec).toContain("### Ask first")
-    expect(spec).toContain("### Never")
-    expect(spec).toContain("## Failure and Edge Cases")
-    expect(spec).toContain("## Relevant Files and Patterns")
+    expect(spec).toContain("## Repository Anchors")
     expect(spec).toContain("## Verification")
-    expect(spec).toContain("## Slices")
+    expect(spec).toContain("## Output")
+    expect(spec).toContain("## Contract Changes")
+    expect(spec).toContain("## Milestones")
+    expect(spec).toContain("Delete this section when")
     expect(spec).toContain("**Focused:**")
     expect(spec).toContain("**Repository gate:**")
-    expect(spec).toContain("## Current System")
-    expect(spec).toContain("## Output")
-    expect(spec).toContain("Read first because")
-    expect(spec).toContain("current evidence, not the fix")
     expect(spec).toContain("Valid:")
     expect(spec).toContain("Invalid:")
+    expect(spec).not.toContain("## Execution")
+    expect(spec).not.toContain("## Current System")
+    expect(spec).not.toContain("### Current excerpts")
     expect(doctrine).toContain("The spec is the prompt")
     expect(quality).toContain("NO PROMPT WITHOUT CURRENT-SYSTEM EVIDENCE")
-    expect(skill).toContain("against the complete `_spec.md` draft")
-    expect(quality).toContain("This bar applies to `.spec-finder/tasks/<slug>/_spec.md`")
+    expect(quality).toContain("Core sections")
+    expect(quality).toContain("Conditional sections")
     expect(quality).toContain("every template token must be replaced")
 
     expect(skill).toContain("references/quality-bar.md")

@@ -1,107 +1,127 @@
-# [Feature] TDD Spec
+# [Outcome] TDD Spec
 
 This file is the complete implementation prompt at `.spec-finder/tasks/<slug>/_spec.md`.
-An executor that reads this file plus the repository must implement and verify without chat history.
+An executor that reads this file plus the repository must implement and verify without chat history or an external TDD skill.
 
 - **Slug:** `<slug>`
 - **This file:** `.spec-finder/tasks/<slug>/_spec.md`
 - **Product source:** `.spec-finder/tasks/<slug>/_prd.md` [include only when that approved PRD exists]
-Omit this writer note from the saved spec. Start the saved file at `# [Feature] TDD Spec`.
 - **Job:** [Feature | Improvement | Bug]
-- **Outcome:** [observable user or operator result]
+- **Outcome:** [one observable user or operator result]
 
-## Execution
+Omit writer notes and unused conditional sections from the saved spec.
 
-1. Read this file and every path under Relevant Files before editing.
-2. Follow TDD Execution and implement Slices in numeric order.
-3. Stay inside Out of Scope, Contracts, and Agent Boundaries.
-4. Run every focused command and the repository gate to terminal exit.
-5. Do not claim completion without observed red and green evidence for every slice.
-6. Stop after Output. Do not implement Ask-first follow-ups.
+## Implementation
 
-## Problem
+1. Read this file, inspect Repository Anchors and confirmed Public Test Seams, and verify the stated current behavior before editing.
+2. Treat Scope, Acceptance, Contract Changes, Public Test Seams, TDD Execution, and Boundaries as the implementation contract.
+3. If repository evidence and current primary docs cannot resolve a material decision, ask at most 6 implementation questions across this run.
+4. Ask exactly one question at a time and wait for its answer. Offer 2-3 concrete uppercase choices, put `A. (Recommended)` first, explain the principal trade-off, and add `Other` only when the choices are not exhaustive.
+5. End each question with: `Reply with the letter (for example, A), or the letter plus context.`
+6. Ask only about unresolved scope, public contracts, data ownership, security, migrations, destructive behavior, required evidence, or repository evidence that invalidates a confirmed test seam. Never ask for repository facts, private implementation preferences, or product decisions already fixed here.
+7. If no material decision remains, do not manufacture a question. Execute TDD Slices in order, fix a failed slice before continuing, and stop after Output.
 
-[Who is affected, workflow today, failure, and why now.]
+Example implementation question:
 
-Desired after this spec: [observable change against the current baseline].
+```text
+[Material decision and the evidence that leaves it open]
 
-## Current System
+A. (Recommended) [answer] - [principal trade-off]
+B. [answer] - [principal trade-off]
+C. Other - describe a different answer.
 
-### Behavior now
-
-[Current shipped behavior and failure.]
-
-### Evidence
-
-| Path | Today | Take from it |
-|---|---|---|
-| `path/to/file` | [shipped behavior] | [seam, convention, or invariant] |
-
-### Current excerpts
-
-```ts
-// path/to/file — current evidence, not the fix
+Reply with the letter (for example, A), or the letter plus context.
 ```
 
-### Preserve
+### Boundaries
 
-- [invariant]
+**Always**
 
-### Callers and existing tests
+- Test through the confirmed public seams with independently sourced expected values.
+- Preserve exact red and green command evidence.
 
-- `path/to/caller` — [use of the seam]
-- `path/to/test` — [behavior to extend or mirror]
+**Ask first**
 
-## Out of Scope
+- A new dependency, public contract, schema migration, security boundary, or repository conflict that invalidates a confirmed test seam.
+
+**Never**
+
+- Mock internal collaborators or test private methods.
+- Write all tests before implementation.
+- Refactor during a red-green slice.
+
+## Problem and Delta
+
+**Current**
+
+- [observable shipped behavior or failure]
+- [who is affected and why it matters]
+
+**Desired**
+
+- [observable behavior after implementation]
+
+## Scope
+
+### Out
 
 - **[excluded capability]** — [rationale]. Reconsider when [trigger].
 
-## In Scope
-
-[Selected approach and principal trade-off.]
+### In
 
 | ID | Capability | Observable outcome |
 |---|---|---|
 | F-01 | [capability] | [result] |
 
+### Preserve
+
+- [existing behavior, compatibility rule, or invariant that must not regress]
+
 ## Acceptance
 
-### US-01: [happy path]
+### AC-01 / US-01: [behavior]
 
 - **Given** [precondition]
 - **When** [action]
 - **Then** [observable result]
 
-### US-01 failure: [failure path]
+### AC-02: [failure or recovery behavior]
 
 - **Given** [precondition]
-- **When** [action]
-- **Then** [observable failure or recovery]
+- **When** [invalid, conflicting, denied, or failing action]
+- **Then** [observable error, unchanged state, or recovery]
 
-## Contracts
+## Contract Changes
 
-### Public interfaces
+Delete this section when no public signature, schema, protocol, configuration, storage, CLI, or error contract changes.
+Private implementation does not belong here.
+
+### Public interface
 
 ```ts
 // repository-language signature, schema, protocol, or CLI grammar
 ```
 
-### Examples
-
 - Valid: [input] → [output]
 - Invalid: [input] → [observable error]
 
-### Errors
-
-| Name | Trigger | Observable behavior |
+| Error / state | Trigger | Observable behavior |
 |---|---|---|
 | [named error] | [condition] | [result] |
+
+## Repository Anchors
+
+Verified paths and symbols only. These are evidence and starting points, not a prescribed patch.
+
+| Path / symbol | Current fact | Why inspect | Expected role |
+|---|---|---|---|
+| `path/to/file#symbol` | [shipped behavior or convention] | [relevant seam or invariant] | [read / edit / create] |
 
 ## Public Test Seams
 
 These seams were confirmed before this spec was approved.
 
-| Seam | Public interface | Observable behavior | Test location | Focused command | Why this seam |
+| ID | Public interface | Observable behavior | Test location | Focused command | Why public |
 |---|---|---|---|---|---|
 | S-01 | `[interface]` | [behavior] | `path/to/test` | `[exact command]` | [consumer-visible boundary] |
 
@@ -110,53 +130,18 @@ These seams were confirmed before this spec was approved.
 For every slice:
 
 1. Write one failing public-seam test named for observable behavior.
-2. Run the slice's focused command to terminal exit and require the intended red.
-3. Add only enough production behavior for that test.
-4. Run the same focused command and require green.
+2. Run the slice's focused command to terminal exit and require failure for the intended missing behavior.
+3. Add only enough production behavior to pass that test.
+4. Run the same focused command to terminal exit and require success.
 5. Start no later slice before this one is green.
 
 Stop on implementation-coupled tests, tautological expectations, horizontal slicing, unexpected red passes, or failed green. Mock only system boundaries. Refactor only during Review after every slice is green.
 
-## Agent Boundaries
-
-### Always
-
-- Test through the confirmed public seams with independently sourced expected values.
-- Preserve exact red and green command evidence.
-
-### Ask first
-
-- New dependency, public contract, schema migration, security boundary, or test seam.
-
-### Never
-
-- Mock internal collaborators or test private methods.
-- Write all tests before implementation.
-- Refactor during a red-green slice.
-
-## Failure and Edge Cases
-
-| Failure mode | Detection | Observable behavior | Recovery | Evidence |
-|---|---|---|---|---|
-| [named case] | [detection] | [result] | [recovery] | [test or command] |
-
-## Relevant Files and Patterns
-
-| Path | Read first because | Role | Pattern to follow |
-|---|---|---|---|
-| `path/to/file` | [fact to extract] | [edit or create] | [verified convention] |
-
-## Verification
-
-- **Focused:** `[exact command]`
-- **Repository gate:** `[exact command]`
-- **Platform / e2e:** [needed evidence or Not applicable with reason]
-
-## Slices
+## TDD Slices
 
 ### Slice 01: [observable outcome]
 
-- **Primary:** US-01 / F-01
+- **Primary:** AC-01 / US-01 / F-01
 - **Seam:** S-01
 - **Dependencies:** none
 - **Given/When/Then:** [binary behavior]
@@ -166,24 +151,39 @@ Stop on implementation-coupled tests, tautological expectations, horizontal slic
 - **Files:** `path/to/file` — [role]
 - **Out of scope:** [excluded work]
 
+Add another slice only for the next independently observable outcome. Finish red then green before starting it.
+
+## Risks and Edge Cases
+
+Delete this section when Acceptance and TDD Slices already cover every material risk and edge case.
+
+| Case | Detection | Observable behavior | Recovery / preservation | Evidence |
+|---|---|---|---|---|
+| [named case] | [condition] | [result] | [recovery or unchanged state] | [acceptance ID, slice, test, or command] |
+
+## Verification
+
+- **Focused:** `[exact command or ordered command set]` — proves every slice remains green.
+- **Repository gate:** `[exact command]` — proves regression protection.
+- **Runtime proof:** `[exact scenario, request, CLI invocation, or UI interaction]` — observe [result].
+
+Completion requires observed red and green results plus runtime evidence, not "tests should pass" or source inspection alone.
+
 ## Review
 
 After every slice is green:
 
 1. Review duplication, naming, locality, and maintainability without changing behavior.
 2. Refactor only where evidence justifies it.
-3. Re-run all focused commands and the repository gate.
+3. Re-run all focused commands, the repository gate, and runtime proof.
 
 ## Output
 
 Report and stop:
 
 - red and green result for each slice, including command identity
-- changed files
-- repository-gate result
-- decisions made against Contracts and Acceptance
-- Ask-first follow-ups not implemented
-
-## Open Questions
-
-Non-blocking items only. Do not save with a material branch, seam, or contract undecided.
+- changed behavior and files
+- acceptance criteria satisfied
+- repository-gate and runtime results with observed evidence
+- implementation decisions made within the contract
+- unresolved blockers or Ask-first follow-ups not implemented

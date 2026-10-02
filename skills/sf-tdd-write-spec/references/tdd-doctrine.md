@@ -12,7 +12,7 @@ A good test describes observable behavior through a public interface and survive
 
 A seam is the public boundary where behavior is observed without reaching inside. Tests live at seams, never against private methods or internal collaborators.
 
-The spec author must research candidate seams, present them, and receive user confirmation before drafting the test plan. The implementation executor uses those confirmed seams without reopening design.
+The implementation executor uses confirmed seams without reopening them unless repository evidence invalidates a seam. In that case, use the saved spec's bounded implementation-question protocol before changing the seam.
 
 ## Mocking
 
