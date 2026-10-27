@@ -67,7 +67,7 @@ A thin task is enough to start. Do not require it to already state the user, fai
 ### 1. Resolve context
 
 - Derive or confirm the slug and target `.spec-finder/tasks/<slug>/`.
-- Read repository instructions and all existing packet artifacts, including `_idea.md` when present, an existing `_prd.md`, downstream artifacts, and every ADR. Read `.spec-finder/config.json` when present.
+- Read repository instructions and all existing packet artifacts, including `_idea.md` when present, an existing `_prd.md`, downstream artifacts, and every ADR. Read `.spec-finder/config.json` when present. If it is absent, continue normally without asking about it or raising its absence.
 - When `_idea.md` exists, treat it as approved input, not immutable truth; surface conflicts with current evidence.
 - A thin or poorly written task is a valid start. Do not stop for missing product context before research and clarification.
 - New PRDs use `references/prd-template.md`. In update mode, identify the requested delta, preserve untouched sections, and keep the existing document structure. Do not migrate Overview / Core Features / Success Metrics layouts unless the user explicitly asks. The PRD is a living document; change only the approved delta.

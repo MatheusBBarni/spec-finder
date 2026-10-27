@@ -18,8 +18,8 @@ Skip those dimensions.
 Ask only public contracts, failure, boundaries, and slice forks that the PRD did not decide.
 If the PRD conflicts with the repository, that conflict is the question. Do not silently override the PRD.
 Do not manufacture questions to reach a quota.
-Ask 2-6 remaining questions.
-If none remain, present the complete draft.
+Ask 2-6 remaining material questions when they exist. Separately offer the Git commit-cadence choice before drafting, even if no material question remains; this is an execution preference, not a product question.
+If no material decision remains, ask only about Git cadence, then present the complete draft.
 
 ## Rules
 

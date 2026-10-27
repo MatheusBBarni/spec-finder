@@ -23,6 +23,7 @@ NO PLACEHOLDERS IN THE SAVED SPEC.
 - A proposed test seam was not explicitly confirmed by the user.
 - Implementation omits the six-question cap, one-question-per-turn rule, recommendation-first labeled choices, or allowed material decision categories.
 - Implementation can reopen a confirmed seam without conflicting repository evidence.
+- The saved spec omits the user's explicit Git commit-cadence choice, enables intermediate commits without opt-in, or permits staging unrelated changes or ignored packet files.
 - A test reaches a private method, mocks an internal collaborator, or verifies through a side channel.
 - An expected value is computed with production logic instead of an independent literal, example, or contract.
 - Tests are written as a horizontal batch before implementation.

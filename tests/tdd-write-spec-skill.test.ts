@@ -14,6 +14,7 @@ describe("sf-tdd-write-spec contract", () => {
 
     expect(skill).toContain("name: sf-tdd-write-spec")
     expect(skill).toContain("Write exactly one file")
+    expect(skill).toContain("If the config is absent, continue normally without asking about it or raising its absence.")
     expect(skill).toContain(".spec-finder/tasks/<slug>/_spec.md")
     expect(skill).toContain("Product source")
     expect(skill).toContain("Read `references/tdd-doctrine.md`")

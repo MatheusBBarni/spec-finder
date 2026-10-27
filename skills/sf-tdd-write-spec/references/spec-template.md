@@ -8,6 +8,7 @@ An executor that reads this file plus the repository must implement and verify w
 - **Product source:** `.spec-finder/tasks/<slug>/_prd.md` [include only when that approved PRD exists]
 - **Job:** [Feature | Improvement | Bug]
 - **Outcome:** [one observable user or operator result]
+- **Git commits:** [No intermediate commits | After each green slice | After each observed red test and green slice]
 
 Omit writer notes and unused conditional sections from the saved spec.
 
@@ -20,6 +21,7 @@ Omit writer notes and unused conditional sections from the saved spec.
 5. End each question with: `Reply with the letter (for example, A), or the letter plus context.`
 6. Ask only about unresolved scope, public contracts, data ownership, security, migrations, destructive behavior, required evidence, or repository evidence that invalidates a confirmed test seam. Never ask for repository facts, private implementation preferences, or product decisions already fixed here.
 7. If no material decision remains, do not manufacture a question. Execute TDD Slices in order, fix a failed slice before continuing, and stop after Output.
+8. Follow the selected Git commit cadence above. With no intermediate commits, leave commit timing to the operator; do not commit on your own. With green-slice commits, commit after the same focused command passes for each slice, before writing the next test. With red-and-green commits, commit only the new test after observing its intended red failure, then commit the minimal implementation after the same focused command passes; a red commit intentionally has a failing focused test. Never commit an unexpected red pass or a failed green. If Review changes files, commit those changes separately only after its verification passes. Stage explicit paths owned by this implementation, inspect the staged diff, and do not include unrelated changes or ignored packet files. If the worktree cannot be separated safely, stop and ask before committing.
 
 Example implementation question:
 
@@ -135,6 +137,7 @@ For every slice:
 4. Run the same focused command to terminal exit and require success.
 5. Start no later slice before this one is green.
 
+When commits are selected, make them at the chosen red and/or green boundaries before starting the next slice. A red commit contains only the new failing test and is permitted only after observing its intended failure.
 Stop on implementation-coupled tests, tautological expectations, horizontal slicing, unexpected red passes, or failed green. Mock only system boundaries. Refactor only during Review after every slice is green.
 
 ## TDD Slices
@@ -186,4 +189,5 @@ Report and stop:
 - acceptance criteria satisfied
 - repository-gate and runtime results with observed evidence
 - implementation decisions made within the contract
+- commit hashes with their slice and red/green phase, when commits were selected
 - unresolved blockers or Ask-first follow-ups not implemented

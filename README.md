@@ -162,6 +162,7 @@ Every stage keeps the approval gates from the original Compozy skills. Research 
 Use `sf-create-prd` when a task is thin or poorly written and lacks product context. It writes `.spec-finder/tasks/<slug>/_prd.md`, then asks whether the next artifact is a normal spec, a TDD spec, or a TechSpec.
 Use `sf-write-spec` when the request is already clear, or when an approved PRD should produce a separate `.spec-finder/tasks/<slug>/_spec.md`. The spec references the PRD, and the skill prints both paths.
 Use `sf-tdd-write-spec` for the same separate `_spec.md` when implementation must follow public-seam red-green slices.
+Both spec skills ask whether the implementation agent should create Git commits. The normal spec can commit after each verified step or milestone; the TDD spec can commit after each green slice or after each observed red test and green slice. The default leaves commits to the operator. The selected cadence is written into `_spec.md`; intermediate commits stage only files owned by the implementation, never unrelated changes or ignored packet files.
 Use `sf-refinement` when a prompt or tracker ticket needs stories and technical specs before implementation. It writes only `.spec-finder/refinements/<task_slug>.md`.
 Keep using idea, PRD, TechSpec, and tasks when you need discovery, a design-only TechSpec, or task regeneration.
 

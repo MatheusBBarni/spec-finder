@@ -8,6 +8,7 @@ An executor that reads this file plus the repository must implement and verify w
 - **Product source:** `.spec-finder/tasks/<slug>/_prd.md` [include only when that approved PRD exists]
 - **Job:** [Feature | Improvement | Bug]
 - **Outcome:** [one observable user or operator result]
+- **Git commits:** [No intermediate commits | Commit after each verified step or milestone]
 
 Omit writer notes and unused conditional sections from the saved spec.
 
@@ -20,6 +21,7 @@ Omit writer notes and unused conditional sections from the saved spec.
 5. End each question with: `Reply with the letter (for example, A), or the letter plus context.`
 6. Ask only about unresolved scope, public contracts, data ownership, security, migrations, destructive behavior, or required evidence. Never ask for repository facts, private implementation preferences, or product decisions already fixed here.
 7. If no material decision remains, do not manufacture a question. Implement the smallest coherent diff, fix verification failures before continuing, and stop after Output.
+8. Follow the selected Git commit cadence above. With no intermediate commits, leave commit timing to the operator; do not commit on your own. With verified-step commits, commit only after the focused check for each independently verifiable step or earned milestone succeeds, before starting the next; a single-outcome spec without milestones gets only a final commit after Verification. Never commit a broken state. Stage explicit paths owned by this implementation, inspect the staged diff, and do not include unrelated changes or ignored packet files. If the worktree cannot be separated safely, stop and ask before committing.
 
 Example implementation question:
 
@@ -141,6 +143,7 @@ Keep it only when the work has multiple ordered, independently verifiable outcom
 | M-01 | [observable result] | AC-01 | `[focused command]` | none |
 
 Finish and verify each milestone before starting the next.
+When verified-step commits are selected, each verified milestone is a commit boundary, not a reason to invent extra milestones.
 Split independent outcomes into separate specs instead of growing this table.
 
 ## Output
@@ -151,4 +154,5 @@ Report and stop:
 - acceptance criteria satisfied
 - focused, repository-gate, and runtime results with observed evidence
 - implementation decisions made within the contract
+- commit hashes and their verified steps, when commits were selected
 - unresolved blockers or Ask-first follow-ups not implemented

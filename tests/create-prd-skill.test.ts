@@ -8,6 +8,7 @@ describe("sf-create-prd contract", () => {
   test("accepts a thin task and hands off to a normal spec, a TDD spec, or a TechSpec", async () => {
     const skill = await readFile(join(skillDir, "SKILL.md"), "utf8")
 
+    expect(skill).toContain("If it is absent, continue normally without asking about it or raising its absence.")
     expect(skill).toContain("thin or poorly written task")
     expect(skill).toContain("sf-write-spec")
     expect(skill).toContain("sf-tdd-write-spec")

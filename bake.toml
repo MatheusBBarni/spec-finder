@@ -1,0 +1,40 @@
+[project]
+version = 1
+
+[tasks."cli:check"]
+command = ["bun", "node_modules/typescript/bin/tsc", "--noEmit"]
+inputs = [
+  "src/**",
+  "tests/**",
+  "scripts/**",
+  "tsconfig.json",
+  "package.json",
+]
+
+[tasks."cli:test"]
+command = ["bun", "test"]
+inputs = [
+  "src/**",
+  "tests/**",
+  "package.json",
+  "bun.lock",
+]
+
+[tasks."cli:build"]
+command = ["bun", "run", "build"]
+inputs = [
+  "src/**",
+  "package.json",
+  "bun.lock",
+]
+outputs = ["dist"]
+
+[tasks."website:build"]
+command = ["bun", "run", "build"]
+cwd = "website"
+inputs = [
+  "src/**",
+  "package.json",
+  "astro.config.mjs",
+]
+outputs = ["dist"]

@@ -38,6 +38,7 @@ Read `references/spec-template.md` and `references/quality-bar.md` before drafti
 - NEVER omit the core Implementation, Problem and Delta, Scope, Acceptance, Repository Anchors, Public Test Seams, TDD Execution, TDD Slices, Verification, Review, or Output sections.
 - NEVER retain Contract Changes or Risks and Edge Cases when the section does not change executor behavior.
 - NEVER omit the bounded executor clarification protocol: at most six implementation questions, exactly one per turn, recommendation-first labeled choices, and material-decision limits.
+- NEVER omit the user's commit-cadence choice from the saved spec or enable intermediate commits without their opt-in.
 </HARD-GATE>
 
 ## Interaction contract
@@ -47,6 +48,7 @@ Read `references/spec-template.md` and `references/quality-bar.md` before drafti
 - Ask exactly one remaining question per turn using the runtime's blocking question mechanism when available.
 - Give 2-3 concrete labeled choices, recommendation first. Do not auto-resolve scope, contract, security, migration, ownership, seam, or evidence decisions.
 - Present the complete draft once and obtain explicit whole-draft approval before writing.
+- Offer the Git commit cadence before drafting, even when no other decision remains. An explicit request for a cadence counts as the answer; preserve it in update mode unless the user changes it.
 
 ## Required input and output
 
@@ -68,7 +70,7 @@ If they want a spec without prescribed red-green slices, use `sf-write-spec`.
 ### 1. Resolve and research
 
 1. Derive or confirm a descriptive kebab-case slug.
-2. Read repository instructions, current configuration when relevant, `_spec.md` in update mode, applicable ADRs, and `.spec-finder/tasks/<slug>/_prd.md` when it exists.
+2. Read repository instructions, `.spec-finder/config.json` when present, `_spec.md` in update mode, applicable ADRs, and `.spec-finder/tasks/<slug>/_prd.md` when it exists. If the config is absent, continue normally without asking about it or raising its absence.
 3. Build a current-system ledger:
    - current versus desired behavior
    - public interfaces and candidate test seams
@@ -84,6 +86,7 @@ If they want a spec without prescribed red-green slices, use `sf-write-spec`.
 2. Ask the user which public interfaces and seams the tests should cover. Do not draft tests before confirmation.
 3. Ask only unresolved material questions. Skip need, success, and non-goals already fixed by the approved PRD. Still confirm public seams, contracts, failures, boundaries, and slice ordering.
 4. If work has no changed behavior at a public seam, state that TDD is not applicable and offer `sf-write-spec`; do not invent test theater.
+5. Ask once whether the executor should make Git commits: `A. (Recommended) No intermediate commits`, `B. Commit after each green slice`, or `C. Commit after each observed red test and green slice`. The choice is independent of product clarification and the executor's six-question cap. Explain that C intentionally records failing tests in Git history; never commit an unexpected red or failed green.
 
 ### 3. Draft one complete spec
 
@@ -101,6 +104,7 @@ Fill `references/spec-template.md` with repository facts. The draft must include
 - for every slice: one failing public-seam test, observed red reason, minimal green behavior, and the same focused command
 - anti-pattern stop conditions and system-boundary-only mocking
 - review/refactoring after all slices are green
+- the user's selected Git commit cadence, with a commit boundary after each green slice or after both observed red and green when opted in; keep the review/refactor commit separate if it changes files
 - verified Repository Anchors, repository gate, runtime proof, and final output
 
 Apply `references/quality-bar.md`. Delete unused conditional sections and remove all placeholders. Do not split the draft into other artifacts.
@@ -137,6 +141,7 @@ Re-read `.spec-finder/tasks/<slug>/_spec.md` and verify:
 - implementation-coupled, tautological, and horizontal tests are prohibited
 - refactoring is deferred until all slices are green
 - the repository gate, runtime proof, and completion output are named
+- the Git commit cadence is explicit, matches the user's choice, and stages only owned files
 
 Fix any validation failure before completion.
 

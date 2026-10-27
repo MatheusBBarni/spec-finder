@@ -46,6 +46,7 @@ Read `references/quality-bar.md` before drafting.
 - NEVER present a draft that fails `references/quality-bar.md` or still contains template placeholders.
 - NEVER omit current-system evidence: current versus desired behavior, verified Repository Anchors, relevant callers/tests, and preserved invariants. Current-code excerpts are optional and must earn their tokens.
 - NEVER omit the bounded executor clarification protocol: at most six implementation questions, exactly one per turn, recommendation-first labeled choices, and material-decision limits.
+- NEVER omit the user's commit-cadence choice from the saved spec or enable intermediate commits without their opt-in.
 - NEVER run idea-factory council, KPI scoring, or 3-7 market-search depth on this path.
 </HARD-GATE>
 
@@ -59,6 +60,7 @@ Read `references/quality-bar.md` before drafting.
   Add `Other` whenever those answers are not exhaustive; lead with `A. (Recommended)`.
 - End every choice prompt with: `Reply with the letter (for example, A), or the letter plus context.`
 - Do not auto-resolve a decision that changes scope, public contracts, data ownership, security, migrations, or required evidence.
+- Offer the Git commit cadence as a separate choice before drafting, even when no product decision remains. Do not count it toward the executor's six implementation questions.
 
 Read `references/question-protocol.md` before asking questions or requesting approval.
 
@@ -80,7 +82,7 @@ If they asked for prescribed red-green slices, use `sf-tdd-write-spec`.
 1. Resolve the spec path, read an approved PRD when present, and read the existing spec in update mode.
 2. Research the repository and current docs into a current-system ledger.
 3. Present evidence and remaining decisions.
-4. Ask only the remaining material questions.
+4. Ask only the remaining material questions and offer the Git commit-cadence choice.
 5. Draft the complete spec as one review.
 6. Obtain explicit whole-draft approval.
 7. Write `.spec-finder/tasks/<slug>/_spec.md`.
@@ -92,7 +94,7 @@ If they asked for prescribed red-green slices, use `sf-tdd-write-spec`.
 
 - Derive or confirm a descriptive kebab-case slug.
 - Target only `.spec-finder/tasks/<slug>/_spec.md`.
-- Read repository instructions, `.spec-finder/config.json` when present, and the existing `_spec.md` when present.
+- Read repository instructions, `.spec-finder/config.json` when present, and the existing `_spec.md` when present. If the config is absent, continue normally without asking about it or raising its absence.
 - Read `.spec-finder/tasks/<slug>/_prd.md` and its linked ADRs when that file exists. If it is missing, continue only when the request is not thin.
 - If the PRD exists but is unapproved or still has a material product branch open, stop and offer finishing `sf-create-prd` before drafting the spec.
 - Extract `G-xx`, `US-xx`, `F-xx`, Out of Scope, constraints, and open questions from the PRD. Do not rewrite that file.
@@ -135,7 +137,8 @@ Present:
 - Follow the remaining-decision order: need and success, non-goals, public contracts and failure, boundaries, then slice forks.
 - Skip need, success, and non-goals already fixed by the approved PRD.
 - If repository evidence conflicts with the PRD, present both and ask with lettered choices whether the PRD, current evidence, or another direction governs. Do not silently override the PRD.
-- If no material decision remains, skip to the complete draft.
+- Ask once before drafting whether the executor should make intermediate Git commits: `A. (Recommended) No intermediate commits` or `B. Commit after each verified step or milestone`. An explicit user request for a cadence counts as the answer; preserve it in update mode unless the user changes it. A single-outcome spec without milestones has only a final verified commit if B is selected. Do not ask for arbitrary implementation checkpoints.
+- If no material decision remains, ask only for the commit cadence, then draft.
 
 ### 4. Draft the complete spec
 
@@ -152,6 +155,7 @@ Do not ask for section-by-section or stage-by-stage approval.
 - Read `references/spec-template.md`; fill all core sections and only conditional sections that change execution.
 - Include a Product source line with `.spec-finder/tasks/<slug>/_prd.md` when an approved PRD exists.
 - Include Implementation with a maximum of six executor questions, one per turn, recommendation-first labeled choices, and material-decision boundaries.
+- Record the selected Git commit cadence in the spec and instruct the executor to stage only files owned by this change, never unrelated worktree changes or ignored packet files.
 - Include current versus desired behavior, Out before In, preserved invariants, Given/When/Then plus applicable failure paths, verified Repository Anchors, exact focused and repository commands, runtime proof, and Output.
 - Include Contract Changes only for a changed public interface or persisted shape; include Risks and Edge Cases only when Acceptance does not cover them; include Milestones only for multiple ordered, independently verifiable outcomes.
 - When an approved PRD exists, carry every implementation-relevant decision and map every in-scope `F-xx` and `US-xx`. Do not duplicate unrelated product prose.
@@ -181,6 +185,7 @@ Re-read `.spec-finder/tasks/<slug>/_spec.md` and verify:
 - the only write is `_spec.md`; the approved PRD is unchanged
 - no `.spec-finder/specs/` file, TechSpec, task index, task file, ADR, or memory file was created or changed
 - when an approved PRD was the input, `_spec.md` contains its exact path as Product source and every in-scope `F-xx` and `US-xx` appears or is named out of scope with the PRD rationale
+- the Git commit cadence is explicit, matches the user's choice, and does not authorize commits of unrelated files
 
 Fix validation failures and repeat.
 Do not point to `spec-finder run <slug>` or `sf-execute-task`; this path does not create their runner packet.

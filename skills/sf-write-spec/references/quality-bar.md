@@ -27,6 +27,7 @@ NO RUNNER PACKET OUTPUT.
 - Fewer than two **Never** lines remain in Implementation boundaries.
 - Implementation omits the six-question cap, one-question-per-turn rule, recommendation-first labeled choices, or allowed material decision categories.
 - Implementation questions can reopen approved product decisions, ask repository facts, or solicit private implementation preferences.
+- The saved spec omits the user's explicit Git commit-cadence choice, enables intermediate commits without opt-in, or permits staging unrelated changes or ignored packet files.
 - Acceptance lacks Given/When/Then, observable results, or a materially applicable failure or recovery path.
 - Verification lacks an exact focused command, repository gate, or runtime proof.
 - A section is one vague sentence or retained boilerplate that does not change executor behavior.

@@ -17,6 +17,7 @@ describe("sf-write-spec contract", () => {
     expect(skill).toContain("This is not `sf-idea-factory`, `sf-create-prd`, `sf-create-techspec`, and `sf-create-tasks` run in sequence.")
     expect(skill).toContain("Write exactly one file")
     expect(skill).toContain(".spec-finder/tasks/<slug>/_spec.md")
+    expect(skill).toContain("If the config is absent, continue normally without asking about it or raising its absence.")
     expect(skill).toContain("Do not point to `spec-finder run <slug>` or `sf-execute-task`")
     expect(doctrine).toContain("Single output only")
     expect(skill).toContain("approved `.spec-finder/tasks/<slug>/_prd.md`")
