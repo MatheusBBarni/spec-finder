@@ -59,6 +59,18 @@ function jobRunText(job: WorkflowJob): string {
 }
 
 describe("stable release workflow policy", () => {
+  test("pins a Bun version compatible with the repository lockfile", async () => {
+    const { document } = await readWorkflow()
+    const setupSteps = Object.values(document.jobs ?? {})
+      .flatMap((job) => steps(job))
+      .filter((step) => typeof step.uses === "string" && step.uses.startsWith("oven-sh/setup-bun@"))
+
+    expect(setupSteps.length).toBeGreaterThan(0)
+    for (const step of setupSteps) {
+      expect(step.with?.["bun-version"]).toBe("1.4.2")
+    }
+  })
+
   test("exposes only the deliberate modes and rejects non-main dispatches", async () => {
     const { document, source } = await readWorkflow()
     const dispatch = document.on?.workflow_dispatch as Record<string, unknown> | undefined
